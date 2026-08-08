@@ -8,13 +8,16 @@ import java.util.List;
 import java.util.Map;
 
 /** A course layout: an <b>ordered</b> list of tiles relative to a center anchor, with rotation
- * support -- the Rune Party analog of Gnomeball's FieldPreset. The key difference from that
- * unordered zone/field model: {@code tiles}' list order <i>is</i> the walked path order (tile 0 is
- * the start, tile 1 is one roll-of-1 away, etc.) -- no separate index field needed on
- * RelativeTile/PlacedTile, since {@link #layout} preserves list order into its output and callers
- * that need an explicit path index (committing to the server, see TileReducer) derive it from each
- * tile's position in that returned list. Built-in courses and host-saved custom courses share this
- * one representation, same as FieldPreset does for Gnomeball fields. */
+ * support -- the Rune Party analog of Gnomeball's FieldPreset. {@code tiles}' list order is still
+ * the tile's stable identity (tile 0 is the start, and a fresh commit assigns pathIndex == list
+ * position, see RunePartyPlugin#commitPreset) -- but it's no longer the *only* way tiles connect.
+ * By default each tile leads to "list position + 1" (wrapping at the end, closing the loop), same
+ * as every course before forks existed; a tile can override that default via
+ * {@link RelativeTile#nextIndices} to point at one or more *other* list positions instead --
+ * that's a fork (more than one) or a merge redirect (exactly one, pointing somewhere other than
+ * "+1"). See {@link #buildForkedLoop} for a worked example of both. Built-in courses and
+ * host-saved custom courses share this one representation, same as FieldPreset does for Gnomeball
+ * fields. */
 public final class CoursePreset
 {
     public final String name;
@@ -42,9 +45,10 @@ public final class CoursePreset
      * quarter-turns clockwise (0-3: 0/90/180/270 degrees), via the standard clockwise transform
      * (dx,dy) -> (dy,-dx). List order is preserved (index i of the input maps to index i of the
      * output), so a caller zipping the result against 0..N-1 recovers correct path indices after
-     * rotation exactly as before it. This is the single source of truth for course geometry, used
-     * identically by the live placement preview and the actual commit so they can never disagree
-     * (same guarantee FieldPreset.layout() makes for Gnomeball fields).
+     * rotation exactly as before it -- and since nextIndices are list-position references rather
+     * than coordinates, they carry over unchanged by rotation. This is the single source of truth
+     * for course geometry, used identically by the live placement preview and the actual commit so
+     * they can never disagree (same guarantee FieldPreset.layout() makes for Gnomeball fields).
      */
     public List<PlacedTile> layout(WorldPoint center, int rotationSteps)
     {
@@ -62,7 +66,7 @@ public final class CoursePreset
                 dx = ndx;
                 dy = ndy;
             }
-            placed.add(new PlacedTile(new WorldPoint(center.getX() + dx, center.getY() + dy, plane), rt.tileType, rt.color));
+            placed.add(new PlacedTile(new WorldPoint(center.getX() + dx, center.getY() + dy, plane), rt.tileType, rt.color, rt.nextIndices));
         }
         return placed;
     }
@@ -73,6 +77,10 @@ public final class CoursePreset
      * sorts the snapshot by {@link TileReducer.TileEntry#pathIndex} first -- the reducer's own
      * storage is an unordered map, so path order only survives via that field, not iteration order.
      * Entries with no path index (a stray non-course marker) are dropped rather than guessed at.
+     * Each tile's nextIndices carries over unchanged, which only stays correct if pathIndex values
+     * are contiguous from 0 (true for any course committed via the normal placement flow) --
+     * removing individual tiles by hand first could leave stale references, same pre-existing
+     * caveat this function already had for path order in general.
      */
     public static CoursePreset fromTiles(String name, List<TileReducer.TileEntry> snapshot)
     {
@@ -120,7 +128,7 @@ public final class CoursePreset
         for (TileReducer.TileEntry e : ordered)
         {
             if (e.point.getPlane() != majorityPlane) continue;
-            relTiles.add(new RelativeTile(e.point.getX() - anchorX, e.point.getY() - anchorY, e.tileType, e.color));
+            relTiles.add(new RelativeTile(e.point.getX() - anchorX, e.point.getY() - anchorY, e.tileType, e.color, e.nextIndices));
         }
         return new CoursePreset(name, relTiles);
     }
@@ -130,13 +138,22 @@ public final class CoursePreset
         public final int dx, dy;
         public final String tileType;
         public final String color;
+        /** Explicit outgoing edges, as *list positions* in this preset's own {@code tiles} (which
+         * become pathIndex values 1:1 on commit -- see RunePartyPlugin#commitPreset). Empty means
+         * "no override": the default single edge to list position {@code (thisIndex + 1) %
+         * tiles.size()} applies, same linear-with-wraparound behavior every course had before
+         * forks existed. Two or more entries is a fork; exactly one entry that isn't "+1" is a
+         * merge redirect (e.g. a branch's last tile rejoining the trunk somewhere else in the
+         * list). */
+        public final int[] nextIndices;
 
-        public RelativeTile(int dx, int dy, String tileType, String color)
+        public RelativeTile(int dx, int dy, String tileType, String color, int... nextIndices)
         {
             this.dx = dx;
             this.dy = dy;
             this.tileType = tileType;
             this.color = color;
+            this.nextIndices = nextIndices != null ? nextIndices : new int[0];
         }
     }
 
@@ -145,12 +162,14 @@ public final class CoursePreset
         public final WorldPoint point;
         public final String tileType;
         public final String color;
+        public final int[] nextIndices;
 
-        PlacedTile(WorldPoint point, String tileType, String color)
+        PlacedTile(WorldPoint point, String tileType, String color, int[] nextIndices)
         {
             this.point = point;
             this.tileType = tileType;
             this.color = color;
+            this.nextIndices = nextIndices != null ? nextIndices : new int[0];
         }
     }
 
@@ -179,13 +198,56 @@ public final class CoursePreset
         if (!tiles.isEmpty())
         {
             RelativeTile first = tiles.get(0);
-            tiles.set(0, new RelativeTile(first.dx, first.dy, "START", null));
+            tiles.set(0, new RelativeTile(first.dx, first.dy, "START", null, first.nextIndices));
         }
 
         return new CoursePreset("Standard Loop", tiles);
     }
 
-    public static final CoursePreset STANDARD_LOOP = buildStandardLoop();
+    /**
+     * A test course exercising forks end-to-end: the trunk splits in two three tiles out from
+     * START, an "upper" and a "lower" branch each run three tiles, and both rejoin a single merge
+     * tile before the trunk continues and loops back to START. Only the fork tile and each
+     * branch's last tile need an explicit nextIndices override -- everything else (including the
+     * loop closing back to index 0) is the default "+1" edge, same as Standard Loop. Rolling a
+     * value that lands exactly on the fork tile offers both branches as candidates (see
+     * TileOverlay#renderTargetArrow, which draws one arrow per candidate); rolling past it without
+     * landing there resolves normally along whichever branch that specific roll's step count
+     * reaches.
+     */
+    public static CoursePreset buildForkedLoop()
+    {
+        List<RelativeTile> tiles = new ArrayList<>();
 
-    public static final List<CoursePreset> ALL = List.of(STANDARD_LOOP);
+        tiles.add(new RelativeTile(-3, 0, "START", null));       // 0
+        tiles.add(new RelativeTile(-2, 0, "PATH", null));        // 1
+        tiles.add(new RelativeTile(-1, 0, "PENALTY_TILE", null));        // 2
+        tiles.add(new RelativeTile(0, 0, "PENALTY_TILE", null, 4, 7));   // 3 -- FORK: upper branch (4) or lower branch (7)
+
+        // Branch A ("upper route"), arcing north of the trunk.
+        tiles.add(new RelativeTile(1, -1, "PATH", null));        // 4
+        tiles.add(new RelativeTile(2, -1, "PENALTY_TILE", null));        // 5
+        tiles.add(new RelativeTile(3, -1, "PATH", null, 10));    // 6 -- rejoins at the merge tile (10)
+
+        // Branch B ("lower route"), arcing south of the trunk.
+        tiles.add(new RelativeTile(1, 1, "PATH", null));         // 7
+        tiles.add(new RelativeTile(2, 1, "PENALTY_TILE", null));         // 8
+        tiles.add(new RelativeTile(3, 1, "PENALTY_TILE", null, 10));     // 9 -- rejoins at the merge tile (10)
+
+        tiles.add(new RelativeTile(4, 0, "PATH", null));         // 10 -- MERGE: both branches lead here, trunk continues
+
+        // Trunk continues, then loops back around to START (default "+1" wraparound closes it).
+        tiles.add(new RelativeTile(5, 0, "PATH", null));         // 11
+        tiles.add(new RelativeTile(5, 3, "PENALTY_TILE", null));         // 12
+        tiles.add(new RelativeTile(0, 3, "PENALTY_TILE", null));         // 13
+        tiles.add(new RelativeTile(-3, 3, "PENALTY_TILE", null));        // 14
+        tiles.add(new RelativeTile(-3, 1, "PATH", null));        // 15 -- default next wraps to 0 (START)
+
+        return new CoursePreset("Forked Loop", tiles);
+    }
+
+    public static final CoursePreset STANDARD_LOOP = buildStandardLoop();
+    public static final CoursePreset FORKED_LOOP = buildForkedLoop();
+
+    public static final List<CoursePreset> ALL = List.of(STANDARD_LOOP, FORKED_LOOP);
 }

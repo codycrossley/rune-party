@@ -63,7 +63,7 @@ public class AnnouncementOverlay extends Overlay
         RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getNumber(rsn));
         Color color = seatColor != null ? seatColor.awt : Color.WHITE;
 
-        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(28f));
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(36f));
         FontMetrics fm = g.getFontMetrics();
         int textWidth = fm.stringWidth(text);
         int x = (client.getCanvasWidth() - textWidth) / 2;

@@ -17,14 +17,20 @@ public class TileReducer
         public final String color;
         public final Integer orientation; // nullable -- reserved for future directional tiles
         public final Integer pathIndex; // nullable -- null only for a non-course decorative marker; every PATH/START/GNOMEBALL_TILE/EVENT_TILE has one
+        /** Explicit outgoing edges (pathIndex values), for board forks/merges -- empty means "use
+         * the default (pathIndex + 1) % courseLength" edge every tile had before forks existed.
+         * Only ever non-empty at a fork tile or a branch's tile just before a merge point; see
+         * TileReducer#resolveNextIndices, which is what actually applies the default. */
+        public final int[] nextIndices;
 
-        public TileEntry(WorldPoint point, String tileType, String color, Integer orientation, Integer pathIndex)
+        public TileEntry(WorldPoint point, String tileType, String color, Integer orientation, Integer pathIndex, int[] nextIndices)
         {
             this.point = point;
             this.tileType = tileType;
             this.color = color;
             this.orientation = orientation;
             this.pathIndex = pathIndex;
+            this.nextIndices = nextIndices != null ? nextIndices : new int[0];
         }
     }
 
@@ -74,9 +80,10 @@ public class TileReducer
         String color = safeStr(tile, "color");
         Integer orientation = safeInt(tile, "orientation");
         Integer pathIndex = safeInt(tile, "pathIndex");
+        int[] nextIndices = safeIntArray(tile, "nextIndices");
 
         tiles.put(key(x, y, plane, tileType),
-            new TileEntry(new WorldPoint(x, y, plane), tileType, color, orientation, pathIndex));
+            new TileEntry(new WorldPoint(x, y, plane), tileType, color, orientation, pathIndex, nextIndices));
     }
 
     private void applyUnmark(JsonObject tile)
@@ -111,7 +118,7 @@ public class TileReducer
         {
             if (t == null || t.tileType == null) continue; // server always requires/validates a real tileType
             tiles.put(key(t.x, t.y, t.plane, t.tileType),
-                new TileEntry(new WorldPoint(t.x, t.y, t.plane), t.tileType, t.color, t.orientation, t.pathIndex));
+                new TileEntry(new WorldPoint(t.x, t.y, t.plane), t.tileType, t.color, t.orientation, t.pathIndex, t.nextIndices));
         }
     }
 
@@ -185,6 +192,20 @@ public class TileReducer
         return max + 1;
     }
 
+    /** Resolves a tile's outgoing graph edges: its own explicit nextIndices if it set any (a fork,
+     * or a merge redirect), else the default single edge to (pathIndex + 1) % courseLength -- same
+     * linear-with-wraparound behavior every course had before forks existed. Mirrors the server's
+     * own _resolve_next_indices exactly, so route-line rendering always agrees with what a roll
+     * can actually resolve to (see ApiClient's DICE_ROLLED targetIndices). */
+    public int[] resolveNextIndices(TileEntry entry)
+    {
+        if (entry.nextIndices.length > 0) return entry.nextIndices;
+        if (entry.pathIndex == null) return new int[0];
+        int length = courseLength();
+        if (length == 0) return new int[0];
+        return new int[] { (entry.pathIndex + 1) % length };
+    }
+
     /** Whether the host has marked out any course tiles at all -- mirrors Gnomeball's
      * hasFieldBoundary() guard: without this, "no course marked" and "board complete" are both
      * indistinguishable zero states to the turn engine. */
@@ -207,5 +228,18 @@ public class TileReducer
     {
         try { return (o != null && o.has(k) && !o.get(k).isJsonNull()) ? o.get(k).getAsInt() : null; }
         catch (Exception ignored) { return null; }
+    }
+
+    private static int[] safeIntArray(JsonObject o, String k)
+    {
+        if (o == null || !o.has(k) || o.get(k).isJsonNull() || !o.get(k).isJsonArray()) return new int[0];
+        JsonArray arr = o.get(k).getAsJsonArray();
+        int[] out = new int[arr.size()];
+        for (int i = 0; i < arr.size(); i++)
+        {
+            try { out[i] = arr.get(i).getAsInt(); }
+            catch (Exception ignored) { return new int[0]; }
+        }
+        return out;
     }
 }

@@ -1,6 +1,7 @@
 package gay.runescape.runeparty;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.inject.Provides;
 import java.awt.Color;
@@ -8,12 +9,16 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import net.runelite.api.ChatMessageType;
@@ -56,6 +61,17 @@ public class RunePartyPlugin extends Plugin
      * tracks. */
     public static final long TURN_ANNOUNCE_DURATION_MS = 2500;
 
+    /** How long PlayerOverlay's coin popup stays up after a standard-tile reward -- split into a
+     * "+3" phase followed by a running-total phase, see PlayerOverlay#drawCoinPopup. Also a
+     * purely client-side timer. */
+    public static final long COIN_POPUP_DURATION_MS = 2200;
+
+    /** Extra breathing room after a still-showing coin popup finishes before the next turn's
+     * banner appears -- so "+3 coins" -> new total doesn't get stepped on by "<player>'s Turn"
+     * popping up over top of it. Only applied when a coin popup is actually active when the turn
+     * changes; see scheduleTurnAnnouncement. */
+    public static final long TURN_ANNOUNCE_POST_COIN_DELAY_MS = 500;
+
     @Inject private Client client;
     @Inject private ClientThread clientThread;
     @Inject private ConfigManager configManager;
@@ -84,6 +100,17 @@ public class RunePartyPlugin extends Plugin
         return t;
     });
 
+    // Dedicated to delayed, purely-cosmetic UI timers (see scheduleTurnAnnouncement) -- kept
+    // separate from `executor` above so a pending delay can never queue behind (or block) a real
+    // network call.
+    private final ScheduledExecutorService uiTimerExec = Executors.newSingleThreadScheduledExecutor(r ->
+    {
+        Thread t = new Thread(r, "runeparty-ui-timer");
+        t.setDaemon(true);
+        return t;
+    });
+    private volatile ScheduledFuture<?> turnAnnounceTask;
+
     private volatile GamePhase phase = GamePhase.DISCONNECTED;
 
     // ---- session ----
@@ -102,7 +129,10 @@ public class RunePartyPlugin extends Plugin
     private volatile String currentTurnRsn = null;
     private volatile Integer lastDiceRoll = null;
     private volatile boolean pendingRoll = false;
-    private volatile Integer pendingTargetIndex = null;
+    // Candidate destination tiles for the current roll -- more than one when the roll's path
+    // crosses a fork (see TileOverlay#renderTargetArrow, which draws one arrow per candidate).
+    // Never null, only ever empty.
+    private volatile List<Integer> pendingTargetIndices = Collections.emptyList();
     private volatile boolean arrivalSubmitted = false; // guards confirm-arrival from firing every tick while the echo is in flight
     private volatile boolean minigameActive = false;
     private volatile String minigameInstructions = null;
@@ -113,6 +143,13 @@ public class RunePartyPlugin extends Plugin
     // ---- instructional overlays (client-side timers, not server state -- see AnnouncementOverlay) ----
     private volatile String turnAnnounceRsn = null;
     private volatile long turnAnnounceUntil = 0;
+
+    // ---- coin popup (client-side timer -- see PlayerOverlay#drawCoinPopup) ----
+    private volatile String coinPopupRsn = null;
+    private volatile int coinPopupDelta = 0;
+    private volatile int coinPopupNewTotal = 0;
+    private volatile long coinPopupStart = 0;
+    private volatile long coinPopupUntil = 0;
 
     @Override
     protected void startUp()
@@ -157,6 +194,7 @@ public class RunePartyPlugin extends Plugin
         log.debug("Rune Party shutting down");
         if (eventSocket != null) eventSocket.shutdown();
         executor.shutdownNow();
+        uiTimerExec.shutdownNow();
         if (tileOverlay != null) overlayManager.remove(tileOverlay);
         if (statsOverlay != null) overlayManager.remove(statsOverlay);
         if (playerOverlay != null) overlayManager.remove(playerOverlay);
@@ -533,7 +571,7 @@ public class RunePartyPlugin extends Plugin
             // List order IS path order (see CoursePreset's own class doc) -- this is the one
             // place that turns "position i in the list" into an explicit pathIndex, since once
             // this leaves as a TileSpec the server/TileReducer only ever see unordered tiles.
-            tileSpecs.add(new ApiClient.TileSpec(pt.point.getX(), pt.point.getY(), pt.point.getPlane(), pt.tileType, pt.color, null, i));
+            tileSpecs.add(new ApiClient.TileSpec(pt.point.getX(), pt.point.getY(), pt.point.getPlane(), pt.tileType, pt.color, null, i, pt.nextIndices));
         }
 
         final String gid = gameId;
@@ -575,7 +613,7 @@ public class RunePartyPlugin extends Plugin
         if (pos == null) return;
 
         Integer indexHere = tileReducer.pathIndexAt(pos);
-        if (indexHere == null || pendingTargetIndex == null || !indexHere.equals(pendingTargetIndex)) return;
+        if (indexHere == null || !pendingTargetIndices.contains(indexHere)) return;
 
         arrivalSubmitted = true;
         confirmArrival(pos);
@@ -695,6 +733,27 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
+    /** Schedules AnnouncementOverlay's "<player>'s Turn" banner -- immediately, unless a coin
+     * popup (see PlayerOverlay#drawCoinPopup) is still showing when the turn changes, in which
+     * case it waits for that popup to finish plus a short extra beat, so the two never visually
+     * collide. Cancels any previously-scheduled announcement first, since a stray double-fire of
+     * this (there shouldn't be one, but see EventSocket's reconnect-task pattern for the same
+     * defensive cancel-before-reschedule) would otherwise leave two competing delayed writes to
+     * turnAnnounceRsn/turnAnnounceUntil in flight. */
+    private void scheduleTurnAnnouncement(String rsn)
+    {
+        if (turnAnnounceTask != null) turnAnnounceTask.cancel(false);
+
+        long now = System.currentTimeMillis();
+        long delay = coinPopupUntil > now ? (coinPopupUntil - now) + TURN_ANNOUNCE_POST_COIN_DELAY_MS : 0;
+
+        turnAnnounceTask = uiTimerExec.schedule(() ->
+        {
+            turnAnnounceRsn = rsn;
+            turnAnnounceUntil = System.currentTimeMillis() + TURN_ANNOUNCE_DURATION_MS;
+        }, delay, TimeUnit.MILLISECONDS);
+    }
+
     // -------------------------------------------------------------------------
     // Server-pushed events
     // -------------------------------------------------------------------------
@@ -739,10 +798,9 @@ public class RunePartyPlugin extends Plugin
                 currentTurnRsn = safeStr(e.payload, "player");
                 pendingRoll = false;
                 lastDiceRoll = null;
-                pendingTargetIndex = null;
+                pendingTargetIndices = Collections.emptyList();
                 arrivalSubmitted = false;
-                turnAnnounceRsn = currentTurnRsn;
-                turnAnnounceUntil = System.currentTimeMillis() + TURN_ANNOUNCE_DURATION_MS;
+                scheduleTurnAnnouncement(currentTurnRsn);
                 String self = localRsn();
                 if (self != null && self.equalsIgnoreCase(currentTurnRsn))
                 {
@@ -754,7 +812,7 @@ public class RunePartyPlugin extends Plugin
             case "DICE_ROLLED":
             {
                 lastDiceRoll = safeInt(e.payload, "value");
-                pendingTargetIndex = safeInt(e.payload, "targetIndex");
+                pendingTargetIndices = safeIntList(e.payload, "targetIndices");
                 pendingRoll = true;
                 arrivalSubmitted = false;
                 addChatMessage(safeStr(e.payload, "player") + " rolled a " + lastDiceRoll + "!");
@@ -763,9 +821,29 @@ public class RunePartyPlugin extends Plugin
 
             case "TILE_EFFECT":
             {
-                // V1 tile effects are all a no-op -- see the plan's build order. This still
-                // surfaces the event to chat so the plumbing is visibly real end-to-end.
+                // PATH is the only tile type with a real effect so far (see the COINS_CHANGED
+                // case below, which is what actually pays it out) -- every other type is still a
+                // no-op, but the event fires for all of them so this chat line is always accurate.
                 addChatMessage(safeStr(e.payload, "player") + " landed on a " + safeStr(e.payload, "tileType") + " tile.");
+                break;
+            }
+
+            case "COINS_CHANGED":
+            {
+                // Only the standard-tile reward gets the popup treatment for now -- a purchase or
+                // mini-game payout already has its own feedback (the roster/stats panels update,
+                // and submitMinigameResult's caller sees the MINIGAME_ENDED chat line), so this
+                // stays scoped to the one case that otherwise had no visible feedback at all.
+                if ("standard_tile".equals(safeStr(e.payload, "reason")))
+                {
+                    coinPopupRsn = safeStr(e.payload, "player");
+                    Integer delta = safeInt(e.payload, "delta");
+                    Integer total = safeInt(e.payload, "coins");
+                    coinPopupDelta = delta != null ? delta : 0;
+                    coinPopupNewTotal = total != null ? total : 0;
+                    coinPopupStart = System.currentTimeMillis();
+                    coinPopupUntil = coinPopupStart + COIN_POPUP_DURATION_MS;
+                }
                 break;
             }
 
@@ -820,15 +898,32 @@ public class RunePartyPlugin extends Plugin
         catch (Exception ignored) { return null; }
     }
 
+    /** Reads DICE_ROLLED's targetIndices -- plural since a fork can offer more than one candidate
+     * destination for a single roll (see TileOverlay#renderTargetArrow). Never null, only empty. */
+    private static List<Integer> safeIntList(JsonObject o, String key)
+    {
+        if (o == null || !o.has(key) || o.get(key).isJsonNull() || !o.get(key).isJsonArray()) return Collections.emptyList();
+        JsonArray arr = o.get(key).getAsJsonArray();
+        List<Integer> out = new ArrayList<>(arr.size());
+        for (int i = 0; i < arr.size(); i++)
+        {
+            try { out.add(arr.get(i).getAsInt()); }
+            catch (Exception ignored) { /* skip malformed entry */ }
+        }
+        return out;
+    }
+
     private void resetState()
     {
         if (eventSocket != null) eventSocket.stop();
+        if (turnAnnounceTask != null) { turnAnnounceTask.cancel(false); turnAnnounceTask = null; }
         gameId = null; writeKey = null; playerToken = null; joinCode = null; hostRsn = null;
         phase = GamePhase.DISCONNECTED;
         coursePlacementMode = false; selectedPreset = null; presetRotationSteps = 0;
-        currentTurnRsn = null; lastDiceRoll = null; pendingRoll = false; pendingTargetIndex = null;
+        currentTurnRsn = null; lastDiceRoll = null; pendingRoll = false; pendingTargetIndices = Collections.emptyList();
         arrivalSubmitted = false; minigameActive = false; minigameInstructions = null;
         turnAnnounceRsn = null; turnAnnounceUntil = 0; startConfirmSubmitted = false;
+        coinPopupRsn = null; coinPopupDelta = 0; coinPopupNewTotal = 0; coinPopupStart = 0; coinPopupUntil = 0;
         if (rosterReducer != null) rosterReducer.reset();
         if (tileReducer != null) tileReducer.reset();
         refreshPanel();
@@ -851,9 +946,14 @@ public class RunePartyPlugin extends Plugin
     public String getCurrentTurnRsn() { return currentTurnRsn; }
     public Integer getLastDiceRoll() { return lastDiceRoll; }
     public boolean isPendingRoll() { return pendingRoll; }
-    public Integer getPendingTargetIndex() { return pendingTargetIndex; }
+    public List<Integer> getPendingTargetIndices() { return pendingTargetIndices; }
     public boolean isMinigameActive() { return minigameActive; }
     public String getMinigameInstructions() { return minigameInstructions; }
     public String getTurnAnnounceRsn() { return turnAnnounceRsn; }
     public long getTurnAnnounceUntil() { return turnAnnounceUntil; }
+    public String getCoinPopupRsn() { return coinPopupRsn; }
+    public int getCoinPopupDelta() { return coinPopupDelta; }
+    public int getCoinPopupNewTotal() { return coinPopupNewTotal; }
+    public long getCoinPopupStart() { return coinPopupStart; }
+    public long getCoinPopupUntil() { return coinPopupUntil; }
 }

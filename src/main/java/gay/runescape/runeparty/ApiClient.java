@@ -260,6 +260,12 @@ public class ApiClient
             if (t.color != null) tileObj.addProperty("color", t.color);
             if (t.orientation != null) tileObj.addProperty("orientation", t.orientation);
             if (t.pathIndex != null) tileObj.addProperty("pathIndex", t.pathIndex);
+            if (t.nextIndices.length > 0)
+            {
+                JsonArray nextArr = new JsonArray();
+                for (int idx : t.nextIndices) nextArr.add(idx);
+                tileObj.add("nextIndices", nextArr);
+            }
             arr.add(tileObj);
         }
         JsonObject body = new JsonObject();
@@ -400,8 +406,9 @@ public class ApiClient
         public final String color; // nullable
         public final Integer orientation; // nullable -- reserved for future directional tiles
         public final Integer pathIndex; // nullable -- this tile's position along the walked course
+        public final int[] nextIndices; // empty -- the default (pathIndex + 1) % courseLength edge applies server-side; see app.py's _resolve_next_indices
 
-        public TileSpec(int x, int y, int plane, String tileType, String color, Integer orientation, Integer pathIndex)
+        public TileSpec(int x, int y, int plane, String tileType, String color, Integer orientation, Integer pathIndex, int[] nextIndices)
         {
             this.x = x;
             this.y = y;
@@ -410,6 +417,7 @@ public class ApiClient
             this.color = color;
             this.orientation = orientation;
             this.pathIndex = pathIndex;
+            this.nextIndices = nextIndices != null ? nextIndices : new int[0];
         }
     }
 
@@ -494,6 +502,7 @@ public class ApiClient
         public String color;
         public Integer orientation;
         public Integer pathIndex;
+        public int[] nextIndices; // nullable -- absent/empty means the default (pathIndex + 1) % courseLength edge applies
     }
 
     private static class CreateGameResponse

@@ -22,10 +22,11 @@ public class TileOverlay extends Overlay
 {
     private static final Color COLOR_UNKNOWN_TYPE = new Color(255, 255, 0); // fallback for any tile type not explicitly recognized below
     private static final Color COLOR_PATH          = new Color(40, 130, 230); // the "standard" tile -- plain, always worth 3 coins on landing
+    private static final Color COLOR_PENALTY_TILE  = new Color(220, 50, 50); // functions like PATH, but -3 coins on landing (floored at 0)
     private static final Color COLOR_START         = new Color(60, 179, 74);
     private static final Color COLOR_GNOMEBALL_TILE = new Color(255, 210, 0);
     private static final Color COLOR_EVENT_TILE    = new Color(170, 80, 220);
-    private static final Color COLOR_ROUTE_LINE    = new Color(255, 255, 255, 140);
+    private static final Color COLOR_ROUTE_LINE    = new Color(255, 255, 255, 100);
     private static final Color COLOR_TARGET_ARROW  = new Color(255, 215, 0);
 
     private static final int FILL_ALPHA   = 128; // 50% opacity fill
@@ -88,30 +89,45 @@ public class TileOverlay extends Overlay
 
     /** Draws a bouncing, pulsing arrow -- in the mover's own RunePartyColor (see
      * RunePartyPlugin#getRosterReducer, falls back to gold if their seat color can't be resolved)
-     * -- labeled with their name centered above it, over the tile the current roll resolved to.
-     * Visible to every client watching, not just the mover, the same way the rest of the board
-     * state is shared. Disappears as soon as that player is actually standing on the tile (checked
-     * directly against their on-screen position every frame, not just on the next TURN_STARTED
-     * echo) or, failing that, once TURN_STARTED clears pendingRoll/pendingTargetIndex (see
-     * RunePartyPlugin#handleEvent) -- e.g. if the mover isn't currently rendered for this client. */
+     * -- labeled with their name centered above it, over <i>every</i> candidate tile the current
+     * roll could resolve to. Usually that's one tile, but a roll whose path crosses a fork can
+     * offer more than one (see RunePartyPlugin#getPendingTargetIndices and the server's
+     * _reachable_targets) -- the player picks which one to walk to, so every candidate gets its
+     * own arrow. Visible to every client watching, not just the mover, the same way the rest of
+     * the board state is shared. All of them disappear together as soon as the mover is actually
+     * standing on any one candidate (checked directly against their on-screen position every
+     * frame, not just on the next TURN_STARTED echo) or, failing that, once TURN_STARTED clears
+     * pendingRoll/pendingTargetIndices (see RunePartyPlugin#handleEvent) -- e.g. if the mover
+     * isn't currently rendered for this client. */
     private void renderTargetArrow(Graphics2D g)
     {
         if (!plugin.isPendingRoll()) return;
-        Integer targetIndex = plugin.getPendingTargetIndex();
-        if (targetIndex == null) return;
+        List<Integer> targetIndices = plugin.getPendingTargetIndices();
+        if (targetIndices.isEmpty()) return;
         String moverRsn = plugin.getCurrentTurnRsn();
         if (moverRsn == null) return;
 
-        TileReducer.TileEntry target = tileReducer.tileAtIndex(targetIndex);
-        if (target == null) return;
-
         Player mover = findPlayerByRsn(moverRsn);
-        if (mover != null && target.point.equals(mover.getWorldLocation())) return;
+        WorldPoint moverPos = mover != null ? mover.getWorldLocation() : null;
+
+        if (moverPos != null)
+        {
+            for (int targetIndex : targetIndices)
+            {
+                TileReducer.TileEntry target = tileReducer.tileAtIndex(targetIndex);
+                if (target != null && target.point.equals(moverPos)) return; // already chose one -- hide every candidate
+            }
+        }
 
         RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getNumber(moverRsn));
         Color arrowColor = seatColor != null ? seatColor.awt : COLOR_TARGET_ARROW;
 
-        drawBouncingArrowWithLabel(g, target.point, moverRsn, arrowColor);
+        for (int targetIndex : targetIndices)
+        {
+            TileReducer.TileEntry target = tileReducer.tileAtIndex(targetIndex);
+            if (target == null) continue;
+            drawBouncingArrowWithLabel(g, target.point, moverRsn, arrowColor);
+        }
     }
 
     /** Draws a bouncing, pulsing arrow over {@code tilePoint} with {@code label} centered above
@@ -179,29 +195,34 @@ public class TileOverlay extends Overlay
         return null;
     }
 
-    /** Draws a line from each path tile to the next (index i -> i+1), so the walked route reads
-     * clearly even though every tile renders as an independent filled square. Only draws between
-     * indices that are both actually present -- a gap in the course just leaves that one segment
+    /** Draws a line from each path tile to every tile it actually leads to (see
+     * TileReducer#resolveNextIndices), so the walked route reads clearly even though every tile
+     * renders as an independent filled square -- a fork fans out into more than one line, and a
+     * branch's tiles converge back onto whatever merge tile they were pointed at. Only draws
+     * between tiles that both actually exist -- a gap in the course just leaves that one segment
      * undrawn rather than guessing a connection across it. */
     private void renderRouteLines(Graphics2D g, List<TileReducer.TileEntry> entries)
     {
-        int length = tileReducer.courseLength();
-        if (length <= 1) return;
+        if (entries.isEmpty()) return;
 
         g.setStroke(ROUTE_STROKE);
         g.setColor(COLOR_ROUTE_LINE);
 
-        for (int i = 0; i < length - 1; i++)
+        for (TileReducer.TileEntry from : entries)
         {
-            TileReducer.TileEntry from = tileReducer.tileAtIndex(i);
-            TileReducer.TileEntry to = tileReducer.tileAtIndex(i + 1);
-            if (from == null || to == null) continue;
+            if (from.pathIndex == null) continue;
 
-            Point fromCanvas = tileCenterOnCanvas(from.point);
-            Point toCanvas = tileCenterOnCanvas(to.point);
-            if (fromCanvas == null || toCanvas == null) continue;
+            for (int nextIndex : tileReducer.resolveNextIndices(from))
+            {
+                TileReducer.TileEntry to = tileReducer.tileAtIndex(nextIndex);
+                if (to == null) continue;
 
-            g.drawLine(fromCanvas.x, fromCanvas.y, toCanvas.x, toCanvas.y);
+                Point fromCanvas = tileCenterOnCanvas(from.point);
+                Point toCanvas = tileCenterOnCanvas(to.point);
+                if (fromCanvas == null || toCanvas == null) continue;
+
+                g.drawLine(fromCanvas.x, fromCanvas.y, toCanvas.x, toCanvas.y);
+            }
         }
     }
 
@@ -235,13 +256,29 @@ public class TileOverlay extends Overlay
 
         g.setStroke(PREVIEW_STROKE);
         g.setColor(COLOR_ROUTE_LINE);
-        for (int i = 0; i < placed.size() - 1; i++)
+        int length = placed.size();
+        for (int i = 0; i < length; i++)
         {
-            Point fromCanvas = tileCenterOnCanvas(placed.get(i).point);
-            Point toCanvas = tileCenterOnCanvas(placed.get(i + 1).point);
-            if (fromCanvas == null || toCanvas == null) continue;
-            g.drawLine(fromCanvas.x, fromCanvas.y, toCanvas.x, toCanvas.y);
+            CoursePreset.PlacedTile pt = placed.get(i);
+            for (int nextIndex : resolvePreviewNextIndices(pt, i, length))
+            {
+                if (nextIndex < 0 || nextIndex >= length) continue;
+                Point fromCanvas = tileCenterOnCanvas(pt.point);
+                Point toCanvas = tileCenterOnCanvas(placed.get(nextIndex).point);
+                if (fromCanvas == null || toCanvas == null) continue;
+                g.drawLine(fromCanvas.x, fromCanvas.y, toCanvas.x, toCanvas.y);
+            }
         }
+    }
+
+    /** Same default-or-explicit resolution as TileReducer#resolveNextIndices, but for a live
+     * placement preview's in-memory PlacedTile list (not yet committed, so there's no TileReducer
+     * entry -- or courseLength -- to resolve against yet). */
+    private static int[] resolvePreviewNextIndices(CoursePreset.PlacedTile pt, int index, int length)
+    {
+        if (pt.nextIndices.length > 0) return pt.nextIndices;
+        if (length == 0) return new int[0];
+        return new int[] { (index + 1) % length };
     }
 
     private void renderFilledTile(Graphics2D g, WorldPoint wp, Color fill, Color border, Stroke stroke)
@@ -271,6 +308,7 @@ public class TileOverlay extends Overlay
     private static Color defaultColorFor(String tileType)
     {
         if ("PATH".equals(tileType)) return COLOR_PATH;
+        if ("PENALTY_TILE".equals(tileType)) return COLOR_PENALTY_TILE;
         if ("START".equals(tileType)) return COLOR_START;
         if ("GNOMEBALL_TILE".equals(tileType)) return COLOR_GNOMEBALL_TILE;
         if ("EVENT_TILE".equals(tileType)) return COLOR_EVENT_TILE;
