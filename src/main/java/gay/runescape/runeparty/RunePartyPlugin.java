@@ -13,7 +13,9 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -27,8 +29,10 @@ import net.runelite.api.MenuAction;
 import net.runelite.api.Player;
 import net.runelite.api.Tile;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.MenuEntryAdded;
+import net.runelite.api.gameval.AnimationID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -61,16 +65,63 @@ public class RunePartyPlugin extends Plugin
      * tracks. */
     public static final long TURN_ANNOUNCE_DURATION_MS = 2500;
 
-    /** How long PlayerOverlay's coin popup stays up after a standard-tile reward -- split into a
-     * "+3" phase followed by a running-total phase, see PlayerOverlay#drawCoinPopup. Also a
-     * purely client-side timer. */
-    public static final long COIN_POPUP_DURATION_MS = 2200;
+    /** How long AnnouncementOverlay's "Welcome to Rune Party Showdown" title card stays up after
+     * successfully creating/joining a game -- see triggerWelcomeBanner. Shown once, client-side
+     * only, to whoever just created/joined; nobody else sees it. */
+    public static final long WELCOME_BANNER_DURATION_MS = 4000;
 
-    /** Extra breathing room after a still-showing coin popup finishes before the next turn's
-     * banner appears -- so "+3 coins" -> new total doesn't get stepped on by "<player>'s Turn"
-     * popping up over top of it. Only applied when a coin popup is actually active when the turn
-     * changes; see scheduleTurnAnnouncement. */
-    public static final long TURN_ANNOUNCE_POST_COIN_DELAY_MS = 500;
+    /** How long AnnouncementOverlay's "MINIGAME!" banner stays up once it actually appears --
+     * server-driven (unlike the welcome banner), so every client shows it at the same moment. The
+     * appearance itself is delayed until the last roller's own turn effects settle; see
+     * scheduleMinigameBanner. */
+    public static final long MINIGAME_BANNER_DURATION_MS = 2800;
+
+    /** How long AnnouncementOverlay's "HERE WE GO!" banner stays up after GAME_STARTED -- fires
+     * the instant the host's Start Game click lands, no turnEffectGateUntil delay needed since
+     * nothing can be mid-effect before the game has even started. Server-driven, so every client
+     * (host and joiners alike) sees it at the same moment. */
+    public static final long GAME_START_BANNER_DURATION_MS = 3200;
+
+    /** How long PlayerOverlay's coin popup shows "+3" (or "-3") before switching to the player's
+     * new running total -- see PlayerOverlay#drawCoinPopup, which is the only other place these
+     * three get read from (kept here rather than duplicated as private constants there, so
+     * lengthening one phase can't silently eat into another's screen time the way a
+     * separately-hardcoded total once did). Purely a client-side timer, not anything the server
+     * tracks. */
+    public static final long COIN_POPUP_DELTA_PHASE_MS = 2000;
+    /** How long the popup then holds on the running total (its last COIN_POPUP_FADE_MS of this
+     * spent fading out) before disappearing. */
+    public static final long COIN_POPUP_TOTAL_PHASE_MS = 1800;
+    /** Tail-end fade shared by both phases' transition out -- carved out of COIN_POPUP_TOTAL_PHASE_MS
+     * above, not additional time. */
+    public static final long COIN_POPUP_FADE_MS = 400;
+    /** Total popup lifetime, derived from the two phases above -- this is what actually gets
+     * stamped as coinPopupUntil; nothing should hardcode this independently again. */
+    public static final long COIN_POPUP_DURATION_MS = COIN_POPUP_DELTA_PHASE_MS + COIN_POPUP_TOTAL_PHASE_MS;
+
+    /** Extra breathing room after a turn's in-flight visual effects (currently just the coin
+     * popup; see extendTurnEffectGate) finish before whatever announcement comes next -- the next
+     * "<player>'s Turn" banner, or "MINIGAME!" -- is allowed to appear, so e.g. "+3 coins" -> new
+     * total never gets stepped on by something popping up over top of it. Only actually adds delay
+     * when a turn effect is still in flight; see scheduleAfterTurnEffects. */
+    public static final long POST_TURN_EFFECT_GRACE_MS = 500;
+
+    /** How long AnnouncementOverlay's screen-centered retro dice cycles through random faces once
+     * the roll actually starts -- see onAnimationChanged, which delays calling rollDice() until
+     * the local player's Spin emote animation finishes, so this cosmetic re-cycling never overlaps
+     * the emote itself. Kept here (not a private constant on AnnouncementOverlay) for the same
+     * reason as the coin popup phase constants above: so DICE_ROLL_DURATION_MS below can be
+     * derived from it instead of drifting out of sync. */
+    public static final long DICE_ROLL_SPIN_PHASE_MS = 900;
+    /** How long the die then holds on the real rolled value before fading (its last
+     * DICE_ROLL_FADE_MS spent fading out). */
+    public static final long DICE_ROLL_HOLD_MS = 2000;
+    /** Tail-end fade, carved out of DICE_ROLL_HOLD_MS above, not additional time. */
+    public static final long DICE_ROLL_FADE_MS = 350;
+    /** Total time AnnouncementOverlay's die stays visible after a DICE_ROLLED event, derived from
+     * the two phases above -- this is what actually gets stamped as diceRollUntil; nothing should
+     * hardcode this independently again. */
+    public static final long DICE_ROLL_DURATION_MS = DICE_ROLL_SPIN_PHASE_MS + DICE_ROLL_HOLD_MS;
 
     @Inject private Client client;
     @Inject private ClientThread clientThread;
@@ -110,6 +161,19 @@ public class RunePartyPlugin extends Plugin
         return t;
     });
     private volatile ScheduledFuture<?> turnAnnounceTask;
+    private volatile ScheduledFuture<?> minigameBannerTask;
+
+    /** Rolling "nothing turn-concluding should appear before this" gate. Every turn-effect visual
+     * with its own on-screen duration -- currently just the coin popup, but meant to grow as more
+     * tile effects gain their own reveal animations -- pushes this forward via
+     * extendTurnEffectGate when it starts. Anything that announces "the turn is over, here's
+     * what's next" (the next TURN_STARTED banner, the MINIGAME! banner, and any future one)
+     * schedules itself against this single shared timestamp via scheduleAfterTurnEffects instead
+     * of hardcoding its own "is some specific effect still showing?" check -- so a new effect only
+     * ever needs to touch this one field, not every downstream announcement. Never moves backward:
+     * an effect that lands while another is still settling extends the gate rather than shortening
+     * it. */
+    private volatile long turnEffectGateUntil = 0;
 
     private volatile GamePhase phase = GamePhase.DISCONNECTED;
 
@@ -129,6 +193,14 @@ public class RunePartyPlugin extends Plugin
     private volatile String currentTurnRsn = null;
     private volatile Integer lastDiceRoll = null;
     private volatile boolean pendingRoll = false;
+    // Guards the Spin-emote roll trigger against double-submitting while a roll request is in
+    // flight but the server's DICE_ROLLED echo (which flips pendingRoll) hasn't landed yet -- see
+    // onAnimationChanged and rollDice().
+    private volatile boolean rollRequestSubmitted = false;
+    // True from the moment the local player's Spin emote starts (on their own turn) until it
+    // finishes -- onAnimationChanged only actually calls rollDice() on the animation change that
+    // clears this, so the roll never fires mid-emote.
+    private volatile boolean awaitingSpinFinish = false;
     // Candidate destination tiles for the current roll -- more than one when the roll's path
     // crosses a fork (see TileOverlay#renderTargetArrow, which draws one arrow per candidate).
     // Never null, only ever empty.
@@ -137,6 +209,15 @@ public class RunePartyPlugin extends Plugin
     private volatile boolean minigameActive = false;
     private volatile String minigameInstructions = null;
 
+    // Every player's current board position (pathIndex), keyed by lowercase rsn -- mirrors the
+    // server's own state["positions"], kept in sync purely by replaying PLAYER_MOVED events (see
+    // handleEvent). Since EventSocket always connects with afterSeq=0 (see start/createGame/
+    // joinGame), a fresh or reconnecting client replays every PLAYER_MOVED since the game began, so
+    // this ends up correct even without a dedicated snapshot endpoint. A player with no entry yet
+    // is on pathIndex 0 (START), same default the server uses. See TileOverlay#
+    // renderReturnToPositionArrow, which is what actually uses this to gate re-rolling.
+    private final Map<String, Integer> playerPositions = new ConcurrentHashMap<>();
+
     // ---- pre-game gathering (GAME_STARTED fired, but currentTurnRsn still null -- see confirmStart) ----
     private volatile boolean startConfirmSubmitted = false; // guards confirm-start firing every tick while the echo is in flight
 
@@ -144,12 +225,27 @@ public class RunePartyPlugin extends Plugin
     private volatile String turnAnnounceRsn = null;
     private volatile long turnAnnounceUntil = 0;
 
+    // ---- welcome title card (client-side, local-player-only -- see triggerWelcomeBanner) ----
+    private volatile long welcomeBannerUntil = 0;
+
+    // ---- minigame banner (server-driven, everyone sees it -- see MINIGAME_STARTED handling) ----
+    private volatile long minigameBannerUntil = 0;
+
+    // ---- game-start banner (server-driven, everyone sees it -- see GAME_STARTED handling) ----
+    private volatile long gameStartBannerUntil = 0;
+
     // ---- coin popup (client-side timer -- see PlayerOverlay#drawCoinPopup) ----
     private volatile String coinPopupRsn = null;
     private volatile int coinPopupDelta = 0;
     private volatile int coinPopupNewTotal = 0;
     private volatile long coinPopupStart = 0;
     private volatile long coinPopupUntil = 0;
+
+    // ---- dice roll popup (client-side timer -- see PlayerOverlay#drawDiceRoll) ----
+    private volatile String diceRollRsn = null;
+    private volatile int diceRollValue = 0;
+    private volatile long diceRollStart = 0;
+    private volatile long diceRollUntil = 0;
 
     @Override
     protected void startUp()
@@ -250,6 +346,7 @@ public class RunePartyPlugin extends Plugin
                 phase = GamePhase.LOBBY;
                 eventSocket.start(gameId, host);
                 addChatMessage("Created Rune Party game. Join code: " + result.joinCode);
+                triggerWelcomeBanner();
             }
             catch (Exception e)
             {
@@ -278,6 +375,7 @@ public class RunePartyPlugin extends Plugin
                 phase = GamePhase.LOBBY;
                 eventSocket.start(gameId, self);
                 addChatMessage("Joined Rune Party game hosted by " + result.hostRsn);
+                triggerWelcomeBanner();
             }
             catch (Exception e)
             {
@@ -335,13 +433,15 @@ public class RunePartyPlugin extends Plugin
         final String gid = gameId;
         final String token = playerToken;
         if (self == null || gid == null || token == null) return;
-        if (!self.equalsIgnoreCase(currentTurnRsn) || pendingRoll) return;
+        if (!self.equalsIgnoreCase(currentTurnRsn) || pendingRoll || rollRequestSubmitted) return;
 
+        rollRequestSubmitted = true;
         executor.submit(() ->
         {
             try { apiClient.rollDice(gid, self, token); }
             catch (Exception e)
             {
+                rollRequestSubmitted = false; // let a retry (another Spin) through
                 log.warn("Roll dice failed", e);
                 addChatMessage("Failed to roll dice: " + e.getMessage());
             }
@@ -642,11 +742,11 @@ public class RunePartyPlugin extends Plugin
 
     // -------------------------------------------------------------------------
     // Menu entries -- course placement/removal during LOBBY (mirrors Gnomeball's
-    // field builder), a host-only "Add to Game" on other players' Follow option
-    // (mirrors Gnomeball's Follow -> Enlist), and a "Roll Dice" trigger on your
-    // own tile during ACTIVE. There's no dedicated in-world button for course
-    // building/rolling, so "Walk here" on the relevant tile is the entry point
-    // for both, same as Gnomeball's approach.
+    // field builder) and a host-only "Add to Game" on other players' Follow
+    // option (mirrors Gnomeball's Follow -> Enlist). There's no dedicated
+    // in-world button for course building, so "Walk here" on the relevant tile
+    // is the entry point, same as Gnomeball's approach. Rolling dice is a
+    // gesture trigger instead (see onAnimationChanged) rather than a menu entry.
     // -------------------------------------------------------------------------
 
     @Subscribe
@@ -659,29 +759,59 @@ public class RunePartyPlugin extends Plugin
         }
 
         if (!"Walk here".equals(event.getOption())) return;
-
         if (phase == GamePhase.LOBBY && isHost() && coursePlacementMode)
         {
             addPresetMenuEntries();
+        }
+    }
+
+    /** Rolls the dice once the local player's Spin emote finishes on their own turn -- replaces the
+     * old "right-click your tile -> Roll Dice" menu entry with a gesture trigger. Only reacts to
+     * the local player's own animation (every client sees every nearby player's AnimationChanged,
+     * so this would otherwise also fire for spectators watching someone else spin for fun). Waits
+     * for the *next* animation change away from the Spin ID -- i.e. the emote actually finishing,
+     * not just starting -- so the roll (and the screen-centered dice reveal every client sees, see
+     * AnnouncementOverlay#renderDiceRoll) never fires mid-emote; awaitingSpinFinish is what carries
+     * that wait across the two AnimationChanged firings. Also requires actually standing on the
+     * tile tracked in playerPositions -- if a player wandered off their last landed tile before
+     * their next turn, spinning in place does nothing until they walk back (see TileOverlay#
+     * renderReturnToPositionArrow, which is what tells them to). This gate never applies during a
+     * mini-game or any other non-turn state, since currentTurnRsn is null/stale then and this whole
+     * method already requires it to match the local player. rollDice() itself re-checks turn/pending
+     * state, this is just what decides *when* to call it. */
+    @Subscribe
+    public void onAnimationChanged(AnimationChanged event)
+    {
+        if (phase != GamePhase.ACTIVE) return;
+
+        Player localPlayer = client.getLocalPlayer();
+        if (localPlayer == null || event.getActor() != localPlayer) return;
+
+        if (localPlayer.getAnimation() == AnimationID.EMOTE_DANCE_SPIN)
+        {
+            if (pendingRoll || rollRequestSubmitted) return;
+            String self = localRsn();
+            if (self == null || !self.equalsIgnoreCase(currentTurnRsn)) return;
+            if (!isStandingOnTrackedPosition(localPlayer, self)) return;
+            awaitingSpinFinish = true;
             return;
         }
 
-        if (phase != GamePhase.ACTIVE) return;
+        if (!awaitingSpinFinish) return;
+        awaitingSpinFinish = false;
+        rollDice();
+    }
 
-        String self = localRsn();
-        if (self == null || !self.equalsIgnoreCase(currentTurnRsn) || pendingRoll) return;
-
-        Player localPlayer = client.getLocalPlayer();
-        WorldPoint localPos = localPlayer != null ? localPlayer.getWorldLocation() : null;
-        if (localPos == null) return;
-        Tile tile = client.getTopLevelWorldView().getSelectedSceneTile();
-        if (tile == null || !localPos.equals(tile.getWorldLocation())) return;
-
-        client.createMenuEntry(-1)
-            .setOption("Roll Dice")
-            .setTarget(event.getTarget())
-            .setType(MenuAction.RUNELITE)
-            .onClick(me -> rollDice());
+    /** Whether {@code localPlayer} is standing on {@code rsn}'s tracked board position -- see
+     * getPlayerPosition and onAnimationChanged, the only caller. False (not just "unknown") if the
+     * course isn't marked or the local player's position isn't resolvable, same fail-closed
+     * behavior as everywhere else that resolves a WorldPoint against the course. */
+    private boolean isStandingOnTrackedPosition(Player localPlayer, String rsn)
+    {
+        WorldPoint pos = localPlayer.getWorldLocation();
+        if (pos == null) return false;
+        TileReducer.TileEntry tile = tileReducer.tileAtIndex(getPlayerPosition(rsn));
+        return tile != null && tile.point.equals(pos);
     }
 
     /** Adds an "Add to Game" entry on another player's Follow option, host-only, so the host can
@@ -733,25 +863,67 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
-    /** Schedules AnnouncementOverlay's "<player>'s Turn" banner -- immediately, unless a coin
-     * popup (see PlayerOverlay#drawCoinPopup) is still showing when the turn changes, in which
-     * case it waits for that popup to finish plus a short extra beat, so the two never visually
-     * collide. Cancels any previously-scheduled announcement first, since a stray double-fire of
-     * this (there shouldn't be one, but see EventSocket's reconnect-task pattern for the same
-     * defensive cancel-before-reschedule) would otherwise leave two competing delayed writes to
-     * turnAnnounceRsn/turnAnnounceUntil in flight. */
-    private void scheduleTurnAnnouncement(String rsn)
+    /** Pushes turnEffectGateUntil forward to at least {@code untilTimestamp} -- called by whatever
+     * just started a turn-effect visual with its own on-screen duration (currently only the
+     * COINS_CHANGED handler, passing coinPopupUntil). A future tile effect with its own timed
+     * reveal (a teleport animation, a "steal coins" flourish, whatever comes next) should call this
+     * the same way when it starts, and nothing else needs to change -- every "what's next"
+     * announcement already waits on this one gate via scheduleAfterTurnEffects. Never moves the
+     * gate backward, so two effects landing close together both get their own full window. */
+    private void extendTurnEffectGate(long untilTimestamp)
     {
-        if (turnAnnounceTask != null) turnAnnounceTask.cancel(false);
+        turnEffectGateUntil = Math.max(turnEffectGateUntil, untilTimestamp);
+    }
+
+    /** Schedules {@code action} to run once every in-flight turn-effect visual has cleared (see
+     * extendTurnEffectGate) plus a short POST_TURN_EFFECT_GRACE_MS beat, so an outgoing effect and
+     * an incoming "turn's over" announcement never visually collide -- runs immediately (still off
+     * the caller's thread) if nothing is currently gating. Cancels {@code previousTask} first, since
+     * a stray double-fire of the caller (there shouldn't be one, but see EventSocket's
+     * reconnect-task pattern for the same defensive cancel-before-reschedule) would otherwise leave
+     * two competing delayed writes in flight; returns the new task so the caller can do the same on
+     * its next call. Shared by scheduleTurnAnnouncement and the MINIGAME_STARTED handler -- anything
+     * else that announces "the turn is over" should go through this too rather than growing its own
+     * bespoke delay math. */
+    private ScheduledFuture<?> scheduleAfterTurnEffects(ScheduledFuture<?> previousTask, Runnable action)
+    {
+        if (previousTask != null) previousTask.cancel(false);
 
         long now = System.currentTimeMillis();
-        long delay = coinPopupUntil > now ? (coinPopupUntil - now) + TURN_ANNOUNCE_POST_COIN_DELAY_MS : 0;
+        long delay = turnEffectGateUntil > now ? (turnEffectGateUntil - now) + POST_TURN_EFFECT_GRACE_MS : 0;
 
-        turnAnnounceTask = uiTimerExec.schedule(() ->
+        return uiTimerExec.schedule(action, delay, TimeUnit.MILLISECONDS);
+    }
+
+    /** Schedules AnnouncementOverlay's "<player>'s Turn" banner via scheduleAfterTurnEffects, so it
+     * never appears while e.g. the previous mover's coin popup is still settling. */
+    private void scheduleTurnAnnouncement(String rsn)
+    {
+        turnAnnounceTask = scheduleAfterTurnEffects(turnAnnounceTask, () ->
         {
             turnAnnounceRsn = rsn;
             turnAnnounceUntil = System.currentTimeMillis() + TURN_ANNOUNCE_DURATION_MS;
-        }, delay, TimeUnit.MILLISECONDS);
+        });
+    }
+
+    /** Schedules AnnouncementOverlay's "MINIGAME!" banner via scheduleAfterTurnEffects, so it never
+     * appears while the last roller's own turn -- including their coin popup -- is still settling.
+     * minigameActive/minigameInstructions are set immediately in the MINIGAME_STARTED handler,
+     * unaffected by this delay: this only postpones the celebratory banner, not the mini-game
+     * itself. */
+    private void scheduleMinigameBanner()
+    {
+        minigameBannerTask = scheduleAfterTurnEffects(minigameBannerTask, () ->
+            minigameBannerUntil = System.currentTimeMillis() + MINIGAME_BANNER_DURATION_MS);
+    }
+
+    /** Arms AnnouncementOverlay's "Welcome to Rune Party Showdown" title card -- called once, right
+     * after createGame/joinGame succeeds, for the local player only (there's no server event for
+     * this; it's purely a client-side "you're in!" splash, so it never fires for anyone already in
+     * the lobby when someone else joins). */
+    private void triggerWelcomeBanner()
+    {
+        welcomeBannerUntil = System.currentTimeMillis() + WELCOME_BANNER_DURATION_MS;
     }
 
     // -------------------------------------------------------------------------
@@ -772,6 +944,7 @@ public class RunePartyPlugin extends Plugin
                 // currentTurnRsn stays null here -- see confirmStart/checkGatheringAtStart, turn
                 // order doesn't actually begin until every seated PLAYER reports being at START.
                 startConfirmSubmitted = false;
+                gameStartBannerUntil = System.currentTimeMillis() + GAME_START_BANNER_DURATION_MS;
                 break;
 
             case "GAME_ENDED":
@@ -797,6 +970,8 @@ public class RunePartyPlugin extends Plugin
             {
                 currentTurnRsn = safeStr(e.payload, "player");
                 pendingRoll = false;
+                rollRequestSubmitted = false;
+                awaitingSpinFinish = false;
                 lastDiceRoll = null;
                 pendingTargetIndices = Collections.emptyList();
                 arrivalSubmitted = false;
@@ -804,7 +979,7 @@ public class RunePartyPlugin extends Plugin
                 String self = localRsn();
                 if (self != null && self.equalsIgnoreCase(currentTurnRsn))
                 {
-                    addChatMessage("It's your turn! Right-click your own tile to Roll Dice.");
+                    addChatMessage("It's your turn! Use the Spin emote to roll the dice.");
                 }
                 break;
             }
@@ -814,8 +989,28 @@ public class RunePartyPlugin extends Plugin
                 lastDiceRoll = safeInt(e.payload, "value");
                 pendingTargetIndices = safeIntList(e.payload, "targetIndices");
                 pendingRoll = true;
+                rollRequestSubmitted = false; // pendingRoll is now the authoritative in-flight guard
                 arrivalSubmitted = false;
-                addChatMessage(safeStr(e.payload, "player") + " rolled a " + lastDiceRoll + "!");
+                String roller = safeStr(e.payload, "player");
+                addChatMessage(roller + " rolled a " + lastDiceRoll + "!");
+                if (lastDiceRoll != null)
+                {
+                    diceRollRsn = roller;
+                    diceRollValue = lastDiceRoll;
+                    diceRollStart = System.currentTimeMillis();
+                    diceRollUntil = diceRollStart + DICE_ROLL_DURATION_MS;
+                }
+                break;
+            }
+
+            case "PLAYER_MOVED":
+            {
+                String mover = safeStr(e.payload, "player");
+                Integer toIndex = safeInt(e.payload, "toIndex");
+                if (mover != null && toIndex != null)
+                {
+                    playerPositions.put(mover.toLowerCase(Locale.ROOT), toIndex);
+                }
                 break;
             }
 
@@ -843,13 +1038,18 @@ public class RunePartyPlugin extends Plugin
                     coinPopupNewTotal = total != null ? total : 0;
                     coinPopupStart = System.currentTimeMillis();
                     coinPopupUntil = coinPopupStart + COIN_POPUP_DURATION_MS;
+                    extendTurnEffectGate(coinPopupUntil);
                 }
                 break;
             }
 
             case "MINIGAME_STARTED":
+                // minigameActive/minigameInstructions take effect immediately -- only the
+                // celebratory banner waits (see scheduleMinigameBanner) for this turn's own
+                // effects (the coin popup, and whatever else lands here in the future) to settle.
                 minigameActive = true;
                 minigameInstructions = safeStr(e.payload, "instructions");
+                scheduleMinigameBanner();
                 addChatMessage("Mini-game! " + minigameInstructions);
                 break;
 
@@ -917,13 +1117,22 @@ public class RunePartyPlugin extends Plugin
     {
         if (eventSocket != null) eventSocket.stop();
         if (turnAnnounceTask != null) { turnAnnounceTask.cancel(false); turnAnnounceTask = null; }
+        if (minigameBannerTask != null) { minigameBannerTask.cancel(false); minigameBannerTask = null; }
+        turnEffectGateUntil = 0;
         gameId = null; writeKey = null; playerToken = null; joinCode = null; hostRsn = null;
         phase = GamePhase.DISCONNECTED;
         coursePlacementMode = false; selectedPreset = null; presetRotationSteps = 0;
-        currentTurnRsn = null; lastDiceRoll = null; pendingRoll = false; pendingTargetIndices = Collections.emptyList();
+        currentTurnRsn = null; lastDiceRoll = null; pendingRoll = false; rollRequestSubmitted = false;
+        awaitingSpinFinish = false;
+        pendingTargetIndices = Collections.emptyList();
         arrivalSubmitted = false; minigameActive = false; minigameInstructions = null;
+        playerPositions.clear();
         turnAnnounceRsn = null; turnAnnounceUntil = 0; startConfirmSubmitted = false;
+        welcomeBannerUntil = 0;
+        minigameBannerUntil = 0;
+        gameStartBannerUntil = 0;
         coinPopupRsn = null; coinPopupDelta = 0; coinPopupNewTotal = 0; coinPopupStart = 0; coinPopupUntil = 0;
+        diceRollRsn = null; diceRollValue = 0; diceRollStart = 0; diceRollUntil = 0;
         if (rosterReducer != null) rosterReducer.reset();
         if (tileReducer != null) tileReducer.reset();
         refreshPanel();
@@ -948,12 +1157,28 @@ public class RunePartyPlugin extends Plugin
     public boolean isPendingRoll() { return pendingRoll; }
     public List<Integer> getPendingTargetIndices() { return pendingTargetIndices; }
     public boolean isMinigameActive() { return minigameActive; }
+    /** The board tile (pathIndex) {@code rsn} is currently standing at, per the last PLAYER_MOVED
+     * seen for them -- 0 (START) if they haven't moved yet this game. See TileOverlay#
+     * renderReturnToPositionArrow, the only consumer. */
+    public int getPlayerPosition(String rsn)
+    {
+        if (rsn == null) return 0;
+        Integer idx = playerPositions.get(rsn.toLowerCase(Locale.ROOT));
+        return idx != null ? idx : 0;
+    }
     public String getMinigameInstructions() { return minigameInstructions; }
     public String getTurnAnnounceRsn() { return turnAnnounceRsn; }
     public long getTurnAnnounceUntil() { return turnAnnounceUntil; }
+    public long getWelcomeBannerUntil() { return welcomeBannerUntil; }
+    public long getMinigameBannerUntil() { return minigameBannerUntil; }
+    public long getGameStartBannerUntil() { return gameStartBannerUntil; }
     public String getCoinPopupRsn() { return coinPopupRsn; }
     public int getCoinPopupDelta() { return coinPopupDelta; }
     public int getCoinPopupNewTotal() { return coinPopupNewTotal; }
     public long getCoinPopupStart() { return coinPopupStart; }
     public long getCoinPopupUntil() { return coinPopupUntil; }
+    public String getDiceRollRsn() { return diceRollRsn; }
+    public int getDiceRollValue() { return diceRollValue; }
+    public long getDiceRollStart() { return diceRollStart; }
+    public long getDiceRollUntil() { return diceRollUntil; }
 }

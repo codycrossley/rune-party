@@ -34,7 +34,6 @@ public class RunePartyPanel extends PluginPanel
     private final JLabel joinCodeValueLabel = new JLabel("—");
     private final JButton copyJoinCodeBtn = new JButton("Copy");
     private final JLabel statusLabel = new JLabel(" ");
-    private final JButton rollDiceBtn = new JButton("Roll Dice");
     private final JButton purchaseBtn = new JButton("Purchase Gilded Gnomeball");
 
     // Mini-game
@@ -187,10 +186,6 @@ public class RunePartyPanel extends PluginPanel
         statusLabel.setForeground(COLOR_TURN);
         statusLabel.setFont(FontManager.getRunescapeSmallFont());
 
-        rollDiceBtn.setAlignmentX(LEFT_ALIGNMENT);
-        rollDiceBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-        rollDiceBtn.addActionListener(e -> plugin.rollDice());
-
         purchaseBtn.setAlignmentX(LEFT_ALIGNMENT);
         purchaseBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
         purchaseBtn.addActionListener(e -> plugin.purchaseGnomeball());
@@ -224,8 +219,6 @@ public class RunePartyPanel extends PluginPanel
         card.add(Box.createVerticalStrut(8));
         card.add(statusLabel);
         card.add(Box.createVerticalStrut(6));
-        card.add(rollDiceBtn);
-        card.add(Box.createVerticalStrut(4));
         card.add(purchaseBtn);
         card.add(Box.createVerticalStrut(8));
         card.add(minigamePanel);
@@ -383,12 +376,6 @@ public class RunePartyPanel extends PluginPanel
         copyJoinCodeBtn.setEnabled(joinCode != null);
 
         statusLabel.setText(statusText(phase));
-
-        boolean myTurn = phase == GamePhase.ACTIVE
-            && plugin.getCurrentTurnRsn() != null
-            && !plugin.isPendingRoll();
-        rollDiceBtn.setVisible(phase == GamePhase.ACTIVE);
-        rollDiceBtn.setEnabled(myTurn);
 
         purchaseBtn.setVisible(phase == GamePhase.ACTIVE);
 

@@ -20,7 +20,10 @@ import net.runelite.client.util.Text;
  * PlayerOverlay, minus the field-boundary gating since Rune Party colors are a roster-wide
  * identity, not a "currently on the field" state -- plus a color-coded token hovering above their
  * head, with a pulsing glow in that same seat color (same breathing-alpha technique as Gnomeball's
- * TimerOverlay#renderPauseGlow) while it's their turn to roll. Spectators are left unaltered. */
+ * TimerOverlay#renderPauseGlow) while it's their turn to roll, and a floating coin popup after a
+ * standard/penalty tile reward. The retro dice-roll reveal lives in AnnouncementOverlay instead --
+ * screen-centered so everyone can see it, not anchored to the roller's head. Spectators are left
+ * unaltered. */
 public class PlayerOverlay extends Overlay
 {
     private static final int OUTLINE_WIDTH = 2;
@@ -38,8 +41,6 @@ public class PlayerOverlay extends Overlay
 
     private static final Color COIN_POPUP_GAIN_COLOR = new Color(80, 220, 80);
     private static final Color COIN_POPUP_LOSS_COLOR = new Color(230, 70, 70);
-    private static final long COIN_POPUP_DELTA_PHASE_MS = 900; // how long "+3" shows before switching to the running total
-    private static final long COIN_POPUP_FADE_MS = 400; // tail-end fade, same pattern as AnnouncementOverlay
     private static final int COIN_POPUP_CLEARANCE = 22; // gap above the token
     private static final int COIN_POPUP_MAX_RISE = 16; // pixels risen by the time the popup fades out
 
@@ -146,12 +147,12 @@ public class PlayerOverlay extends Overlay
         if (remaining <= 0) return;
 
         long elapsed = now - plugin.getCoinPopupStart();
-        boolean showTotal = elapsed >= COIN_POPUP_DELTA_PHASE_MS;
+        boolean showTotal = elapsed >= RunePartyPlugin.COIN_POPUP_DELTA_PHASE_MS;
         int delta = plugin.getCoinPopupDelta();
         String text = showTotal ? (plugin.getCoinPopupNewTotal() + " coins") : ((delta >= 0 ? "+" : "") + delta + " coins");
         Color color = showTotal ? Color.WHITE : (delta >= 0 ? COIN_POPUP_GAIN_COLOR : COIN_POPUP_LOSS_COLOR);
 
-        float alpha = remaining < COIN_POPUP_FADE_MS ? remaining / (float) COIN_POPUP_FADE_MS : 1f;
+        float alpha = remaining < RunePartyPlugin.COIN_POPUP_FADE_MS ? remaining / (float) RunePartyPlugin.COIN_POPUP_FADE_MS : 1f;
         int rise = (int) Math.min(COIN_POPUP_MAX_RISE, elapsed / 50);
 
         g.setFont(FontManager.getRunescapeBoldFont());

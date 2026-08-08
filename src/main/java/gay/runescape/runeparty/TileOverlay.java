@@ -69,6 +69,7 @@ public class TileOverlay extends Overlay
         }
 
         renderTargetArrow(g);
+        renderReturnToPositionArrow(g);
         renderStartArrow(g);
 
         return null;
@@ -98,10 +99,15 @@ public class TileOverlay extends Overlay
      * standing on any one candidate (checked directly against their on-screen position every
      * frame, not just on the next TURN_STARTED echo) or, failing that, once TURN_STARTED clears
      * pendingRoll/pendingTargetIndices (see RunePartyPlugin#handleEvent) -- e.g. if the mover
-     * isn't currently rendered for this client. */
+     * isn't currently rendered for this client. Also suppressed once a mini-game starts: when the
+     * last roller of a round lands, the server fires MINIGAME_STARTED instead of TURN_STARTED (see
+     * the server's _advance_turn_or_start_minigame), so pendingRoll/pendingTargetIndices are never
+     * cleared by that path -- without this check, that mover stepping off their landed tile during
+     * the mini-game would make this arrow reappear telling them to go back, which is no longer
+     * where they need to be. */
     private void renderTargetArrow(Graphics2D g)
     {
-        if (!plugin.isPendingRoll()) return;
+        if (!plugin.isPendingRoll() || plugin.isMinigameActive()) return;
         List<Integer> targetIndices = plugin.getPendingTargetIndices();
         if (targetIndices.isEmpty()) return;
         String moverRsn = plugin.getCurrentTurnRsn();
@@ -130,10 +136,37 @@ public class TileOverlay extends Overlay
         }
     }
 
+    /** Draws the "come back here" arrow over the current mover's own tracked board position (see
+     * RunePartyPlugin#getPlayerPosition) whenever it's their turn, they haven't rolled yet, and
+     * they're not actually standing there -- e.g. they wandered off after landing last round.
+     * Mirrors renderStartArrow's pre-game "gather here" instruction, just generalized to every
+     * turn instead of only the first: RunePartyPlugin#onAnimationChanged enforces the same
+     * requirement server-side-of-the-gesture (the Spin emote does nothing until they're back), this
+     * is purely the visual telling them where "back" is. Suppressed during a mini-game the same way
+     * renderTargetArrow is (see that method's own doc) -- once minigameActive flips true there's no
+     * tile left to return to until the round's next TURN_STARTED. */
+    private void renderReturnToPositionArrow(Graphics2D g)
+    {
+        if (plugin.isPendingRoll() || plugin.isMinigameActive()) return;
+        String moverRsn = plugin.getCurrentTurnRsn();
+        if (moverRsn == null) return;
+
+        TileReducer.TileEntry tile = tileReducer.tileAtIndex(plugin.getPlayerPosition(moverRsn));
+        if (tile == null) return;
+
+        Player mover = findPlayerByRsn(moverRsn);
+        WorldPoint moverPos = mover != null ? mover.getWorldLocation() : null;
+        if (moverPos != null && moverPos.equals(tile.point)) return; // already back -- nothing to show
+
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getNumber(moverRsn));
+        Color arrowColor = seatColor != null ? seatColor.awt : COLOR_TARGET_ARROW;
+        drawBouncingArrowWithLabel(g, tile.point, "Return Here!", arrowColor);
+    }
+
     /** Draws a bouncing, pulsing arrow over {@code tilePoint} with {@code label} centered above
-     * it, in {@code color}. Shared by renderTargetArrow (whose-turn-is-it) and renderStartArrow
-     * (the pre-game gathering instruction) -- same animation, different trigger condition, color,
-     * and label. */
+     * it, in {@code color}. Shared by renderTargetArrow (whose-turn-is-it), renderReturnToPositionArrow
+     * (go back to your last tile before rolling again), and renderStartArrow (the pre-game
+     * gathering instruction) -- same animation, different trigger condition, color, and label. */
     private void drawBouncingArrowWithLabel(Graphics2D g, WorldPoint tilePoint, String label, Color color)
     {
         Point center = tileCenterOnCanvas(tilePoint);
