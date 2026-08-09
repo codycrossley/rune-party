@@ -24,7 +24,7 @@ public class TileOverlay extends Overlay
     private static final Color COLOR_PATH          = new Color(40, 130, 230); // the "standard" tile -- plain, always worth 3 coins on landing
     private static final Color COLOR_PENALTY_TILE  = new Color(220, 50, 50); // functions like PATH, but -3 coins on landing (floored at 0)
     private static final Color COLOR_START         = new Color(60, 179, 74);
-    private static final Color COLOR_GNOMEBALL_TILE = new Color(255, 210, 0);
+    private static final Color COLOR_GOLDEN_GNOME_TILE = new Color(255, 210, 0);
     private static final Color COLOR_EVENT_TILE    = new Color(170, 80, 220);
     private static final Color COLOR_ROUTE_LINE    = new Color(255, 255, 255, 100);
     private static final Color COLOR_TARGET_ARROW  = new Color(255, 215, 0);
@@ -95,19 +95,24 @@ public class TileOverlay extends Overlay
      * offer more than one (see RunePartyPlugin#getPendingTargetIndices and the server's
      * _reachable_targets) -- the player picks which one to walk to, so every candidate gets its
      * own arrow. Visible to every client watching, not just the mover, the same way the rest of
-     * the board state is shared. All of them disappear together as soon as the mover is actually
-     * standing on any one candidate (checked directly against their on-screen position every
-     * frame, not just on the next TURN_STARTED echo) or, failing that, once TURN_STARTED clears
-     * pendingRoll/pendingTargetIndices (see RunePartyPlugin#handleEvent) -- e.g. if the mover
-     * isn't currently rendered for this client. Also suppressed once a mini-game starts: when the
-     * last roller of a round lands, the server fires MINIGAME_STARTED instead of TURN_STARTED (see
-     * the server's _advance_turn_or_start_minigame), so pendingRoll/pendingTargetIndices are never
-     * cleared by that path -- without this check, that mover stepping off their landed tile during
-     * the mini-game would make this arrow reappear telling them to go back, which is no longer
-     * where they need to be. */
+     * the board state is shared. Held back until AnnouncementOverlay's dice-roll reveal has
+     * actually settled on the real number (RunePartyPlugin.DICE_ROLL_SPIN_PHASE_MS after
+     * diceRollStart) -- pendingTargetIndices is known the instant DICE_ROLLED lands, same moment
+     * the die starts cycling random faces, so showing the destination immediately would spoil the
+     * roll before the die even reveals what it landed on. All of them disappear together as soon as
+     * the mover is actually standing on any one candidate (checked directly against their on-screen
+     * position every frame, not just on the next TURN_STARTED echo) or, failing that, once
+     * TURN_STARTED clears pendingRoll/pendingTargetIndices (see RunePartyPlugin#handleEvent) -- e.g.
+     * if the mover isn't currently rendered for this client. Also suppressed once a mini-game
+     * starts: when the last roller of a round lands, the server fires MINIGAME_STARTED instead of
+     * TURN_STARTED (see the server's _advance_turn_or_start_minigame), so
+     * pendingRoll/pendingTargetIndices are never cleared by that path -- without this check, that
+     * mover stepping off their landed tile during the mini-game would make this arrow reappear
+     * telling them to go back, which is no longer where they need to be. */
     private void renderTargetArrow(Graphics2D g)
     {
         if (!plugin.isPendingRoll() || plugin.isMinigameActive()) return;
+        if (System.currentTimeMillis() - plugin.getDiceRollStart() < RunePartyPlugin.DICE_ROLL_SPIN_PHASE_MS) return;
         List<Integer> targetIndices = plugin.getPendingTargetIndices();
         if (targetIndices.isEmpty()) return;
         String moverRsn = plugin.getCurrentTurnRsn();
@@ -144,19 +149,20 @@ public class TileOverlay extends Overlay
      * requirement server-side-of-the-gesture (the Spin emote does nothing until they're back), this
      * is purely the visual telling them where "back" is. Suppressed during a mini-game the same way
      * renderTargetArrow is (see that method's own doc) -- once minigameActive flips true there's no
-     * tile left to return to until the round's next TURN_STARTED. */
+     * tile left to return to until the round's next TURN_STARTED. Unlike renderTargetArrow (which
+     * broadcasts whose turn is resolving to everyone watching), this only ever renders for the mover
+     * themselves -- it's a personal nudge to walk back, not board state anyone else needs to see. */
     private void renderReturnToPositionArrow(Graphics2D g)
     {
         if (plugin.isPendingRoll() || plugin.isMinigameActive()) return;
         String moverRsn = plugin.getCurrentTurnRsn();
-        if (moverRsn == null) return;
+        if (moverRsn == null || !isLocalPlayer(moverRsn)) return;
 
         TileReducer.TileEntry tile = tileReducer.tileAtIndex(plugin.getPlayerPosition(moverRsn));
         if (tile == null) return;
 
-        Player mover = findPlayerByRsn(moverRsn);
-        WorldPoint moverPos = mover != null ? mover.getWorldLocation() : null;
-        if (moverPos != null && moverPos.equals(tile.point)) return; // already back -- nothing to show
+        WorldPoint localPos = client.getLocalPlayer() != null ? client.getLocalPlayer().getWorldLocation() : null;
+        if (localPos != null && localPos.equals(tile.point)) return; // already back -- nothing to show
 
         RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getNumber(moverRsn));
         Color arrowColor = seatColor != null ? seatColor.awt : COLOR_TARGET_ARROW;
@@ -226,6 +232,15 @@ public class TileOverlay extends Overlay
             if (rsn.equalsIgnoreCase(Text.toJagexName(p.getName()))) return p;
         }
         return null;
+    }
+
+    /** Whether {@code rsn} is this client's own local player -- see renderReturnToPositionArrow,
+     * the only caller. */
+    private boolean isLocalPlayer(String rsn)
+    {
+        Player local = client.getLocalPlayer();
+        if (local == null || local.getName() == null) return false;
+        return rsn.equalsIgnoreCase(Text.toJagexName(local.getName()));
     }
 
     /** Draws a line from each path tile to every tile it actually leads to (see
@@ -343,7 +358,7 @@ public class TileOverlay extends Overlay
         if ("PATH".equals(tileType)) return COLOR_PATH;
         if ("PENALTY_TILE".equals(tileType)) return COLOR_PENALTY_TILE;
         if ("START".equals(tileType)) return COLOR_START;
-        if ("GNOMEBALL_TILE".equals(tileType)) return COLOR_GNOMEBALL_TILE;
+        if ("GOLDEN_GNOME_TILE".equals(tileType)) return COLOR_GOLDEN_GNOME_TILE;
         if ("EVENT_TILE".equals(tileType)) return COLOR_EVENT_TILE;
         return COLOR_UNKNOWN_TYPE;
     }

@@ -22,12 +22,14 @@ import net.runelite.client.util.Text;
  * plus the retro dice-roll reveal after a DICE_ROLLED event (see renderDiceRoll), screen-centered
  * for the same reason: everyone at the table should be able to see what got rolled without hunting
  * for the roller's model on screen, and a one-shot "Welcome to Rune Party Showdown" title card (see
- * renderWelcomeBanner) shown only to whoever just created/joined a game. Same client-side
- * fade-on-a-timer pattern as Gnomeball's TimerOverlay#renderGoalFlash: the plugin stamps an
+ * renderWelcomeBanner) shown only to whoever just created/joined a game. Most of these are
+ * fade-on-a-timer, same pattern as Gnomeball's TimerOverlay#renderGoalFlash: the plugin stamps an
  * until-timestamp when the triggering event lands (see RunePartyPlugin's
  * turnAnnounceRsn/turnAnnounceUntil, diceRollRsn/diceRollUntil, and welcomeBannerUntil), this
- * overlay just counts down and fades against it every frame. Meant to grow with more instructional
- * banners as the game does, not just these three. */
+ * overlay just counts down and fades against it every frame. renderSpinHint is the one exception --
+ * local-only and duration-less, it's just a live read of plugin state that shows/hides itself
+ * instantly rather than fading on a clock. Meant to grow with more instructional banners as the
+ * game does, not just these. */
 @Slf4j
 public class AnnouncementOverlay extends Overlay
 {
@@ -68,6 +70,11 @@ public class AnnouncementOverlay extends Overlay
 
     private static final long GAME_START_FADE_MS = 600;
     private static final float GAME_START_TITLE_SIZE = 58f;
+
+    private static final Color SPIN_HINT_COLOR = new Color(255, 255, 255);
+    private static final float SPIN_HINT_SIZE = 22f;
+    private static final long SPIN_HINT_PULSE_PERIOD_MS = 1400; // gentle breathing alpha so a hint that has to persist (no fixed duration) doesn't just sit there static and easy to ignore
+    private static final float SPIN_HINT_MIN_ALPHA = 0.55f;
 
     // Bundled at src/main/resources/gay/runescape/runeparty/mario-party-hudson.ttf -- loaded once
     // at class-init, deriveFont(size) per use same as FontManager's own fonts. Falls back to the
@@ -113,6 +120,7 @@ public class AnnouncementOverlay extends Overlay
         renderWelcomeBanner(g);
         renderGameStartBanner(g);
         renderTurnAnnouncement(g);
+        renderSpinHint(g);
         renderMinigameBanner(g);
         renderDiceRoll(g);
 
@@ -137,6 +145,56 @@ public class AnnouncementOverlay extends Overlay
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(36f));
         drawCenteredText(g, text, client.getCanvasWidth() / 2, client.getCanvasHeight() / 4, color, alpha);
+    }
+
+    /** Reminds the local player to "Use the SPIN! emote to roll the dice." -- local-only, unlike
+     * every other banner here: it's not tied to a server event or a fixed duration, it's a
+     * continuous read of RunePartyPlugin#isLocalPlayerReadyToRoll() (the same check
+     * onAnimationChanged gates the real roll on), so it's visible for exactly as long as spinning
+     * would actually do something and disappears the instant that stops being true -- whether
+     * because they rolled, a mini-game started, or their turn simply ended. Deliberately never
+     * shown while they still need to walk back to their tile first (isLocalPlayerReadyToRoll
+     * already requires that), so this and TileOverlay's "Return Here!" arrow are always mutually
+     * exclusive rather than both nagging at once. Sits just under the turn banner's own slot and
+     * gently pulses since, unlike that banner, it has no fade-out to naturally draw the eye. "SPIN!"
+     * itself gets the same Mario-Party-logo rainbow-letter treatment as "RUNE PARTY"/"MINIGAME!"
+     * (see drawLeftAlignedRainbowText and RAINBOW_LETTER_COLORS -- "SPIN!" is only 5 characters, so
+     * it just uses the first 5 entries of that 9-entry sequence), stitched into the plain-white rest
+     * of the sentence via drawLeftAlignedText -- both return the x just past what they drew, so the
+     * three segments chain into one still-centered line despite switching font and color partway
+     * through. */
+    private void renderSpinHint(Graphics2D g)
+    {
+        if (!plugin.isLocalPlayerReadyToRoll()) return;
+
+        long phaseMs = System.currentTimeMillis() % SPIN_HINT_PULSE_PERIOD_MS;
+        float pulse = (float) (0.5 + 0.5 * Math.sin(2 * Math.PI * phaseMs / SPIN_HINT_PULSE_PERIOD_MS));
+        float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * pulse;
+
+        String prefix = "Use the ";
+        String spinWord = "SPIN";
+        String suffix = " emote to roll the dice.";
+
+        Font normalFont = FontManager.getRunescapeBoldFont().deriveFont(SPIN_HINT_SIZE);
+        Font spinFont = MARIO_PARTY_FONT.deriveFont(SPIN_HINT_SIZE);
+
+        g.setFont(normalFont);
+        int prefixWidth = g.getFontMetrics().stringWidth(prefix);
+        int suffixWidth = g.getFontMetrics().stringWidth(suffix);
+        g.setFont(spinFont);
+        int spinWidth = g.getFontMetrics().stringWidth(spinWord);
+
+        int y = client.getCanvasHeight() / 4 + 40;
+        int x = client.getCanvasWidth() / 2 - (prefixWidth + spinWidth + suffixWidth) / 2;
+
+        g.setFont(normalFont);
+        x = drawLeftAlignedText(g, prefix, x, y, SPIN_HINT_COLOR, alpha);
+
+        g.setFont(spinFont);
+        x = drawLeftAlignedRainbowText(g, spinWord, RAINBOW_LETTER_COLORS, x, y, alpha);
+
+        g.setFont(normalFont);
+        drawLeftAlignedText(g, suffix, x, y, SPIN_HINT_COLOR, alpha);
     }
 
     /** Draws the "MINIGAME!" banner on a MINIGAME_STARTED event -- server-driven, so every client
@@ -220,28 +278,43 @@ public class AnnouncementOverlay extends Overlay
      * font first (they all differ in size). */
     private void drawCenteredText(Graphics2D g, String text, int centerX, int y, Color color, float alpha)
     {
-        FontMetrics fm = g.getFontMetrics();
-        int x = centerX - fm.stringWidth(text) / 2;
-
-        g.setColor(withAlpha(Color.BLACK, alpha * 0.7f));
-        g.drawString(text, x + 2, y + 2);
-        g.setColor(withAlpha(color, alpha));
-        g.drawString(text, x, y);
+        int x = centerX - g.getFontMetrics().stringWidth(text) / 2;
+        drawLeftAlignedText(g, text, x, y, color, alpha);
     }
 
     /** Same centered/shadowed draw as drawCenteredText, but colors each non-space character from
      * {@code letterColors} in order instead of drawing the whole string in one color -- the
      * Mario-Party-logo look for "RUNE PARTY". Measures total width first (summing per-character
      * advances, since a mixed-color string can't use a single stringWidth call) so the whole line
-     * still centers correctly, then walks it a second time to actually draw. */
+     * still centers correctly, then hands off to drawLeftAlignedRainbowText to actually draw it. */
     private void drawCenteredRainbowText(Graphics2D g, String text, Color[] letterColors, int centerX, int y, float alpha)
     {
         FontMetrics fm = g.getFontMetrics();
-
         int totalWidth = 0;
         for (int i = 0; i < text.length(); i++) totalWidth += fm.charWidth(text.charAt(i));
 
-        int x = centerX - totalWidth / 2;
+        drawLeftAlignedRainbowText(g, text, letterColors, centerX - totalWidth / 2, y, alpha);
+    }
+
+    /** Draws {@code text} left-aligned from canvas x {@code x} at baseline y {@code y}, same
+     * shadow treatment as every other banner, and returns the x just past what it drew -- so a
+     * composite line built from differently-styled segments (see renderSpinHint, which chains this
+     * with drawLeftAlignedRainbowText) can keep chaining off the end of the previous one. */
+    private int drawLeftAlignedText(Graphics2D g, String text, int x, int y, Color color, float alpha)
+    {
+        g.setColor(withAlpha(Color.BLACK, alpha * 0.7f));
+        g.drawString(text, x + 2, y + 2);
+        g.setColor(withAlpha(color, alpha));
+        g.drawString(text, x, y);
+        return x + g.getFontMetrics().stringWidth(text);
+    }
+
+    /** Left-aligned counterpart to drawCenteredRainbowText -- draws {@code text} starting at canvas
+     * x {@code x}, one color per non-space character pulled from {@code letterColors} starting at
+     * index 0, and returns the x just past what it drew. */
+    private int drawLeftAlignedRainbowText(Graphics2D g, String text, Color[] letterColors, int x, int y, float alpha)
+    {
+        FontMetrics fm = g.getFontMetrics();
         int colorIndex = 0;
         for (int i = 0; i < text.length(); i++)
         {
@@ -259,6 +332,7 @@ public class AnnouncementOverlay extends Overlay
             }
             x += charWidth;
         }
+        return x;
     }
 
     /** Draws a big, retro, toy-like die dead center of the screen after a DICE_ROLLED event --

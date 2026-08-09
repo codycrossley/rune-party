@@ -43,7 +43,7 @@ public interface RunePartyConfig extends Config
     @ConfigItem(
         keyName = "showStatsOverlay",
         name = "Show stats overlay",
-        description = "Show each player's coin count and gilded gnomeball count",
+        description = "Show each player's coin count and Golden Gnome count",
         position = 3
     )
     default boolean showStatsOverlay()

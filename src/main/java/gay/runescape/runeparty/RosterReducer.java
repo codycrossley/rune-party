@@ -15,7 +15,7 @@ public class RosterReducer
     private final ConcurrentHashMap<String, Boolean> onlineByPlayer = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> numberByPlayer = new ConcurrentHashMap<>(); // turn-order position ("1", "2", ...)
     private final ConcurrentHashMap<String, Integer> coinsByPlayer = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, Integer> gnomeballCountByPlayer = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Integer> goldenGnomeCountByPlayer = new ConcurrentHashMap<>();
 
     public static final class RosterEntry
     {
@@ -25,9 +25,9 @@ public class RosterReducer
         public final String number;
         public final boolean joined;
         public final int coins;
-        public final int gnomeballCount;
+        public final int goldenGnomeCount;
 
-        public RosterEntry(String rsn, RunePartyRole role, boolean online, String number, boolean joined, int coins, int gnomeballCount)
+        public RosterEntry(String rsn, RunePartyRole role, boolean online, String number, boolean joined, int coins, int goldenGnomeCount)
         {
             this.rsn = rsn;
             this.role = role;
@@ -35,7 +35,7 @@ public class RosterReducer
             this.number = number;
             this.joined = joined;
             this.coins = coins;
-            this.gnomeballCount = gnomeballCount;
+            this.goldenGnomeCount = goldenGnomeCount;
         }
     }
 
@@ -57,10 +57,10 @@ public class RosterReducer
         return coinsByPlayer.getOrDefault(canonicalRsn.toLowerCase(Locale.ROOT), 0);
     }
 
-    public int getGnomeballCount(String canonicalRsn)
+    public int getGoldenGnomeCount(String canonicalRsn)
     {
         if (canonicalRsn == null) return 0;
-        return gnomeballCountByPlayer.getOrDefault(canonicalRsn.toLowerCase(Locale.ROOT), 0);
+        return goldenGnomeCountByPlayer.getOrDefault(canonicalRsn.toLowerCase(Locale.ROOT), 0);
     }
 
     public boolean isOnline(String canonicalRsn)
@@ -80,7 +80,7 @@ public class RosterReducer
             if (p.number != null) numberByPlayer.put(key, p.number);
             actuallyJoined.put(key, p.joined);
             coinsByPlayer.put(key, p.coins);
-            gnomeballCountByPlayer.put(key, p.gnomeballCount);
+            goldenGnomeCountByPlayer.put(key, p.goldenGnomeCount);
         }
     }
 
@@ -109,7 +109,7 @@ public class RosterReducer
         onlineByPlayer.clear();
         numberByPlayer.clear();
         coinsByPlayer.clear();
-        gnomeballCountByPlayer.clear();
+        goldenGnomeCountByPlayer.clear();
     }
 
     public void loadSnapshot(List<ApiClient.RosterPlayerOut> players)
@@ -126,7 +126,7 @@ public class RosterReducer
             actuallyJoined.put(key, p.joined);
             if (p.number != null) numberByPlayer.put(key, p.number);
             coinsByPlayer.put(key, p.coins);
-            gnomeballCountByPlayer.put(key, p.gnomeballCount);
+            goldenGnomeCountByPlayer.put(key, p.goldenGnomeCount);
             RunePartyRole role = RunePartyRole.SPECTATOR;
             if (p.role != null)
             {
@@ -155,7 +155,7 @@ public class RosterReducer
                 actuallyJoined.put(key, true);
                 roleByPlayer.putIfAbsent(key, RunePartyRole.SPECTATOR);
                 coinsByPlayer.putIfAbsent(key, 0);
-                gnomeballCountByPlayer.putIfAbsent(key, 0);
+                goldenGnomeCountByPlayer.putIfAbsent(key, 0);
                 break;
             }
             case "ROLE_ASSIGNED":
@@ -187,7 +187,7 @@ public class RosterReducer
                 actuallyJoined.remove(key);
                 numberByPlayer.remove(key);
                 coinsByPlayer.remove(key);
-                gnomeballCountByPlayer.remove(key);
+                goldenGnomeCountByPlayer.remove(key);
                 break;
             }
             case "COINS_CHANGED":
@@ -200,14 +200,14 @@ public class RosterReducer
                 if (coins != null) coinsByPlayer.put(key, coins);
                 break;
             }
-            case "GNOMEBALL_PURCHASED":
+            case "GOLDEN_GNOME_PURCHASED":
             {
                 String playerRaw = safeStr(e.payload, "player");
                 if (playerRaw == null) return;
                 String key = canonicalKey(playerRaw);
                 if (key == null) return;
-                Integer count = safeInt(e.payload, "gnomeballCount");
-                if (count != null) gnomeballCountByPlayer.put(key, count);
+                Integer count = safeInt(e.payload, "goldenGnomeCount");
+                if (count != null) goldenGnomeCountByPlayer.put(key, count);
                 break;
             }
         }
@@ -224,8 +224,8 @@ public class RosterReducer
             String number = numberByPlayer.getOrDefault(key, "");
             boolean joined = Boolean.TRUE.equals(actuallyJoined.get(key));
             int coins = coinsByPlayer.getOrDefault(key, 0);
-            int gnomeballCount = gnomeballCountByPlayer.getOrDefault(key, 0);
-            out.add(new RosterEntry(display, role, online, number, joined, coins, gnomeballCount));
+            int goldenGnomeCount = goldenGnomeCountByPlayer.getOrDefault(key, 0);
+            out.add(new RosterEntry(display, role, online, number, joined, coins, goldenGnomeCount));
         }
         out.sort((a, b) ->
         {

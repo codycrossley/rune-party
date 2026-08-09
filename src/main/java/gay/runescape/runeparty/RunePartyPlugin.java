@@ -279,7 +279,7 @@ public class RunePartyPlugin extends Plugin
 
         eventSocket = new EventSocket(okHttpClient, gson, new EventListener()
         {
-            @Override public void onEvent(ApiClient.EventOut e) { handleEvent(e); }
+            @Override public void onEvent(ApiClient.EventOut e) { handleEvent(e, false); }
             @Override public void onError(Exception e) { log.debug("EventSocket error", e); }
         });
     }
@@ -344,7 +344,7 @@ public class RunePartyPlugin extends Plugin
                 playerToken = result.playerToken;
                 hostRsn = host;
                 phase = GamePhase.LOBBY;
-                eventSocket.start(gameId, host);
+                connectEventStream(gameId, host);
                 addChatMessage("Created Rune Party game. Join code: " + result.joinCode);
                 triggerWelcomeBanner();
             }
@@ -373,7 +373,7 @@ public class RunePartyPlugin extends Plugin
                 writeKey = null;
                 joinCode = code;
                 phase = GamePhase.LOBBY;
-                eventSocket.start(gameId, self);
+                connectEventStream(gameId, self);
                 addChatMessage("Joined Rune Party game hosted by " + result.hostRsn);
                 triggerWelcomeBanner();
             }
@@ -492,7 +492,7 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
-    public void purchaseGnomeball()
+    public void purchaseGoldenGnome()
     {
         String self = localRsn();
         final String gid = gameId;
@@ -501,11 +501,11 @@ public class RunePartyPlugin extends Plugin
 
         executor.submit(() ->
         {
-            try { apiClient.purchaseGnomeball(gid, self, token); }
+            try { apiClient.purchaseGoldenGnome(gid, self, token); }
             catch (Exception e)
             {
-                log.warn("Purchase gnomeball failed", e);
-                addChatMessage("Failed to purchase the gilded gnomeball: " + e.getMessage());
+                log.warn("Purchase Golden Gnome failed", e);
+                addChatMessage("Failed to purchase the Golden Gnome: " + e.getMessage());
             }
         });
     }
@@ -772,13 +772,11 @@ public class RunePartyPlugin extends Plugin
      * for the *next* animation change away from the Spin ID -- i.e. the emote actually finishing,
      * not just starting -- so the roll (and the screen-centered dice reveal every client sees, see
      * AnnouncementOverlay#renderDiceRoll) never fires mid-emote; awaitingSpinFinish is what carries
-     * that wait across the two AnimationChanged firings. Also requires actually standing on the
-     * tile tracked in playerPositions -- if a player wandered off their last landed tile before
-     * their next turn, spinning in place does nothing until they walk back (see TileOverlay#
-     * renderReturnToPositionArrow, which is what tells them to). This gate never applies during a
-     * mini-game or any other non-turn state, since currentTurnRsn is null/stale then and this whole
-     * method already requires it to match the local player. rollDice() itself re-checks turn/pending
-     * state, this is just what decides *when* to call it. */
+     * that wait across the two AnimationChanged firings. Gates the actual roll on
+     * isLocalPlayerReadyToRoll() -- same check AnnouncementOverlay#renderSpinHint uses to decide
+     * whether to show the "Use the SPIN! emote" reminder, so the hint is never showing when
+     * spinning wouldn't actually do anything. rollDice() itself re-checks turn/pending state on top
+     * of this, this is just what decides *when* to call it. */
     @Subscribe
     public void onAnimationChanged(AnimationChanged event)
     {
@@ -789,10 +787,7 @@ public class RunePartyPlugin extends Plugin
 
         if (localPlayer.getAnimation() == AnimationID.EMOTE_DANCE_SPIN)
         {
-            if (pendingRoll || rollRequestSubmitted) return;
-            String self = localRsn();
-            if (self == null || !self.equalsIgnoreCase(currentTurnRsn)) return;
-            if (!isStandingOnTrackedPosition(localPlayer, self)) return;
+            if (!isLocalPlayerReadyToRoll()) return;
             awaitingSpinFinish = true;
             return;
         }
@@ -802,9 +797,28 @@ public class RunePartyPlugin extends Plugin
         rollDice();
     }
 
+    /** Whether the local player could actually roll the dice right now by performing the Spin
+     * emote: it's genuinely their turn, no roll is already pending or in flight, no mini-game is
+     * running, and they're standing on their own tracked board position (see
+     * isStandingOnTrackedPosition -- if they wandered off their last landed tile, spinning in place
+     * does nothing until they walk back, see TileOverlay#renderReturnToPositionArrow). Single
+     * source of truth for "can I roll right now" -- onAnimationChanged gates the real roll on this,
+     * AnnouncementOverlay#renderSpinHint gates the "Use the SPIN! emote" reminder on the exact same
+     * thing, so the two can never disagree about whether spinning would do anything. */
+    public boolean isLocalPlayerReadyToRoll()
+    {
+        if (phase != GamePhase.ACTIVE || pendingRoll || rollRequestSubmitted || minigameActive) return false;
+
+        String self = localRsn();
+        if (self == null || !self.equalsIgnoreCase(currentTurnRsn)) return false;
+
+        Player localPlayer = client.getLocalPlayer();
+        return localPlayer != null && isStandingOnTrackedPosition(localPlayer, self);
+    }
+
     /** Whether {@code localPlayer} is standing on {@code rsn}'s tracked board position -- see
-     * getPlayerPosition and onAnimationChanged, the only caller. False (not just "unknown") if the
-     * course isn't marked or the local player's position isn't resolvable, same fail-closed
+     * getPlayerPosition and isLocalPlayerReadyToRoll, the only caller. False (not just "unknown")
+     * if the course isn't marked or the local player's position isn't resolvable, same fail-closed
      * behavior as everywhere else that resolves a WorldPoint against the course. */
     private boolean isStandingOnTrackedPosition(Player localPlayer, String rsn)
     {
@@ -926,11 +940,52 @@ public class RunePartyPlugin extends Plugin
         welcomeBannerUntil = System.currentTimeMillis() + WELCOME_BANNER_DURATION_MS;
     }
 
+    /** Silently replays a game's full event history via a one-time REST fetch before opening the
+     * live WebSocket -- otherwise, since EventSocket's initial connect always asks for every event
+     * from the beginning (afterSeq=0), a player joining a game already in progress would see every
+     * banner, popup, and dice-roll animation from the whole game so far fire in rapid succession as
+     * that backlog replayed. Real game state (whose turn it is, coin totals, board positions, tile
+     * markers, the minigame-active flag, roster) still updates from every historical event exactly
+     * as it would live -- see handleEvent's catchingUp parameter, which is the one flag that decides
+     * "state always applies, cosmetic timers/banners/chat only when live" for every event type, so
+     * adding a new tile effect or announcement later only ever needs to sort itself into one of
+     * those two buckets, not duplicate this catch-up logic. Once the backlog is applied, the live
+     * socket starts from the backlog's own latestSeq, so nothing replays twice and every event from
+     * that point on gets full normal (animated) treatment. Falls back to the old full-live-replay
+     * behavior if the backlog fetch itself fails, rather than silently connecting from an unknown
+     * point and risking missed history. */
+    private void connectEventStream(String gameId, String rsn)
+    {
+        try
+        {
+            ApiClient.ReadEventsResponse backlog = apiClient.readEvents(gameId, 0);
+            for (ApiClient.EventOut event : backlog.events)
+            {
+                handleEvent(event, true);
+            }
+            syncRosterSnapshot(); // one fresh roster read covers every PLAYER_JOINED/ROLE_ASSIGNED/PLAYER_LEFT skipped above, instead of one REST call per historical event
+            refreshPanel();
+            eventSocket.start(gameId, backlog.latestSeq, rsn);
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to fetch event backlog before connecting -- falling back to a full live replay", e);
+            eventSocket.start(gameId, rsn);
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Server-pushed events
     // -------------------------------------------------------------------------
 
-    private void handleEvent(ApiClient.EventOut e)
+    /** {@code catchingUp} is true only when this event is being silently replayed from
+     * connectEventStream's initial backlog fetch, false for every event that arrives live over the
+     * WebSocket. Real game state -- turn order, coins, board positions, tile markers, the
+     * minigame-active flag, roster sync -- always applies either way, via rosterReducer/tileReducer
+     * above and the unguarded field writes below. Anything purely cosmetic (a banner, a popup timer,
+     * a chat line announcing something happened) is gated behind {@code !catchingUp} so a player who
+     * joins mid-game only ever sees the game's *current* state, not a replay of how it got there. */
+    private void handleEvent(ApiClient.EventOut e, boolean catchingUp)
     {
         if (e == null || e.type == null) return;
 
@@ -944,7 +999,10 @@ public class RunePartyPlugin extends Plugin
                 // currentTurnRsn stays null here -- see confirmStart/checkGatheringAtStart, turn
                 // order doesn't actually begin until every seated PLAYER reports being at START.
                 startConfirmSubmitted = false;
-                gameStartBannerUntil = System.currentTimeMillis() + GAME_START_BANNER_DURATION_MS;
+                if (!catchingUp)
+                {
+                    gameStartBannerUntil = System.currentTimeMillis() + GAME_START_BANNER_DURATION_MS;
+                }
                 break;
 
             case "GAME_ENDED":
@@ -952,18 +1010,26 @@ public class RunePartyPlugin extends Plugin
                 break;
 
             case "PLAYER_READY":
-                addChatMessage(safeStr(e.payload, "player") + " is ready at the start!");
+                if (!catchingUp)
+                {
+                    addChatMessage(safeStr(e.payload, "player") + " is ready at the start!");
+                }
                 break;
 
             // None of these three carry a turn-order "number" in their payload -- the server only
             // ever computes it fresh from the whole event log on a roster read (see
             // _finalize_roster in app.py), and it can shift for everyone whenever the PLAYER set
             // changes (a join, a promotion, a leave). So on any of them, pull a fresh roster
-            // snapshot rather than trying to derive numbers from the event stream itself.
+            // snapshot rather than trying to derive numbers from the event stream itself. Skipped
+            // during catch-up -- connectEventStream does one roster sync after the whole backlog
+            // instead of one REST call per historical join/promotion/leave.
             case "PLAYER_JOINED":
             case "ROLE_ASSIGNED":
             case "PLAYER_LEFT":
-                syncRosterSnapshot();
+                if (!catchingUp)
+                {
+                    syncRosterSnapshot();
+                }
                 break;
 
             case "TURN_STARTED":
@@ -975,11 +1041,14 @@ public class RunePartyPlugin extends Plugin
                 lastDiceRoll = null;
                 pendingTargetIndices = Collections.emptyList();
                 arrivalSubmitted = false;
-                scheduleTurnAnnouncement(currentTurnRsn);
-                String self = localRsn();
-                if (self != null && self.equalsIgnoreCase(currentTurnRsn))
+                if (!catchingUp)
                 {
-                    addChatMessage("It's your turn! Use the Spin emote to roll the dice.");
+                    scheduleTurnAnnouncement(currentTurnRsn);
+                    String self = localRsn();
+                    if (self != null && self.equalsIgnoreCase(currentTurnRsn))
+                    {
+                        addChatMessage("It's your turn! Use the Spin emote to roll the dice.");
+                    }
                 }
                 break;
             }
@@ -991,14 +1060,17 @@ public class RunePartyPlugin extends Plugin
                 pendingRoll = true;
                 rollRequestSubmitted = false; // pendingRoll is now the authoritative in-flight guard
                 arrivalSubmitted = false;
-                String roller = safeStr(e.payload, "player");
-                addChatMessage(roller + " rolled a " + lastDiceRoll + "!");
-                if (lastDiceRoll != null)
+                if (!catchingUp)
                 {
-                    diceRollRsn = roller;
-                    diceRollValue = lastDiceRoll;
-                    diceRollStart = System.currentTimeMillis();
-                    diceRollUntil = diceRollStart + DICE_ROLL_DURATION_MS;
+                    String roller = safeStr(e.payload, "player");
+                    addChatMessage(roller + " rolled a " + lastDiceRoll + "!");
+                    if (lastDiceRoll != null)
+                    {
+                        diceRollRsn = roller;
+                        diceRollValue = lastDiceRoll;
+                        diceRollStart = System.currentTimeMillis();
+                        diceRollUntil = diceRollStart + DICE_ROLL_DURATION_MS;
+                    }
                 }
                 break;
             }
@@ -1019,7 +1091,10 @@ public class RunePartyPlugin extends Plugin
                 // PATH is the only tile type with a real effect so far (see the COINS_CHANGED
                 // case below, which is what actually pays it out) -- every other type is still a
                 // no-op, but the event fires for all of them so this chat line is always accurate.
-                addChatMessage(safeStr(e.payload, "player") + " landed on a " + safeStr(e.payload, "tileType") + " tile.");
+                if (!catchingUp)
+                {
+                    addChatMessage(safeStr(e.payload, "player") + " landed on a " + safeStr(e.payload, "tileType") + " tile.");
+                }
                 break;
             }
 
@@ -1028,8 +1103,10 @@ public class RunePartyPlugin extends Plugin
                 // Only the standard-tile reward gets the popup treatment for now -- a purchase or
                 // mini-game payout already has its own feedback (the roster/stats panels update,
                 // and submitMinigameResult's caller sees the MINIGAME_ENDED chat line), so this
-                // stays scoped to the one case that otherwise had no visible feedback at all.
-                if ("standard_tile".equals(safeStr(e.payload, "reason")))
+                // stays scoped to the one case that otherwise had no visible feedback at all. The
+                // real coin total itself lives in rosterReducer (updated unconditionally above,
+                // catch-up or not) -- everything in this block is purely the popup's own cosmetics.
+                if (!catchingUp && "standard_tile".equals(safeStr(e.payload, "reason")))
                 {
                     coinPopupRsn = safeStr(e.payload, "player");
                     Integer delta = safeInt(e.payload, "delta");
@@ -1044,26 +1121,35 @@ public class RunePartyPlugin extends Plugin
             }
 
             case "MINIGAME_STARTED":
-                // minigameActive/minigameInstructions take effect immediately -- only the
-                // celebratory banner waits (see scheduleMinigameBanner) for this turn's own
-                // effects (the coin popup, and whatever else lands here in the future) to settle.
+                // minigameActive/minigameInstructions take effect immediately, catch-up or not --
+                // a player joining mid-minigame needs the panel to correctly show it's underway.
+                // Only the celebratory banner is cosmetic-only and skipped during catch-up.
                 minigameActive = true;
                 minigameInstructions = safeStr(e.payload, "instructions");
-                scheduleMinigameBanner();
-                addChatMessage("Mini-game! " + minigameInstructions);
+                if (!catchingUp)
+                {
+                    scheduleMinigameBanner();
+                    addChatMessage("Mini-game! " + minigameInstructions);
+                }
                 break;
 
             case "MINIGAME_ENDED":
                 minigameActive = false;
                 minigameInstructions = null;
-                addChatMessage(safeStr(e.payload, "winner") + " won the mini-game!");
+                if (!catchingUp)
+                {
+                    addChatMessage(safeStr(e.payload, "winner") + " won the mini-game!");
+                }
                 break;
 
             default:
                 break;
         }
 
-        refreshPanel();
+        if (!catchingUp)
+        {
+            refreshPanel();
+        }
     }
 
     // -------------------------------------------------------------------------

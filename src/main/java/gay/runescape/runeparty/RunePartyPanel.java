@@ -34,7 +34,7 @@ public class RunePartyPanel extends PluginPanel
     private final JLabel joinCodeValueLabel = new JLabel("—");
     private final JButton copyJoinCodeBtn = new JButton("Copy");
     private final JLabel statusLabel = new JLabel(" ");
-    private final JButton purchaseBtn = new JButton("Purchase Gilded Gnomeball");
+    private final JButton purchaseBtn = new JButton("Purchase Golden Gnome");
 
     // Mini-game
     private final JPanel minigamePanel = new JPanel();
@@ -188,7 +188,7 @@ public class RunePartyPanel extends PluginPanel
 
         purchaseBtn.setAlignmentX(LEFT_ALIGNMENT);
         purchaseBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-        purchaseBtn.addActionListener(e -> plugin.purchaseGnomeball());
+        purchaseBtn.addActionListener(e -> plugin.purchaseGoldenGnome());
 
         buildMinigamePanel();
         minigamePanel.setAlignmentX(LEFT_ALIGNMENT);
@@ -428,7 +428,7 @@ public class RunePartyPanel extends PluginPanel
         header.add(smallLabel("#"));
         header.add(smallLabel("Player"));
         header.add(smallLabel("Coins"));
-        header.add(smallLabel("Gnomeballs"));
+        header.add(smallLabel("Golden Gnomes"));
         rosterTablePanel.add(header);
 
         for (int i = 0; i < entries.size(); i++)
@@ -448,7 +448,7 @@ public class RunePartyPanel extends PluginPanel
             JLabel nameLabel = smallLabel(entry.rsn, nameColor);
             row.add(nameLabel);
             row.add(smallLabel(String.valueOf(entry.coins)));
-            row.add(smallLabel(String.valueOf(entry.gnomeballCount)));
+            row.add(smallLabel(String.valueOf(entry.goldenGnomeCount)));
 
             if (plugin.isHost() && entry.role == RunePartyRole.SPECTATOR && !plugin.isGameFull())
             {
@@ -505,7 +505,7 @@ public class RunePartyPanel extends PluginPanel
         {
             sb.append(e.rsn).append(':').append(e.role).append(':').append(e.number).append(':')
                 .append(e.online).append(':').append(e.joined).append(':')
-                .append(e.coins).append(':').append(e.gnomeballCount).append(';');
+                .append(e.coins).append(':').append(e.goldenGnomeCount).append(';');
         }
         return sb.toString();
     }

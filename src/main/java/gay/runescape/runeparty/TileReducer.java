@@ -16,7 +16,7 @@ public class TileReducer
         public final String tileType;
         public final String color;
         public final Integer orientation; // nullable -- reserved for future directional tiles
-        public final Integer pathIndex; // nullable -- null only for a non-course decorative marker; every PATH/START/GNOMEBALL_TILE/EVENT_TILE has one
+        public final Integer pathIndex; // nullable -- null only for a non-course decorative marker; every PATH/START/GOLDEN_GNOME_TILE/EVENT_TILE has one
         /** Explicit outgoing edges (pathIndex values), for board forks/merges -- empty means "use
          * the default (pathIndex + 1) % courseLength" edge every tile had before forks existed.
          * Only ever non-empty at a fork tile or a branch's tile just before a merge point; see

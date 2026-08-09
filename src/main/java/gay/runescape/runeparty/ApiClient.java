@@ -175,18 +175,18 @@ public class ApiClient
         }
     }
 
-    /** Requests purchase of the gilded gnomeball while standing on its tile. The server -- not
+    /** Requests purchase of the Golden Gnome while standing on its tile. The server -- not
      * this call's caller -- checks and debits the player's coin balance; a request against an
      * insufficient balance simply fails rather than ever letting the client decide affordability. */
-    public void purchaseGnomeball(String gameId, String playerRsn, String playerToken) throws IOException
+    public void purchaseGoldenGnome(String gameId, String playerRsn, String playerToken) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
 
-        try (Response resp = post("/v1/games/" + gameId + "/purchase-gnomeball", body, playerToken))
+        try (Response resp = post("/v1/games/" + gameId + "/purchase-golden-gnome", body, playerToken))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Purchase gnomeball failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new IOException("Purchase Golden Gnome failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -484,7 +484,7 @@ public class ApiClient
         public boolean online;
         public String number; // turn-order position ("1", "2", ...), same field shape RosterReducer already expects
         public int coins;
-        public int gnomeballCount;
+        public int goldenGnomeCount;
     }
 
     public static class TilesResponse
