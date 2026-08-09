@@ -66,7 +66,7 @@ public final class CoursePreset
                 dx = ndx;
                 dy = ndy;
             }
-            placed.add(new PlacedTile(new WorldPoint(center.getX() + dx, center.getY() + dy, plane), rt.tileType, rt.color, rt.nextIndices));
+            placed.add(new PlacedTile(new WorldPoint(center.getX() + dx, center.getY() + dy, plane), rt.tileType, rt.color, rt.nextIndices, rt.decorative));
         }
         return placed;
     }
@@ -76,7 +76,11 @@ public final class CoursePreset
      * center, in path order. Unlike FieldPreset.fromTiles (which doesn't care about order), this
      * sorts the snapshot by {@link TileReducer.TileEntry#pathIndex} first -- the reducer's own
      * storage is an unordered map, so path order only survives via that field, not iteration order.
-     * Entries with no path index (a stray non-course marker) are dropped rather than guessed at.
+     * Entries with no path index (a stray non-course marker <i>or</i> a decorative Golden Gnome
+     * modifier, see RelativeTile#decorative) are dropped rather than guessed at -- this function
+     * predates decorative tiles and doesn't yet know how to place one back at the right dx/dy
+     * relative to whatever real tile it was sitting on, same "not yet wired up" limitation
+     * {@link #fromTiles} already had before this feature existed (there's still no UI calling it).
      * Each tile's nextIndices carries over unchanged, which only stays correct if pathIndex values
      * are contiguous from 0 (true for any course committed via the normal placement flow) --
      * removing individual tiles by hand first could leave stale references, same pre-existing
@@ -144,16 +148,34 @@ public final class CoursePreset
          * tiles.size()} applies, same linear-with-wraparound behavior every course had before
          * forks existed. Two or more entries is a fork; exactly one entry that isn't "+1" is a
          * merge redirect (e.g. a branch's last tile rejoining the trunk somewhere else in the
-         * list). */
+         * list). Always empty for a decorative tile -- it has no course position of its own to
+         * route from. */
         public final int[] nextIndices;
+        /** True for a modifier tile that sits on top of another (non-decorative) tile at the same
+         * dx/dy rather than being a course stop of its own -- a Golden Gnome tile, currently the
+         * only example (see app.py's GOLDEN_GNOME_TILE handling). Committed with pathIndex omitted
+         * (see RunePartyPlugin#commitPreset) instead of the usual "list position becomes
+         * pathIndex," the same "decorative marker" shape TileReducer already supports for a stray
+         * non-course tile. <b>Must be listed after every non-decorative tile in the preset</b>: the
+         * commit step still uses raw list position as pathIndex for non-decorative entries, so a
+         * decorative entry earlier in the list would shift every pathIndex after it, and would also
+         * throw off nextIndices values (which are list-position references computed before
+         * decorative entries are known to skip numbering). */
+        public final boolean decorative;
 
         public RelativeTile(int dx, int dy, String tileType, String color, int... nextIndices)
+        {
+            this(dx, dy, tileType, color, false, nextIndices);
+        }
+
+        public RelativeTile(int dx, int dy, String tileType, String color, boolean decorative, int... nextIndices)
         {
             this.dx = dx;
             this.dy = dy;
             this.tileType = tileType;
             this.color = color;
-            this.nextIndices = nextIndices != null ? nextIndices : new int[0];
+            this.decorative = decorative;
+            this.nextIndices = decorative ? new int[0] : (nextIndices != null ? nextIndices : new int[0]);
         }
     }
 
@@ -163,13 +185,15 @@ public final class CoursePreset
         public final String tileType;
         public final String color;
         public final int[] nextIndices;
+        public final boolean decorative;
 
-        PlacedTile(WorldPoint point, String tileType, String color, int[] nextIndices)
+        PlacedTile(WorldPoint point, String tileType, String color, int[] nextIndices, boolean decorative)
         {
             this.point = point;
             this.tileType = tileType;
             this.color = color;
             this.nextIndices = nextIndices != null ? nextIndices : new int[0];
+            this.decorative = decorative;
         }
     }
 
@@ -179,7 +203,8 @@ public final class CoursePreset
      * <i>design</i> is explicitly out of scope for this pass -- real courses are expected to be
      * host-authored via sequential freehand placement (each click appends the next path index) and
      * saved as custom slots through {@link #fromTiles}, the same way Gnomeball hosts build/save
-     * custom fields.
+     * custom fields. Also exercises a Golden Gnome modifier end-to-end (see RelativeTile#decorative)
+     * two steps out from START, so it's reachable by almost any first roll.
      */
     public static CoursePreset buildStandardLoop()
     {
@@ -200,6 +225,12 @@ public final class CoursePreset
             RelativeTile first = tiles.get(0);
             tiles.set(0, new RelativeTile(first.dx, first.dy, "START", null, first.nextIndices));
         }
+
+        // Decorative Golden Gnome modifier, stacked on the PATH tile two steps out from START (see
+        // RelativeTile#decorative's own doc for why this has to be appended *after* the real path
+        // rather than spliced in at its logical dx/dy).
+        int goldenGnomeDx = startX + 2, goldenGnomeDy = startY;
+        tiles.add(new RelativeTile(goldenGnomeDx, goldenGnomeDy, "GOLDEN_GNOME_TILE", null, true));
 
         return new CoursePreset("Standard Loop", tiles);
     }

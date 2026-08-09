@@ -82,6 +82,14 @@ public class RunePartyPlugin extends Plugin
      * (host and joiners alike) sees it at the same moment. */
     public static final long GAME_START_BANNER_DURATION_MS = 3200;
 
+    /** How long AnnouncementOverlay's Golden Gnome outcome banner ("You got a Golden Gnome!" or
+     * "You can't afford this!") stays up -- fires immediately on GOLDEN_GNOME_OFFER_RESOLVED, same
+     * as the coin/Golden-Gnome-count popups it can appear alongside, rather than waiting on
+     * scheduleAfterTurnEffects itself; like those popups it calls extendTurnEffectGate instead, so
+     * it's the *next* turn's announcement (TURN_STARTED/MINIGAME!) that waits for this one, the
+     * count popup, and the underlying tile's own coin popup to all finish settling. */
+    public static final long GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS = 2600;
+
     /** How long PlayerOverlay's coin popup shows "+3" (or "-3") before switching to the player's
      * new running total -- see PlayerOverlay#drawCoinPopup, which is the only other place these
      * three get read from (kept here rather than duplicated as private constants there, so
@@ -201,6 +209,11 @@ public class RunePartyPlugin extends Plugin
     // finishes -- onAnimationChanged only actually calls rollDice() on the animation change that
     // clears this, so the roll never fires mid-emote.
     private volatile boolean awaitingSpinFinish = false;
+    // Same idea as awaitingSpinFinish, one per response to a pending Golden Gnome offer -- see
+    // onAnimationChanged. At most one of these three "awaiting" flags is ever true at once, since a
+    // roll and an offer can never both be pending at the same time.
+    private volatile boolean awaitingGnomeYesFinish = false;
+    private volatile boolean awaitingGnomeNoFinish = false;
     // Candidate destination tiles for the current roll -- more than one when the roll's path
     // crosses a fork (see TileOverlay#renderTargetArrow, which draws one arrow per candidate).
     // Never null, only ever empty.
@@ -208,6 +221,11 @@ public class RunePartyPlugin extends Plugin
     private volatile boolean arrivalSubmitted = false; // guards confirm-arrival from firing every tick while the echo is in flight
     private volatile boolean minigameActive = false;
     private volatile String minigameInstructions = null;
+    // Host-set at start (see GAME_STARTED's maxRounds) and incremented once per completed round
+    // (see MINIGAME_ENDED) -- together these are what StatsOverlay's "ROUND x/y" line reads via
+    // getCurrentRound/getMaxRounds. 0 until GAME_STARTED actually lands.
+    private volatile int maxRounds = 0;
+    private volatile int completedRounds = 0;
 
     // Every player's current board position (pathIndex), keyed by lowercase rsn -- mirrors the
     // server's own state["positions"], kept in sync purely by replaying PLAYER_MOVED events (see
@@ -233,6 +251,23 @@ public class RunePartyPlugin extends Plugin
 
     // ---- game-start banner (server-driven, everyone sees it -- see GAME_STARTED handling) ----
     private volatile long gameStartBannerUntil = 0;
+
+    // ---- Golden Gnome offer (server-driven, everyone sees it -- see GOLDEN_GNOME_OFFERED/
+    // GOLDEN_GNOME_OFFER_RESOLVED handling). goldenGnomeOfferRsn is real state (non-null exactly
+    // while a response is outstanding, same role pendingRoll plays for a roll) -- it gates whether
+    // a YES/NO emote does anything (see isLocalPlayerAwaitingGoldenGnomeResponse) as well as the
+    // offer banner. goldenGnomeOutcome/goldenGnomeOutcomeBannerUntil are purely the follow-up
+    // announcement ("You got a Golden Gnome!"/"You can't afford this!"), cosmetic only. ----
+    private volatile String goldenGnomeOfferRsn = null;
+    private volatile String goldenGnomeOutcome = null; // "purchased" | "declined" | "cant_afford"
+    private volatile long goldenGnomeOutcomeBannerUntil = 0;
+
+    // ---- Golden Gnome count popup (client-side timer -- see PlayerOverlay#drawGoldenGnomePopup,
+    // same "+1" -> running-total shape and timing as the coin popup) ----
+    private volatile String goldenGnomePopupRsn = null;
+    private volatile int goldenGnomePopupNewTotal = 0;
+    private volatile long goldenGnomePopupStart = 0;
+    private volatile long goldenGnomePopupUntil = 0;
 
     // ---- coin popup (client-side timer -- see PlayerOverlay#drawCoinPopup) ----
     private volatile String coinPopupRsn = null;
@@ -291,7 +326,7 @@ public class RunePartyPlugin extends Plugin
         if (eventSocket != null) eventSocket.shutdown();
         executor.shutdownNow();
         uiTimerExec.shutdownNow();
-        if (tileOverlay != null) overlayManager.remove(tileOverlay);
+        if (tileOverlay != null) { tileOverlay.clearGoldenGnomeModels(); overlayManager.remove(tileOverlay); }
         if (statsOverlay != null) overlayManager.remove(statsOverlay);
         if (playerOverlay != null) overlayManager.remove(playerOverlay);
         if (announcementOverlay != null) overlayManager.remove(announcementOverlay);
@@ -492,7 +527,12 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
-    public void purchaseGoldenGnome()
+    /** Accepts or declines a pending Golden Gnome offer -- called from onAnimationChanged once the
+     * local player's YES/NO emote finishes, same finish-gated pattern as rollDice/the Spin emote.
+     * The server resolves the outcome (purchased/declined/cant_afford) and reports it back via
+     * GOLDEN_GNOME_OFFER_RESOLVED, which is what actually drives the announcement/popup -- this
+     * call itself is fire-and-forget, same as every other player-action method here. */
+    private void respondGoldenGnomeOffer(boolean accept)
     {
         String self = localRsn();
         final String gid = gameId;
@@ -501,11 +541,11 @@ public class RunePartyPlugin extends Plugin
 
         executor.submit(() ->
         {
-            try { apiClient.purchaseGoldenGnome(gid, self, token); }
+            try { apiClient.respondGoldenGnomeOffer(gid, self, token, accept); }
             catch (Exception e)
             {
-                log.warn("Purchase Golden Gnome failed", e);
-                addChatMessage("Failed to purchase the Golden Gnome: " + e.getMessage());
+                log.warn("Respond to Golden Gnome offer failed", e);
+                addChatMessage("Failed to respond to the Golden Gnome offer: " + e.getMessage());
             }
         });
     }
@@ -670,8 +710,11 @@ public class RunePartyPlugin extends Plugin
             CoursePreset.PlacedTile pt = placed.get(i);
             // List order IS path order (see CoursePreset's own class doc) -- this is the one
             // place that turns "position i in the list" into an explicit pathIndex, since once
-            // this leaves as a TileSpec the server/TileReducer only ever see unordered tiles.
-            tileSpecs.add(new ApiClient.TileSpec(pt.point.getX(), pt.point.getY(), pt.point.getPlane(), pt.tileType, pt.color, null, i, pt.nextIndices));
+            // this leaves as a TileSpec the server/TileReducer only ever see unordered tiles. A
+            // decorative tile (see PlacedTile#decorative) gets no pathIndex at all instead -- it's
+            // a modifier stacked on another tile's position, not a course stop of its own.
+            Integer pathIndex = pt.decorative ? null : i;
+            tileSpecs.add(new ApiClient.TileSpec(pt.point.getX(), pt.point.getY(), pt.point.getPlane(), pt.tileType, pt.color, null, pathIndex, pt.nextIndices));
         }
 
         final String gid = gameId;
@@ -766,17 +809,22 @@ public class RunePartyPlugin extends Plugin
     }
 
     /** Rolls the dice once the local player's Spin emote finishes on their own turn -- replaces the
-     * old "right-click your tile -> Roll Dice" menu entry with a gesture trigger. Only reacts to
+     * old "right-click your tile -> Roll Dice" menu entry with a gesture trigger -- and, the same
+     * way, responds to a pending Golden Gnome offer once a YES/NO emote finishes. Only reacts to
      * the local player's own animation (every client sees every nearby player's AnimationChanged,
-     * so this would otherwise also fire for spectators watching someone else spin for fun). Waits
-     * for the *next* animation change away from the Spin ID -- i.e. the emote actually finishing,
-     * not just starting -- so the roll (and the screen-centered dice reveal every client sees, see
-     * AnnouncementOverlay#renderDiceRoll) never fires mid-emote; awaitingSpinFinish is what carries
-     * that wait across the two AnimationChanged firings. Gates the actual roll on
-     * isLocalPlayerReadyToRoll() -- same check AnnouncementOverlay#renderSpinHint uses to decide
-     * whether to show the "Use the SPIN! emote" reminder, so the hint is never showing when
-     * spinning wouldn't actually do anything. rollDice() itself re-checks turn/pending state on top
-     * of this, this is just what decides *when* to call it. */
+     * so this would otherwise also fire for spectators watching someone else spin/nod/shake for
+     * fun). Waits for the *next* animation change away from whichever emote ID matched -- i.e. the
+     * emote actually finishing, not just starting -- so the roll (and the screen-centered dice
+     * reveal every client sees, see AnnouncementOverlay#renderDiceRoll) or the offer response never
+     * fires mid-emote; awaitingSpinFinish/awaitingGnomeYesFinish/awaitingGnomeNoFinish are what
+     * carry that wait across the two AnimationChanged firings, exactly one set at a time since a
+     * roll and an offer can never both be pending simultaneously (isLocalPlayerReadyToRoll already
+     * requires no offer is pending). Gates the actual roll on isLocalPlayerReadyToRoll() -- same
+     * check AnnouncementOverlay#renderSpinHint uses to decide whether to show the "Use the SPIN!
+     * emote" reminder -- and the offer response on isLocalPlayerAwaitingGoldenGnomeResponse(), same
+     * check AnnouncementOverlay#renderGoldenGnomeOffer uses, so neither hint is ever showing when
+     * the matching emote wouldn't actually do anything. rollDice()/respondGoldenGnomeOffer() each
+     * re-check their own state on top of this, this is just what decides *when* to call them. */
     @Subscribe
     public void onAnimationChanged(AnimationChanged event)
     {
@@ -785,21 +833,51 @@ public class RunePartyPlugin extends Plugin
         Player localPlayer = client.getLocalPlayer();
         if (localPlayer == null || event.getActor() != localPlayer) return;
 
-        if (localPlayer.getAnimation() == AnimationID.EMOTE_DANCE_SPIN)
+        int anim = localPlayer.getAnimation();
+
+        if (anim == AnimationID.EMOTE_DANCE_SPIN)
         {
             if (!isLocalPlayerReadyToRoll()) return;
             awaitingSpinFinish = true;
             return;
         }
 
-        if (!awaitingSpinFinish) return;
-        awaitingSpinFinish = false;
-        rollDice();
+        if (anim == AnimationID.EMOTE_YES)
+        {
+            if (!isLocalPlayerAwaitingGoldenGnomeResponse()) return;
+            awaitingGnomeYesFinish = true;
+            return;
+        }
+
+        if (anim == AnimationID.EMOTE_NO)
+        {
+            if (!isLocalPlayerAwaitingGoldenGnomeResponse()) return;
+            awaitingGnomeNoFinish = true;
+            return;
+        }
+
+        if (awaitingSpinFinish)
+        {
+            awaitingSpinFinish = false;
+            rollDice();
+        }
+        else if (awaitingGnomeYesFinish)
+        {
+            awaitingGnomeYesFinish = false;
+            respondGoldenGnomeOffer(true);
+        }
+        else if (awaitingGnomeNoFinish)
+        {
+            awaitingGnomeNoFinish = false;
+            respondGoldenGnomeOffer(false);
+        }
     }
 
     /** Whether the local player could actually roll the dice right now by performing the Spin
      * emote: it's genuinely their turn, no roll is already pending or in flight, no mini-game is
-     * running, and they're standing on their own tracked board position (see
+     * running, no Golden Gnome offer is awaiting their response (see
+     * isLocalPlayerAwaitingGoldenGnomeResponse -- resolving that always takes priority over
+     * rolling again), and they're standing on their own tracked board position (see
      * isStandingOnTrackedPosition -- if they wandered off their last landed tile, spinning in place
      * does nothing until they walk back, see TileOverlay#renderReturnToPositionArrow). Single
      * source of truth for "can I roll right now" -- onAnimationChanged gates the real roll on this,
@@ -808,12 +886,25 @@ public class RunePartyPlugin extends Plugin
     public boolean isLocalPlayerReadyToRoll()
     {
         if (phase != GamePhase.ACTIVE || pendingRoll || rollRequestSubmitted || minigameActive) return false;
+        if (goldenGnomeOfferRsn != null) return false;
 
         String self = localRsn();
         if (self == null || !self.equalsIgnoreCase(currentTurnRsn)) return false;
 
         Player localPlayer = client.getLocalPlayer();
         return localPlayer != null && isStandingOnTrackedPosition(localPlayer, self);
+    }
+
+    /** Whether the local player has a Golden Gnome offer awaiting their own YES/NO response --
+     * single source of truth for "should a YES/NO emote actually do something right now," mirroring
+     * isLocalPlayerReadyToRoll's role for the Spin emote. See onAnimationChanged (gates the real
+     * response) and AnnouncementOverlay#renderGoldenGnomeOffer (gates the offer banner/instructions
+     * on the exact same thing). */
+    public boolean isLocalPlayerAwaitingGoldenGnomeResponse()
+    {
+        if (phase != GamePhase.ACTIVE || goldenGnomeOfferRsn == null) return false;
+        String self = localRsn();
+        return self != null && self.equalsIgnoreCase(goldenGnomeOfferRsn);
     }
 
     /** Whether {@code localPlayer} is standing on {@code rsn}'s tracked board position -- see
@@ -995,15 +1086,21 @@ public class RunePartyPlugin extends Plugin
         switch (e.type.toUpperCase(Locale.ROOT))
         {
             case "GAME_STARTED":
+            {
                 phase = GamePhase.ACTIVE;
                 // currentTurnRsn stays null here -- see confirmStart/checkGatheringAtStart, turn
                 // order doesn't actually begin until every seated PLAYER reports being at START.
                 startConfirmSubmitted = false;
+                // Real state, applied catch-up or not -- see getCurrentRound/StatsOverlay's
+                // "ROUND x/y" line, the only consumer.
+                Integer mr = safeInt(e.payload, "maxRounds");
+                if (mr != null) maxRounds = mr;
                 if (!catchingUp)
                 {
                     gameStartBannerUntil = System.currentTimeMillis() + GAME_START_BANNER_DURATION_MS;
                 }
                 break;
+            }
 
             case "GAME_ENDED":
                 phase = GamePhase.ENDED;
@@ -1086,6 +1183,68 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
+            case "GOLDEN_GNOME_OFFERED":
+            {
+                // Real state, applied catch-up or not: non-null exactly while a response is
+                // outstanding, gating both a YES/NO emote doing anything (see
+                // isLocalPlayerAwaitingGoldenGnomeResponse) and rolling again (see
+                // isLocalPlayerReadyToRoll). Pauses TILE_EFFECT/COINS_CHANGED for the underlying
+                // tile until GOLDEN_GNOME_OFFER_RESOLVED -- see the server's confirm_arrival/
+                // respond_golden_gnome_offer split.
+                goldenGnomeOfferRsn = safeStr(e.payload, "player");
+                if (!catchingUp)
+                {
+                    addChatMessage(goldenGnomeOfferRsn + " found a Golden Gnome!");
+                }
+                break;
+            }
+
+            case "GOLDEN_GNOME_OFFER_RESOLVED":
+            {
+                goldenGnomeOfferRsn = null; // always clear, catch-up or not -- real state
+                awaitingGnomeYesFinish = false;
+                awaitingGnomeNoFinish = false;
+                // "declined" gets no banner/chat of its own -- the offer simply disappears, same
+                // silence a declined confirm-start or an un-rolled turn would get. "purchased"'s
+                // own announcement comes from the GOLDEN_GNOME_PURCHASED case below instead (it
+                // carries the new total, which this event doesn't), so only "cant_afford" actually
+                // needs to arm anything here.
+                if (!catchingUp && "cant_afford".equals(safeStr(e.payload, "outcome")))
+                {
+                    goldenGnomeOutcome = "cant_afford";
+                    goldenGnomeOutcomeBannerUntil = System.currentTimeMillis() + GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
+                    extendTurnEffectGate(goldenGnomeOutcomeBannerUntil);
+                    addChatMessage("Can't afford the Golden Gnome!");
+                }
+                break;
+            }
+
+            case "GOLDEN_GNOME_PURCHASED":
+            {
+                // The running total itself lives in rosterReducer (updated unconditionally above,
+                // catch-up or not) -- everything here is purely cosmetic: the "You got a Golden
+                // Gnome!" announcement (goldenGnomeOutcome, reusing the same banner
+                // renderGoldenGnomeOutcome uses for "cant_afford") plus the "+1 Golden Gnome"
+                // popup, both fired from this one event since it's the only one carrying the new
+                // total the popup needs.
+                if (!catchingUp)
+                {
+                    goldenGnomePopupRsn = safeStr(e.payload, "player");
+                    Integer total = safeInt(e.payload, "goldenGnomeCount");
+                    goldenGnomePopupNewTotal = total != null ? total : 0;
+                    goldenGnomePopupStart = System.currentTimeMillis();
+                    goldenGnomePopupUntil = goldenGnomePopupStart + COIN_POPUP_DURATION_MS;
+                    extendTurnEffectGate(goldenGnomePopupUntil);
+
+                    goldenGnomeOutcome = "purchased";
+                    goldenGnomeOutcomeBannerUntil = System.currentTimeMillis() + GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
+                    extendTurnEffectGate(goldenGnomeOutcomeBannerUntil);
+
+                    addChatMessage(goldenGnomePopupRsn + " got a Golden Gnome!");
+                }
+                break;
+            }
+
             case "TILE_EFFECT":
             {
                 // PATH is the only tile type with a real effect so far (see the COINS_CHANGED
@@ -1113,7 +1272,18 @@ public class RunePartyPlugin extends Plugin
                     Integer total = safeInt(e.payload, "coins");
                     coinPopupDelta = delta != null ? delta : 0;
                     coinPopupNewTotal = total != null ? total : 0;
-                    coinPopupStart = System.currentTimeMillis();
+
+                    // A Golden Gnome purchase always resolves before the underlying tile's own
+                    // effect (see the server's confirm_arrival/respond_golden_gnome_offer split),
+                    // so both popups can land back-to-back for the same player within milliseconds
+                    // of each other. Rather than show them at once, the coin popup waits for the
+                    // Golden Gnome one to fully finish first -- its disappearance is what marks the
+                    // Golden Gnome tile effect as actually over. Doesn't apply if the still-showing
+                    // Golden Gnome popup belongs to someone else, or there isn't one right now.
+                    long now = System.currentTimeMillis();
+                    boolean samePlayerGnomePopupShowing = coinPopupRsn != null && coinPopupRsn.equalsIgnoreCase(goldenGnomePopupRsn)
+                        && goldenGnomePopupUntil > now;
+                    coinPopupStart = samePlayerGnomePopupShowing ? goldenGnomePopupUntil : now;
                     coinPopupUntil = coinPopupStart + COIN_POPUP_DURATION_MS;
                     extendTurnEffectGate(coinPopupUntil);
                 }
@@ -1136,6 +1306,11 @@ public class RunePartyPlugin extends Plugin
             case "MINIGAME_ENDED":
                 minigameActive = false;
                 minigameInstructions = null;
+                // Real state, applied catch-up or not -- one MINIGAME_ENDED is exactly one
+                // completed round (see the server's own _resolve_minigame_if_complete, which
+                // counts these events the same way to decide when maxRounds is reached). See
+                // getCurrentRound/StatsOverlay's "ROUND x/y" line, the only consumer.
+                completedRounds++;
                 if (!catchingUp)
                 {
                     addChatMessage(safeStr(e.payload, "winner") + " won the mini-game!");
@@ -1210,13 +1385,17 @@ public class RunePartyPlugin extends Plugin
         coursePlacementMode = false; selectedPreset = null; presetRotationSteps = 0;
         currentTurnRsn = null; lastDiceRoll = null; pendingRoll = false; rollRequestSubmitted = false;
         awaitingSpinFinish = false;
+        awaitingGnomeYesFinish = false; awaitingGnomeNoFinish = false;
         pendingTargetIndices = Collections.emptyList();
         arrivalSubmitted = false; minigameActive = false; minigameInstructions = null;
+        maxRounds = 0; completedRounds = 0;
         playerPositions.clear();
         turnAnnounceRsn = null; turnAnnounceUntil = 0; startConfirmSubmitted = false;
         welcomeBannerUntil = 0;
         minigameBannerUntil = 0;
         gameStartBannerUntil = 0;
+        goldenGnomeOfferRsn = null; goldenGnomeOutcome = null; goldenGnomeOutcomeBannerUntil = 0;
+        goldenGnomePopupRsn = null; goldenGnomePopupNewTotal = 0; goldenGnomePopupStart = 0; goldenGnomePopupUntil = 0;
         coinPopupRsn = null; coinPopupDelta = 0; coinPopupNewTotal = 0; coinPopupStart = 0; coinPopupUntil = 0;
         diceRollRsn = null; diceRollValue = 0; diceRollStart = 0; diceRollUntil = 0;
         if (rosterReducer != null) rosterReducer.reset();
@@ -1253,6 +1432,16 @@ public class RunePartyPlugin extends Plugin
         return idx != null ? idx : 0;
     }
     public String getMinigameInstructions() { return minigameInstructions; }
+    public int getMaxRounds() { return maxRounds; }
+    /** 1-indexed round currently in progress, capped at maxRounds so the round the final
+     * MINIGAME_ENDED just completed doesn't briefly read as "one past the end" before GAME_ENDED
+     * lands -- 0 before GAME_STARTED has set maxRounds at all. See StatsOverlay's "ROUND x/y" line,
+     * the only consumer. */
+    public int getCurrentRound()
+    {
+        if (maxRounds <= 0) return 0;
+        return Math.min(completedRounds + 1, maxRounds);
+    }
     public String getTurnAnnounceRsn() { return turnAnnounceRsn; }
     public long getTurnAnnounceUntil() { return turnAnnounceUntil; }
     public long getWelcomeBannerUntil() { return welcomeBannerUntil; }
@@ -1267,4 +1456,11 @@ public class RunePartyPlugin extends Plugin
     public int getDiceRollValue() { return diceRollValue; }
     public long getDiceRollStart() { return diceRollStart; }
     public long getDiceRollUntil() { return diceRollUntil; }
+    public String getGoldenGnomeOfferRsn() { return goldenGnomeOfferRsn; }
+    public String getGoldenGnomeOutcome() { return goldenGnomeOutcome; }
+    public long getGoldenGnomeOutcomeBannerUntil() { return goldenGnomeOutcomeBannerUntil; }
+    public String getGoldenGnomePopupRsn() { return goldenGnomePopupRsn; }
+    public int getGoldenGnomePopupNewTotal() { return goldenGnomePopupNewTotal; }
+    public long getGoldenGnomePopupStart() { return goldenGnomePopupStart; }
+    public long getGoldenGnomePopupUntil() { return goldenGnomePopupUntil; }
 }

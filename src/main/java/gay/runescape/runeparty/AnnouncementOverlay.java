@@ -76,6 +76,16 @@ public class AnnouncementOverlay extends Overlay
     private static final long SPIN_HINT_PULSE_PERIOD_MS = 1400; // gentle breathing alpha so a hint that has to persist (no fixed duration) doesn't just sit there static and easy to ignore
     private static final float SPIN_HINT_MIN_ALPHA = 0.55f;
 
+    private static final float GOLDEN_GNOME_OFFER_TITLE_SIZE = 30f; // "You found a GOLDEN GNOME!"
+    private static final float GOLDEN_GNOME_OFFER_SUBTITLE_SIZE = 20f; // "Would you like to buy one?"
+    // Same breathing-alpha idea as the Spin hint -- this offer is also duration-less (it persists
+    // until the local player's YES/NO emote resolves it), so it needs its own way to stay noticeable.
+    private static final long GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS = 1400;
+    private static final float GOLDEN_GNOME_OFFER_MIN_ALPHA = 0.6f;
+
+    private static final long GOLDEN_GNOME_OUTCOME_FADE_MS = 500;
+    private static final float GOLDEN_GNOME_OUTCOME_SIZE = 32f;
+
     // Bundled at src/main/resources/gay/runescape/runeparty/mario-party-hudson.ttf -- loaded once
     // at class-init, deriveFont(size) per use same as FontManager's own fonts. Falls back to the
     // client's own bold font if the resource is ever missing, so a packaging mistake degrades
@@ -121,6 +131,8 @@ public class AnnouncementOverlay extends Overlay
         renderGameStartBanner(g);
         renderTurnAnnouncement(g);
         renderSpinHint(g);
+        renderGoldenGnomeOffer(g);
+        renderGoldenGnomeOutcome(g);
         renderMinigameBanner(g);
         renderDiceRoll(g);
 
@@ -195,6 +207,81 @@ public class AnnouncementOverlay extends Overlay
 
         g.setFont(normalFont);
         drawLeftAlignedText(g, suffix, x, y, SPIN_HINT_COLOR, alpha);
+    }
+
+    /** Draws the Golden Gnome offer -- "You found a GOLDEN GNOME!" (with "GOLDEN GNOME" in the
+     * Mario Party Hudson font, same gold as "SHOWDOWN", stitched into the surrounding plain-white
+     * text via drawLeftAlignedText the same way renderSpinHint stitches "SPIN"), "Would you like to
+     * buy one?" underneath, then the two emote instructions. Broadcast to everyone (like
+     * renderMinigameBanner/renderGameStartBanner), not local-only, since it's a shared moment
+     * everyone's watching even though only the finder's own YES/NO emote does anything (see
+     * RunePartyPlugin#isLocalPlayerAwaitingGoldenGnomeResponse, which onAnimationChanged and this
+     * method's own instructions both key off of implicitly -- the offer text itself doesn't change
+     * per viewer, same as the dice-roll reveal). Duration-less like renderSpinHint -- it's a live
+     * read of goldenGnomeOfferRsn, not a timed fade, so it pulses instead for the same "needs to
+     * stay noticeable without a fade to draw the eye" reason. */
+    private void renderGoldenGnomeOffer(Graphics2D g)
+    {
+        if (plugin.getGoldenGnomeOfferRsn() == null) return;
+
+        long phaseMs = System.currentTimeMillis() % GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS;
+        float pulse = (float) (0.5 + 0.5 * Math.sin(2 * Math.PI * phaseMs / GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS));
+        float alpha = GOLDEN_GNOME_OFFER_MIN_ALPHA + (1f - GOLDEN_GNOME_OFFER_MIN_ALPHA) * pulse;
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 3;
+
+        String prefix = "You found a ";
+        String goldenGnome = "GOLDEN GNOME";
+        String suffix = "!";
+
+        Font normalFont = FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_TITLE_SIZE);
+        Font goldenGnomeFont = MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_TITLE_SIZE);
+
+        g.setFont(normalFont);
+        int prefixWidth = g.getFontMetrics().stringWidth(prefix);
+        int suffixWidth = g.getFontMetrics().stringWidth(suffix);
+        g.setFont(goldenGnomeFont);
+        int goldenGnomeWidth = g.getFontMetrics().stringWidth(goldenGnome);
+
+        int x = centerX - (prefixWidth + goldenGnomeWidth + suffixWidth) / 2;
+
+        g.setFont(normalFont);
+        x = drawLeftAlignedText(g, prefix, x, y, Color.WHITE, alpha);
+        g.setFont(goldenGnomeFont);
+        x = drawLeftAlignedText(g, goldenGnome, x, y, WELCOME_TITLE_COLOR, alpha);
+        g.setFont(normalFont);
+        drawLeftAlignedText(g, suffix, x, y, Color.WHITE, alpha);
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE));
+        drawCenteredText(g, "Would you like to buy one?", centerX, y + 32, Color.WHITE, alpha);
+
+        g.setFont(FontManager.getRunescapeSmallFont());
+        drawCenteredText(g, "'YES' emote: purchase", centerX, y + 58, Color.LIGHT_GRAY, alpha);
+        drawCenteredText(g, "'NO' emote: decline", centerX, y + 76, Color.LIGHT_GRAY, alpha);
+    }
+
+    /** Draws the Golden Gnome offer's follow-up -- "You got a Golden Gnome!" on a purchase, or
+     * "You can't afford this!" if they accepted without enough coins (a decline gets no banner at
+     * all, see RunePartyPlugin's GOLDEN_GNOME_OFFER_RESOLVED handling) -- fires immediately rather
+     * than waiting on scheduleAfterTurnEffects, same as the coin/dice popups; it's the *next* turn's
+     * own announcement that waits for this one via extendTurnEffectGate instead. */
+    private void renderGoldenGnomeOutcome(Graphics2D g)
+    {
+        long remaining = plugin.getGoldenGnomeOutcomeBannerUntil() - System.currentTimeMillis();
+        if (remaining <= 0) return;
+
+        String outcome = plugin.getGoldenGnomeOutcome();
+        String text = "purchased".equals(outcome) ? "You got a Golden Gnome!"
+            : "cant_afford".equals(outcome) ? "You can't afford this!"
+            : null;
+        if (text == null) return;
+
+        float alpha = remaining < GOLDEN_GNOME_OUTCOME_FADE_MS ? remaining / (float) GOLDEN_GNOME_OUTCOME_FADE_MS : 1f;
+        Color color = "purchased".equals(outcome) ? WELCOME_TITLE_COLOR : Color.WHITE;
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OUTCOME_SIZE));
+        drawCenteredText(g, text, client.getCanvasWidth() / 2, client.getCanvasHeight() / 3, color, alpha);
     }
 
     /** Draws the "MINIGAME!" banner on a MINIGAME_STARTED event -- server-driven, so every client

@@ -44,6 +44,14 @@ public class PlayerOverlay extends Overlay
     private static final int COIN_POPUP_CLEARANCE = 22; // gap above the token
     private static final int COIN_POPUP_MAX_RISE = 16; // pixels risen by the time the popup fades out
 
+    private static final Color GOLDEN_GNOME_POPUP_COLOR = new Color(255, 215, 0);
+    // Taller than the coin popup's own clearance so the two can stack without overlapping when
+    // both fire close together -- a Golden Gnome purchase's own popup, then moments later the
+    // underlying tile's own coin popup (see RunePartyPlugin's GOLDEN_GNOME_PURCHASED/COINS_CHANGED
+    // handling -- confirm_arrival always resolves the tile's effect right after the offer settles).
+    private static final int GOLDEN_GNOME_POPUP_CLEARANCE = 46;
+    private static final int GOLDEN_GNOME_POPUP_MAX_RISE = 16;
+
     private final Client client;
     private final RunePartyConfig config;
     private final RunePartyPlugin plugin;
@@ -94,6 +102,11 @@ public class PlayerOverlay extends Overlay
             {
                 drawCoinPopup(g, p);
             }
+
+            if (phase == GamePhase.ACTIVE && rsn.equalsIgnoreCase(plugin.getGoldenGnomePopupRsn()))
+            {
+                drawGoldenGnomePopup(g, p);
+            }
         }
 
         return null;
@@ -138,15 +151,20 @@ public class PlayerOverlay extends Overlay
      * reward, then swaps to their new running total for the rest of the popup's life -- same
      * client-side start/until-timestamp pattern as AnnouncementOverlay's turn banner (see
      * RunePartyPlugin's COINS_CHANGED handling, which stamps coinPopupStart/coinPopupUntil), not
-     * anything the server tracks the duration of. */
+     * anything the server tracks the duration of. coinPopupStart can be stamped into the future --
+     * see the "now < start" guard below -- when a Golden Gnome popup for the same player is still
+     * showing, so this one waits its turn instead of overlapping it; nothing renders at all until
+     * that future start time actually arrives. */
     private void drawCoinPopup(Graphics2D g, Player p)
     {
         long now = System.currentTimeMillis();
+        long start = plugin.getCoinPopupStart();
+        if (now < start) return; // RunePartyPlugin can push this into the future to wait out a still-showing Golden Gnome popup for the same player
         long until = plugin.getCoinPopupUntil();
         long remaining = until - now;
         if (remaining <= 0) return;
 
-        long elapsed = now - plugin.getCoinPopupStart();
+        long elapsed = now - start;
         boolean showTotal = elapsed >= RunePartyPlugin.COIN_POPUP_DELTA_PHASE_MS;
         int delta = plugin.getCoinPopupDelta();
         String text = showTotal ? (plugin.getCoinPopupNewTotal() + " coins") : ((delta >= 0 ? "+" : "") + delta + " coins");
@@ -164,6 +182,41 @@ public class PlayerOverlay extends Overlay
         g.setColor(withAlpha(Color.BLACK, a));
         g.drawString(text, loc.getX() + 1, loc.getY() + 1);
         g.setColor(withAlpha(color, a));
+        g.drawString(text, loc.getX(), loc.getY());
+    }
+
+    /** Floats "+1 Golden Gnome" above a player's head after a purchase, then swaps to their new
+     * running total ("N Golden Gnomes", or "1 Golden Gnome" singular) for the rest of the popup's
+     * life -- same shape and timing as drawCoinPopup (reuses RunePartyPlugin's
+     * COIN_POPUP_DELTA_PHASE_MS/FADE_MS directly rather than duplicating them, per how the feature
+     * was asked for: "similar to how the coins popup works"), just always the gain color since a
+     * purchase is never a loss here -- the coin cost has its own separate feedback (the outcome
+     * banner), not this popup. Sits higher above the head than the coin popup (see
+     * GOLDEN_GNOME_POPUP_CLEARANCE) so the two never overlap when both are showing at once. */
+    private void drawGoldenGnomePopup(Graphics2D g, Player p)
+    {
+        long now = System.currentTimeMillis();
+        long until = plugin.getGoldenGnomePopupUntil();
+        long remaining = until - now;
+        if (remaining <= 0) return;
+
+        long elapsed = now - plugin.getGoldenGnomePopupStart();
+        boolean showTotal = elapsed >= RunePartyPlugin.COIN_POPUP_DELTA_PHASE_MS;
+        int total = plugin.getGoldenGnomePopupNewTotal();
+        String text = showTotal ? (total + " Golden " + (total == 1 ? "Gnome" : "Gnomes")) : "+1 Golden Gnome";
+
+        float alpha = remaining < RunePartyPlugin.COIN_POPUP_FADE_MS ? remaining / (float) RunePartyPlugin.COIN_POPUP_FADE_MS : 1f;
+        int rise = (int) Math.min(GOLDEN_GNOME_POPUP_MAX_RISE, elapsed / 50);
+
+        g.setFont(FontManager.getRunescapeBoldFont());
+        int yOffset = p.getLogicalHeight() + TOKEN_RADIUS + TOKEN_HEAD_CLEARANCE + GOLDEN_GNOME_POPUP_CLEARANCE + rise;
+        Point loc = p.getCanvasTextLocation(g, text, yOffset);
+        if (loc == null) return;
+
+        int a = Math.max(0, Math.min(255, (int) (alpha * 255)));
+        g.setColor(withAlpha(Color.BLACK, a));
+        g.drawString(text, loc.getX() + 1, loc.getY() + 1);
+        g.setColor(withAlpha(GOLDEN_GNOME_POPUP_COLOR, a));
         g.drawString(text, loc.getX(), loc.getY());
     }
 

@@ -1,8 +1,10 @@
 package gay.runescape.runeparty;
 
 import net.runelite.api.Client;
+import net.runelite.api.Model;
 import net.runelite.api.Perspective;
 import net.runelite.api.Player;
+import net.runelite.api.RuneLiteObject;
 import net.runelite.api.Tile;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
@@ -11,7 +13,11 @@ import net.runelite.client.util.Text;
 
 import java.awt.*;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /** Renders the course: committed tiles from TileReducer, plus a live placement/removal preview
  * while the host is building. Unlike Gnomeball's TileOverlay -- whose FIELD/ZONE tiles are large
@@ -24,6 +30,10 @@ public class TileOverlay extends Overlay
     private static final Color COLOR_PATH          = new Color(40, 130, 230); // the "standard" tile -- plain, always worth 3 coins on landing
     private static final Color COLOR_PENALTY_TILE  = new Color(220, 50, 50); // functions like PATH, but -3 coins on landing (floored at 0)
     private static final Color COLOR_START         = new Color(60, 179, 74);
+    // Only used for the live placement preview now (see renderPresetPreview) -- a committed Golden
+    // Gnome tile renders as a 3D model instead (model 31481, see updateGoldenGnomeModels), but the
+    // preview is a lightweight dashed-outline pass over the whole course before it's even
+    // committed, same as every other tile type there, so it keeps the simple color-fill look.
     private static final Color COLOR_GOLDEN_GNOME_TILE = new Color(255, 210, 0);
     private static final Color COLOR_EVENT_TILE    = new Color(170, 80, 220);
     private static final Color COLOR_ROUTE_LINE    = new Color(255, 255, 255, 100);
@@ -36,10 +46,18 @@ public class TileOverlay extends Overlay
     private static final Stroke PREVIEW_STROKE = new BasicStroke(2f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10f, new float[]{6f, 4f}, 0f);
     private static final Stroke ROUTE_STROKE   = new BasicStroke(2f);
 
+    // A committed Golden Gnome tile renders as this model, spawned as a RuneLiteObject in the
+    // scene, instead of a color fill -- see updateGoldenGnomeModels.
+    private static final int GOLDEN_GNOME_MODEL_ID = 32303;
+
     private final Client client;
     private final RunePartyConfig config;
     private final RunePartyPlugin plugin;
     private final TileReducer tileReducer;
+
+    // One RuneLiteObject per currently-marked Golden Gnome tile, keyed by its WorldPoint -- see
+    // updateGoldenGnomeModels/clearGoldenGnomeModels, the only things that touch this.
+    private final Map<WorldPoint, RuneLiteObject> goldenGnomeModels = new HashMap<>();
 
     public TileOverlay(Client client, RunePartyConfig config, RunePartyPlugin plugin, TileReducer tileReducer)
     {
@@ -55,9 +73,17 @@ public class TileOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (!config.showTileOverlay()) return null;
+        if (!config.showTileOverlay())
+        {
+            clearGoldenGnomeModels();
+            return null;
+        }
         GamePhase phase = plugin.getPhase();
-        if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE) return null;
+        if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE)
+        {
+            clearGoldenGnomeModels();
+            return null;
+        }
 
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
@@ -81,11 +107,74 @@ public class TileOverlay extends Overlay
 
         for (TileReducer.TileEntry entry : entries)
         {
+            if ("GOLDEN_GNOME_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see updateGoldenGnomeModels below
             Color base = resolveColor(entry.color, entry.tileType);
             renderFilledTile(g, entry.point, withAlpha(base, FILL_ALPHA), withAlpha(base, BORDER_ALPHA), SOLID_STROKE);
         }
 
+        updateGoldenGnomeModels(entries);
         renderRouteLines(g, entries);
+    }
+
+    /** Keeps one RuneLiteObject (model GOLDEN_GNOME_MODEL_ID) spawned in the scene for every
+     * currently-marked Golden Gnome tile, diffed each frame against TileReducer's live snapshot --
+     * same "the reducer is the one source of truth" pattern every other tile visual here already
+     * follows. A RuneLiteObject is registered directly with the client, not the OverlayManager, so
+     * it doesn't get cleaned up just because this overlay stops rendering -- see
+     * clearGoldenGnomeModels for the other half of that. loadModel can return null for a couple of
+     * frames right after the client starts while the model's still loading from cache, so this
+     * keeps retrying every frame until it succeeds rather than giving up after one null. */
+    private void updateGoldenGnomeModels(List<TileReducer.TileEntry> entries)
+    {
+        Set<WorldPoint> current = new HashSet<>();
+        for (TileReducer.TileEntry entry : entries)
+        {
+            if ("GOLDEN_GNOME_TILE".equals(entry.tileType)) current.add(entry.point);
+        }
+
+        goldenGnomeModels.entrySet().removeIf(e ->
+        {
+            if (current.contains(e.getKey())) return false;
+            e.getValue().setActive(false);
+            return true;
+        });
+
+        for (WorldPoint point : current)
+        {
+            RuneLiteObject obj = goldenGnomeModels.computeIfAbsent(point, p -> client.createRuneLiteObject());
+
+            if (obj.getModel() == null)
+            {
+                Model model = client.loadModel(GOLDEN_GNOME_MODEL_ID);
+                if (model != null) obj.setModel(model);
+            }
+
+            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), point);
+            if (lp == null)
+            {
+                obj.setActive(false);
+                continue;
+            }
+
+            obj.setLocation(lp, point.getPlane());
+            if (obj.getModel() != null && !obj.isActive())
+            {
+                obj.setActive(true);
+            }
+        }
+    }
+
+    /** Despawns and forgets every Golden Gnome RuneLiteObject -- called whenever this overlay
+     * stops actively rendering the course (see render()'s early returns) and from
+     * RunePartyPlugin#shutDown, since a RuneLiteObject otherwise stays registered with the client
+     * independently of this overlay or even the plugin being active. */
+    public void clearGoldenGnomeModels()
+    {
+        for (RuneLiteObject obj : goldenGnomeModels.values())
+        {
+            obj.setActive(false);
+        }
+        goldenGnomeModels.clear();
     }
 
     /** Draws a bouncing, pulsing arrow -- in the mover's own RunePartyColor (see
@@ -149,12 +238,16 @@ public class TileOverlay extends Overlay
      * requirement server-side-of-the-gesture (the Spin emote does nothing until they're back), this
      * is purely the visual telling them where "back" is. Suppressed during a mini-game the same way
      * renderTargetArrow is (see that method's own doc) -- once minigameActive flips true there's no
-     * tile left to return to until the round's next TURN_STARTED. Unlike renderTargetArrow (which
-     * broadcasts whose turn is resolving to everyone watching), this only ever renders for the mover
-     * themselves -- it's a personal nudge to walk back, not board state anyone else needs to see. */
+     * tile left to return to until the round's next TURN_STARTED. Same reasoning covers a pending
+     * Golden Gnome offer: pendingRoll is already false by the time one exists (PLAYER_MOVED clears
+     * it before the offer is even created), so without this check, wandering off mid-offer -- while
+     * deciding whether to buy -- would make this arrow reappear too, even though "return" isn't
+     * really the point right now. Unlike renderTargetArrow (which broadcasts whose turn is
+     * resolving to everyone watching), this only ever renders for the mover themselves -- it's a
+     * personal nudge to walk back, not board state anyone else needs to see. */
     private void renderReturnToPositionArrow(Graphics2D g)
     {
-        if (plugin.isPendingRoll() || plugin.isMinigameActive()) return;
+        if (plugin.isPendingRoll() || plugin.isMinigameActive() || plugin.getGoldenGnomeOfferRsn() != null) return;
         String moverRsn = plugin.getCurrentTurnRsn();
         if (moverRsn == null || !isLocalPlayer(moverRsn)) return;
 
@@ -302,15 +395,25 @@ public class TileOverlay extends Overlay
             renderFilledTile(g, pt.point, withAlpha(base, FILL_ALPHA), withAlpha(base, BORDER_ALPHA), PREVIEW_STROKE);
         }
 
+        // A decorative tile (a Golden Gnome modifier stacked on another tile, see
+        // CoursePreset.RelativeTile#decorative) never gets a pathIndex of its own on commit, so it
+        // doesn't count toward the course's real length for the "+1" wraparound below, and it never
+        // has a route line drawn *from* it -- only non-decorative entries do. Correctness here
+        // relies on the same "decoratives are always listed after every real tile" ordering commit
+        // itself requires (see RunePartyPlugin#commitPreset), so list index i still equals a
+        // non-decorative entry's real pathIndex.
+        int courseLength = 0;
+        for (CoursePreset.PlacedTile pt : placed) if (!pt.decorative) courseLength++;
+
         g.setStroke(PREVIEW_STROKE);
         g.setColor(COLOR_ROUTE_LINE);
-        int length = placed.size();
-        for (int i = 0; i < length; i++)
+        for (int i = 0; i < placed.size(); i++)
         {
             CoursePreset.PlacedTile pt = placed.get(i);
-            for (int nextIndex : resolvePreviewNextIndices(pt, i, length))
+            if (pt.decorative) continue;
+            for (int nextIndex : resolvePreviewNextIndices(pt, i, courseLength))
             {
-                if (nextIndex < 0 || nextIndex >= length) continue;
+                if (nextIndex < 0 || nextIndex >= placed.size()) continue;
                 Point fromCanvas = tileCenterOnCanvas(pt.point);
                 Point toCanvas = tileCenterOnCanvas(placed.get(nextIndex).point);
                 if (fromCanvas == null || toCanvas == null) continue;
@@ -321,7 +424,8 @@ public class TileOverlay extends Overlay
 
     /** Same default-or-explicit resolution as TileReducer#resolveNextIndices, but for a live
      * placement preview's in-memory PlacedTile list (not yet committed, so there's no TileReducer
-     * entry -- or courseLength -- to resolve against yet). */
+     * entry -- or courseLength -- to resolve against yet). {@code length} is the *real* course
+     * length (non-decorative tiles only, see renderPresetPreview), not placed.size(). */
     private static int[] resolvePreviewNextIndices(CoursePreset.PlacedTile pt, int index, int length)
     {
         if (pt.nextIndices.length > 0) return pt.nextIndices;

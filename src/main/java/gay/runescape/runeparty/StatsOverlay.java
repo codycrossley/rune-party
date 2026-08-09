@@ -14,16 +14,17 @@ import net.runelite.client.ui.overlay.components.LineComponent;
 import net.runelite.client.ui.overlay.components.PanelComponent;
 import net.runelite.client.ui.overlay.components.TitleComponent;
 
-/** Persistent Mario-Party-style standings HUD: every seated (role PLAYER *and* actually joined --
- * see the roster filter below, which excludes both spectators and a host-added PLAYER who hasn't
- * run the join flow yet) player's coin count and Golden Gnome count, ranked highest-coins-
- * first, each name in that player's own RunePartyColor with the current turn highlighted on the
- * stats side -- same fixed-corner overlay pattern Gnomeball's TimerOverlay uses (TOP_LEFT/
- * ABOVE_WIDGETS), but built with PanelComponent/LineComponent since this is a multi-row table
- * rather than a single flashy clock line. Purely a renderer over RosterReducer -- all the coin/
- * Golden Gnome totals it reads are server-mutated (see ApiClient's roll-dice/confirm-arrival/
- * purchase-golden-gnome/submit-minigame-result docs), this class never computes or guesses a total
- * itself. */
+/** Persistent Mario-Party-style standings HUD: a "ROUND x/y" line once the game's actually started
+ * (see RunePartyPlugin#getCurrentRound/getMaxRounds), then every seated (role PLAYER *and*
+ * actually joined -- see the roster filter below, which excludes both spectators and a host-added
+ * PLAYER who hasn't run the join flow yet) player's coin count and Golden Gnome count, ranked
+ * highest-coins-first, each name in that player's own RunePartyColor with the current turn
+ * highlighted on the stats side -- same fixed-corner overlay pattern Gnomeball's TimerOverlay uses
+ * (TOP_LEFT/ABOVE_WIDGETS), but built with PanelComponent/LineComponent since this is a multi-row
+ * table rather than a single flashy clock line. Purely a renderer over RosterReducer/
+ * RunePartyPlugin -- all the coin/Golden Gnome/round totals it reads are server-mutated (see
+ * ApiClient's roll-dice/confirm-arrival/purchase-golden-gnome/submit-minigame-result docs), this
+ * class never computes or guesses a total itself. */
 public class StatsOverlay extends Overlay
 {
     private static final Color COLOR_TURN = new Color(255, 210, 0);
@@ -79,6 +80,17 @@ public class StatsOverlay extends Overlay
             .text("Rune Party")
             .color(Color.WHITE)
             .build());
+
+        // 0 until GAME_STARTED actually lands (see RunePartyPlugin#getMaxRounds) -- LOBBY has no
+        // round to show yet, so this line just doesn't appear until there's something real to say.
+        int maxRounds = plugin.getMaxRounds();
+        if (maxRounds > 0)
+        {
+            panelComponent.getChildren().add(LineComponent.builder()
+                .left("ROUND " + plugin.getCurrentRound() + "/" + maxRounds)
+                .leftColor(COLOR_TURN)
+                .build());
+        }
 
         String currentTurn = plugin.getCurrentTurnRsn();
         for (RosterReducer.RosterEntry entry : players)

@@ -175,18 +175,22 @@ public class ApiClient
         }
     }
 
-    /** Requests purchase of the Golden Gnome while standing on its tile. The server -- not
-     * this call's caller -- checks and debits the player's coin balance; a request against an
-     * insufficient balance simply fails rather than ever letting the client decide affordability. */
-    public void purchaseGoldenGnome(String gameId, String playerRsn, String playerToken) throws IOException
+    /** Accepts or declines a pending Golden Gnome offer (see RunePartyPlugin's GOLDEN_GNOME_OFFERED
+     * handling) -- triggered by the player's own YES/NO emote, not a panel button; there's no
+     * standalone "walk up and buy one anytime" flow anymore now that a Golden Gnome is a modifier
+     * on a PATH tile rather than a course stop of its own. The server -- not this call's caller --
+     * checks and debits the coin balance on accept; an unaffordable accept simply resolves to the
+     * "cant_afford" outcome rather than ever letting the client decide affordability. */
+    public void respondGoldenGnomeOffer(String gameId, String playerRsn, String playerToken, boolean accept) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
+        body.addProperty("accept", accept);
 
-        try (Response resp = post("/v1/games/" + gameId + "/purchase-golden-gnome", body, playerToken))
+        try (Response resp = post("/v1/games/" + gameId + "/respond-golden-gnome-offer", body, playerToken))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Purchase Golden Gnome failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new IOException("Respond to Golden Gnome offer failed (" + resp.code() + "): " + raw);
         }
     }
 
