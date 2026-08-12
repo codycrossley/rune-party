@@ -151,6 +151,7 @@ public class RunePartyPlugin extends Plugin
     private EventSocket eventSocket;
     private RunePartyPanel panel;
     private NavigationButton navButton;
+    private RunePartyMapDialog mapDialog; // lazily created on the first "Show Map" click, see showMap()
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r ->
     {
@@ -331,7 +332,29 @@ public class RunePartyPlugin extends Plugin
         if (playerOverlay != null) overlayManager.remove(playerOverlay);
         if (announcementOverlay != null) overlayManager.remove(announcementOverlay);
         if (navButton != null) clientToolbar.removeNavigation(navButton);
+        if (mapDialog != null) { mapDialog.dispose(); mapDialog = null; }
         resetState();
+    }
+
+    /** Opens (or brings to front) the course map dialog -- see RunePartyMapDialog, which is a
+     * non-modal Swing window so it doesn't block actually playing the game while it's up. Lazily
+     * created once and reused rather than a fresh dialog per click, same as navButton/panel above. */
+    public void showMap()
+    {
+        if (mapDialog == null)
+        {
+            mapDialog = new RunePartyMapDialog(SwingUtilities.getWindowAncestor(panel), this);
+        }
+        mapDialog.setVisible(true);
+        mapDialog.toFront();
+    }
+
+    /** The local player's own RSN, or null if unresolvable -- same lookup localRsn() already does
+     * for every action method here, just exposed for RunePartyMapDialog to tell "you" apart from
+     * everyone else on the map. */
+    public String getLocalRsn()
+    {
+        return localRsn();
     }
 
     /** Drawn in code rather than loaded from a resource -- there's no real icon asset yet, and a

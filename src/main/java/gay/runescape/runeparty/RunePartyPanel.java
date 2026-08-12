@@ -34,6 +34,7 @@ public class RunePartyPanel extends PluginPanel
     private final JLabel joinCodeValueLabel = new JLabel("—");
     private final JButton copyJoinCodeBtn = new JButton("Copy");
     private final JLabel statusLabel = new JLabel(" ");
+    private final JButton showMapBtn = new JButton("Show Map");
 
     // Mini-game
     private final JPanel minigamePanel = new JPanel();
@@ -185,6 +186,10 @@ public class RunePartyPanel extends PluginPanel
         statusLabel.setForeground(COLOR_TURN);
         statusLabel.setFont(FontManager.getRunescapeSmallFont());
 
+        showMapBtn.setAlignmentX(LEFT_ALIGNMENT);
+        showMapBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        showMapBtn.addActionListener(e -> plugin.showMap());
+
         buildMinigamePanel();
         minigamePanel.setAlignmentX(LEFT_ALIGNMENT);
 
@@ -214,6 +219,8 @@ public class RunePartyPanel extends PluginPanel
         card.add(Box.createVerticalStrut(8));
         card.add(statusLabel);
         card.add(Box.createVerticalStrut(6));
+        card.add(showMapBtn);
+        card.add(Box.createVerticalStrut(8));
         card.add(minigamePanel);
         card.add(Box.createVerticalStrut(8));
         card.add(sectionLabel("Players"));
@@ -369,6 +376,8 @@ public class RunePartyPanel extends PluginPanel
         copyJoinCodeBtn.setEnabled(joinCode != null);
 
         statusLabel.setText(statusText(phase));
+
+        showMapBtn.setVisible(phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE || phase == GamePhase.ENDED);
 
         minigamePanel.setVisible(plugin.isMinigameActive());
         if (plugin.isMinigameActive())
