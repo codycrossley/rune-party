@@ -33,6 +33,7 @@ import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.MenuEntryAdded;
 import net.runelite.api.gameval.AnimationID;
+import net.runelite.api.gameval.SpotanimID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -82,6 +83,12 @@ public class RunePartyPlugin extends Plugin
      * (host and joiners alike) sees it at the same moment. */
     public static final long GAME_START_BANNER_DURATION_MS = 3200;
 
+    /** How long AnnouncementOverlay's post-round "ROUND x" / "Current Standings" recap stays up --
+     * triggered on MINIGAME_ENDED (see triggerRoundCompleteBanner), which also extends
+     * turnEffectGateUntil so the new round's first TURN_STARTED banner waits behind this one
+     * instead of overlapping it. */
+    public static final long ROUND_COMPLETE_BANNER_DURATION_MS = 4500;
+
     /** How long AnnouncementOverlay's Golden Gnome outcome banner ("You got a Golden Gnome!" or
      * "You can't afford this!") stays up -- fires immediately on GOLDEN_GNOME_OFFER_RESOLVED, same
      * as the coin/Golden-Gnome-count popups it can appear alongside, rather than waiting on
@@ -89,6 +96,36 @@ public class RunePartyPlugin extends Plugin
      * it's the *next* turn's announcement (TURN_STARTED/MINIGAME!) that waits for this one, the
      * count popup, and the underlying tile's own coin popup to all finish settling. */
     public static final long GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS = 2600;
+
+    /** Default lifetime for a spotanim spawned via triggerSpotAnimAtWorldPoint, in ~20ms client
+     * cycles (not the 600ms game tick) -- long enough for most one-shot effects to finish playing
+     * without a fast one lingering awkwardly afterward. Callers with an unusually long or short
+     * effect can pass their own duration to the other overload instead. */
+    public static final int SPOTANIM_DEFAULT_DURATION_CYCLES = 60;
+
+    /** Spotanim played at both ends of a Golden Gnome relocating after a purchase (see
+     * GOLDEN_GNOME_MOVED handling) -- the same swirling rune-teleport effect standard spellbook
+     * teleports use, gold-toned enough to fit the theme. */
+    public static final int GOLDEN_GNOME_MOVE_SPOTANIM_ID = SpotanimID.TELEPORT_RUNE;
+
+    /** Gap between the "vanish" spotanim at a Golden Gnome's old spot and the "arrive" spotanim at
+     * its new one -- both events fire back to back in the same GOLDEN_GNOME_MOVED payload, but
+     * playing both at literally the same instant reads as one confusing double-flash rather than
+     * "gone, then reappeared elsewhere." */
+    public static final long GOLDEN_GNOME_MOVE_SPOTANIM_GAP_MS = 600;
+
+    /** How long after the "vanish" spotanim starts before the model actually disappears from its
+     * old spot -- see TileOverlay#updateGoldenGnomeModels, which force-persists the old point past
+     * when TileReducer already removed it (that removal is real state, applied the instant the
+     * TILE_UNMARKED event lands, well before this delay) so the spotanim visually "covers" the
+     * disappearance instead of the model just vanishing on its own first. */
+    public static final long GOLDEN_GNOME_MOVE_VANISH_DELAY_MS = 200;
+
+    /** Same idea as GOLDEN_GNOME_MOVE_VANISH_DELAY_MS, mirrored for the arrival: how long after the
+     * "arrive" spotanim starts before the model actually appears at its new spot -- TileReducer
+     * already has the new tile the instant TILE_MARKED lands, so TileOverlay force-suppresses it
+     * until this delay elapses instead. */
+    public static final long GOLDEN_GNOME_MOVE_APPEAR_DELAY_MS = 200;
 
     /** How long PlayerOverlay's coin popup shows "+3" (or "-3") before switching to the player's
      * new running total -- see PlayerOverlay#drawCoinPopup, which is the only other place these
@@ -253,6 +290,13 @@ public class RunePartyPlugin extends Plugin
     // ---- game-start banner (server-driven, everyone sees it -- see GAME_STARTED handling) ----
     private volatile long gameStartBannerUntil = 0;
 
+    // ---- round-complete banner (server-driven, everyone sees it -- see MINIGAME_ENDED handling
+    // and triggerRoundCompleteBanner). roundCompleteRoundNumber is snapshotted at trigger time
+    // (rather than AnnouncementOverlay reading getCurrentRound() live) so the banner keeps
+    // showing the round that just finished even after completedRounds moves on. ----
+    private volatile long roundCompleteBannerUntil = 0;
+    private volatile int roundCompleteRoundNumber = 0;
+
     // ---- Golden Gnome offer (server-driven, everyone sees it -- see GOLDEN_GNOME_OFFERED/
     // GOLDEN_GNOME_OFFER_RESOLVED handling). goldenGnomeOfferRsn is real state (non-null exactly
     // while a response is outstanding, same role pendingRoll plays for a roll) -- it gates whether
@@ -269,6 +313,18 @@ public class RunePartyPlugin extends Plugin
     private volatile int goldenGnomePopupNewTotal = 0;
     private volatile long goldenGnomePopupStart = 0;
     private volatile long goldenGnomePopupUntil = 0;
+
+    // ---- Golden Gnome relocation choreography (client-side timers -- see TileOverlay#
+    // updateGoldenGnomeModels, the only reader). TileReducer already has the *real* tile state the
+    // instant TILE_UNMARKED/TILE_MARKED land (tileReducer.apply runs unconditionally for every
+    // event, before this class's own switch on event type even looks at what kind it is) -- these
+    // four fields are purely about *when the model visually catches up to that*, so the sequence
+    // reads as spotanim -> vanish -> spotanim -> reappear instead of the model teleporting
+    // instantly while the spotanims play catch-up after the fact. ----
+    private volatile WorldPoint goldenGnomeMoveOldPoint = null;
+    private volatile long goldenGnomeMoveHideOldAt = 0; // model still force-shown at goldenGnomeMoveOldPoint until this passes, even though TileReducer already dropped it
+    private volatile WorldPoint goldenGnomeMoveNewPoint = null;
+    private volatile long goldenGnomeMoveShowNewAt = 0; // model force-hidden at goldenGnomeMoveNewPoint until this passes, even though TileReducer already has it
 
     // ---- coin popup (client-side timer -- see PlayerOverlay#drawCoinPopup) ----
     private volatile String coinPopupRsn = null;
@@ -1045,6 +1101,19 @@ public class RunePartyPlugin extends Plugin
             minigameBannerUntil = System.currentTimeMillis() + MINIGAME_BANNER_DURATION_MS);
     }
 
+    /** Arms AnnouncementOverlay's post-round "ROUND x" / "Current Standings" recap -- called from
+     * the MINIGAME_ENDED handler, after completedRounds has already been incremented, so this
+     * always snapshots the round that just finished rather than the one about to start. Also
+     * extends turnEffectGateUntil so the new round's first TURN_STARTED banner (already inserted
+     * server-side by the time this client-side trigger runs -- see _resolve_minigame_if_complete)
+     * waits behind this recap via scheduleAfterTurnEffects instead of overlapping it. */
+    private void triggerRoundCompleteBanner()
+    {
+        roundCompleteRoundNumber = completedRounds;
+        roundCompleteBannerUntil = System.currentTimeMillis() + ROUND_COMPLETE_BANNER_DURATION_MS;
+        extendTurnEffectGate(roundCompleteBannerUntil);
+    }
+
     /** Arms AnnouncementOverlay's "Welcome to Rune Party Showdown" title card -- called once, right
      * after createGame/joinGame succeeds, for the local player only (there's no server event for
      * this; it's purely a client-side "you're in!" splash, so it never fires for anyone already in
@@ -1268,6 +1337,41 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
+            case "GOLDEN_GNOME_MOVED":
+            {
+                // The real relocation is carried by the paired TILE_UNMARKED/TILE_MARKED events,
+                // already applied unconditionally via tileReducer.apply above (catch-up or not) by
+                // the time this case even runs. Everything here is choreographing the *visual*
+                // catch-up -- see goldenGnomeMoveOldPoint/goldenGnomeMoveNewPoint's own doc -- so
+                // it's entirely skipped during catch-up like every other purely-visual event.
+                // Sequence: spotanim at the old spot -> (VANISH_DELAY later) model disappears ->
+                // (GAP after the spotanim) spotanim at the new spot -> (APPEAR_DELAY later) model
+                // appears, rather than the model instantly teleporting while the spotanims play
+                // catch-up after the fact.
+                if (!catchingUp)
+                {
+                    WorldPoint oldPoint = safeWorldPoint(e.payload, "oldPoint");
+                    WorldPoint newPoint = safeWorldPoint(e.payload, "newPoint");
+
+                    if (oldPoint != null)
+                    {
+                        triggerSpotAnimAtWorldPoint(GOLDEN_GNOME_MOVE_SPOTANIM_ID, oldPoint);
+                        goldenGnomeMoveOldPoint = oldPoint;
+                        goldenGnomeMoveHideOldAt = System.currentTimeMillis() + GOLDEN_GNOME_MOVE_VANISH_DELAY_MS;
+                    }
+                    if (newPoint != null)
+                    {
+                        uiTimerExec.schedule(() ->
+                        {
+                            triggerSpotAnimAtWorldPoint(GOLDEN_GNOME_MOVE_SPOTANIM_ID, newPoint);
+                            goldenGnomeMoveNewPoint = newPoint;
+                            goldenGnomeMoveShowNewAt = System.currentTimeMillis() + GOLDEN_GNOME_MOVE_APPEAR_DELAY_MS;
+                        }, GOLDEN_GNOME_MOVE_SPOTANIM_GAP_MS, TimeUnit.MILLISECONDS);
+                    }
+                }
+                break;
+            }
+
             case "TILE_EFFECT":
             {
                 // PATH is the only tile type with a real effect so far (see the COINS_CHANGED
@@ -1337,6 +1441,7 @@ public class RunePartyPlugin extends Plugin
                 if (!catchingUp)
                 {
                     addChatMessage(safeStr(e.payload, "winner") + " won the mini-game!");
+                    triggerRoundCompleteBanner();
                 }
                 break;
 
@@ -1357,6 +1462,28 @@ public class RunePartyPlugin extends Plugin
     private void addChatMessage(String message)
     {
         clientThread.invokeLater(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", message, null));
+    }
+
+    /** Plays {@code spotAnimId} (see net.runelite.api.gameval.SpotanimID) once at a fixed world
+     * point -- no travel, no actor attached. The client API has no direct "spawn a stationary
+     * graphic" call (a real GraphicsObject is otherwise only ever created by the game engine
+     * itself, in response to an actual server packet); the standard RuneLite-plugin trick for this
+     * is a projectile whose source and target are the same point, which is exactly what this does.
+     * Always hops onto the client thread, so any caller (an event handler off the client thread,
+     * same as everything in handleEvent) can call this directly. */
+    public void triggerSpotAnimAtWorldPoint(int spotAnimId, WorldPoint point, int durationCycles)
+    {
+        if (point == null) return;
+        clientThread.invoke(() ->
+        {
+            int startCycle = client.getGameCycle();
+            client.createProjectile(spotAnimId, point, 0, null, point, 0, null, startCycle, startCycle + durationCycles, 0, 0);
+        });
+    }
+
+    public void triggerSpotAnimAtWorldPoint(int spotAnimId, WorldPoint point)
+    {
+        triggerSpotAnimAtWorldPoint(spotAnimId, point, SPOTANIM_DEFAULT_DURATION_CYCLES);
     }
 
     private void refreshPanel()
@@ -1380,6 +1507,19 @@ public class RunePartyPlugin extends Plugin
     {
         try { return (o != null && o.has(key) && !o.get(key).isJsonNull()) ? o.get(key).getAsInt() : null; }
         catch (Exception ignored) { return null; }
+    }
+
+    /** Reads a nested {@code {x, y, plane}} object -- see GOLDEN_GNOME_MOVED's oldPoint/newPoint,
+     * the only current callers. Null if the key's missing or any of the three fields is. */
+    private static WorldPoint safeWorldPoint(JsonObject o, String key)
+    {
+        if (o == null || !o.has(key) || !o.get(key).isJsonObject()) return null;
+        JsonObject p = o.getAsJsonObject(key);
+        Integer x = safeInt(p, "x");
+        Integer y = safeInt(p, "y");
+        Integer plane = safeInt(p, "plane");
+        if (x == null || y == null || plane == null) return null;
+        return new WorldPoint(x, y, plane);
     }
 
     /** Reads DICE_ROLLED's targetIndices -- plural since a fork can offer more than one candidate
@@ -1417,8 +1557,11 @@ public class RunePartyPlugin extends Plugin
         welcomeBannerUntil = 0;
         minigameBannerUntil = 0;
         gameStartBannerUntil = 0;
+        roundCompleteBannerUntil = 0; roundCompleteRoundNumber = 0;
         goldenGnomeOfferRsn = null; goldenGnomeOutcome = null; goldenGnomeOutcomeBannerUntil = 0;
         goldenGnomePopupRsn = null; goldenGnomePopupNewTotal = 0; goldenGnomePopupStart = 0; goldenGnomePopupUntil = 0;
+        goldenGnomeMoveOldPoint = null; goldenGnomeMoveHideOldAt = 0;
+        goldenGnomeMoveNewPoint = null; goldenGnomeMoveShowNewAt = 0;
         coinPopupRsn = null; coinPopupDelta = 0; coinPopupNewTotal = 0; coinPopupStart = 0; coinPopupUntil = 0;
         diceRollRsn = null; diceRollValue = 0; diceRollStart = 0; diceRollUntil = 0;
         if (rosterReducer != null) rosterReducer.reset();
@@ -1470,6 +1613,8 @@ public class RunePartyPlugin extends Plugin
     public long getWelcomeBannerUntil() { return welcomeBannerUntil; }
     public long getMinigameBannerUntil() { return minigameBannerUntil; }
     public long getGameStartBannerUntil() { return gameStartBannerUntil; }
+    public long getRoundCompleteBannerUntil() { return roundCompleteBannerUntil; }
+    public int getRoundCompleteRoundNumber() { return roundCompleteRoundNumber; }
     public String getCoinPopupRsn() { return coinPopupRsn; }
     public int getCoinPopupDelta() { return coinPopupDelta; }
     public int getCoinPopupNewTotal() { return coinPopupNewTotal; }
@@ -1486,4 +1631,8 @@ public class RunePartyPlugin extends Plugin
     public int getGoldenGnomePopupNewTotal() { return goldenGnomePopupNewTotal; }
     public long getGoldenGnomePopupStart() { return goldenGnomePopupStart; }
     public long getGoldenGnomePopupUntil() { return goldenGnomePopupUntil; }
+    public WorldPoint getGoldenGnomeMoveOldPoint() { return goldenGnomeMoveOldPoint; }
+    public long getGoldenGnomeMoveHideOldAt() { return goldenGnomeMoveHideOldAt; }
+    public WorldPoint getGoldenGnomeMoveNewPoint() { return goldenGnomeMoveNewPoint; }
+    public long getGoldenGnomeMoveShowNewAt() { return goldenGnomeMoveShowNewAt; }
 }

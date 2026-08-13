@@ -10,6 +10,7 @@ import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.ui.overlay.*;
 import net.runelite.client.util.Text;
+import lombok.extern.slf4j.Slf4j;
 
 import java.awt.*;
 import java.util.Collection;
@@ -24,6 +25,7 @@ import java.util.Set;
  * connected regions rendered as an outline -- a course is a one-tile-wide walked path, so every
  * tile renders individually filled/bordered (Gnomeball's non-outline-type styling) with a
  * connecting line drawn between consecutive path indices to make the route itself legible. */
+@Slf4j
 public class TileOverlay extends Overlay
 {
     private static final Color COLOR_UNKNOWN_TYPE = new Color(255, 255, 0); // fallback for any tile type not explicitly recognized below
@@ -58,6 +60,11 @@ public class TileOverlay extends Overlay
     // One RuneLiteObject per currently-marked Golden Gnome tile, keyed by its WorldPoint -- see
     // updateGoldenGnomeModels/clearGoldenGnomeModels, the only things that touch this.
     private final Map<WorldPoint, RuneLiteObject> goldenGnomeModels = new HashMap<>();
+
+    // Debug aid while tracking down why GOLDEN_GNOME_MODEL_ID isn't rendering -- logs the outcome
+    // of each loadModel() attempt once per point instead of every frame, so the client log shows
+    // whether it's failing to load at all vs. loading but not showing up.
+    private final Set<WorldPoint> goldenGnomeModelLoadLogged = new HashSet<>();
 
     public TileOverlay(Client client, RunePartyConfig config, RunePartyPlugin plugin, TileReducer tileReducer)
     {
@@ -123,13 +130,35 @@ public class TileOverlay extends Overlay
      * it doesn't get cleaned up just because this overlay stops rendering -- see
      * clearGoldenGnomeModels for the other half of that. loadModel can return null for a couple of
      * frames right after the client starts while the model's still loading from cache, so this
-     * keeps retrying every frame until it succeeds rather than giving up after one null. */
+     * keeps retrying every frame until it succeeds rather than giving up after one null.
+     * <p>
+     * TileReducer is real state, updated the instant TILE_UNMARKED/TILE_MARKED land regardless of
+     * how this overlay wants to present it -- but a Golden Gnome relocating is choreographed
+     * against two spotanims (see RunePartyPlugin's GOLDEN_GNOME_MOVED handling), so the model
+     * shouldn't just teleport the moment those events arrive. RunePartyPlugin#
+     * getGoldenGnomeMoveOldPoint/getGoldenGnomeMoveNewPoint (with their matching hide/show
+     * timestamps) are what let this method override the raw diff for exactly as long as that
+     * choreography needs: force-persisting the old spot a beat after TileReducer already dropped
+     * it, and force-suppressing the new spot a beat before TileReducer's already-added entry
+     * actually shows. */
     private void updateGoldenGnomeModels(List<TileReducer.TileEntry> entries)
     {
         Set<WorldPoint> current = new HashSet<>();
         for (TileReducer.TileEntry entry : entries)
         {
             if ("GOLDEN_GNOME_TILE".equals(entry.tileType)) current.add(entry.point);
+        }
+
+        long now = System.currentTimeMillis();
+        WorldPoint moveOld = plugin.getGoldenGnomeMoveOldPoint();
+        if (moveOld != null && now < plugin.getGoldenGnomeMoveHideOldAt())
+        {
+            current.add(moveOld);
+        }
+        WorldPoint moveNew = plugin.getGoldenGnomeMoveNewPoint();
+        if (moveNew != null && now < plugin.getGoldenGnomeMoveShowNewAt())
+        {
+            current.remove(moveNew);
         }
 
         goldenGnomeModels.entrySet().removeIf(e ->
@@ -146,7 +175,20 @@ public class TileOverlay extends Overlay
             if (obj.getModel() == null)
             {
                 Model model = client.loadModel(GOLDEN_GNOME_MODEL_ID);
-                if (model != null) obj.setModel(model);
+                if (model != null)
+                {
+                    obj.setModel(model);
+                    if (goldenGnomeModelLoadLogged.add(point))
+                    {
+                        log.info("Golden Gnome model {} loaded at {}: vertexCount={} faceCount={}",
+                            GOLDEN_GNOME_MODEL_ID, point, model.getVerticesCount(), model.getFaceCount());
+                    }
+                }
+                else if (goldenGnomeModelLoadLogged.add(point))
+                {
+                    log.info("Golden Gnome model {} returned null from loadModel() at {} (will keep retrying every frame)",
+                        GOLDEN_GNOME_MODEL_ID, point);
+                }
             }
 
             LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), point);
@@ -160,6 +202,7 @@ public class TileOverlay extends Overlay
             if (obj.getModel() != null && !obj.isActive())
             {
                 obj.setActive(true);
+                log.info("Golden Gnome RuneLiteObject activated at {}", point);
             }
         }
     }

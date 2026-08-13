@@ -14,12 +14,15 @@ import net.runelite.client.ui.overlay.components.LineComponent;
 import net.runelite.client.ui.overlay.components.PanelComponent;
 import net.runelite.client.ui.overlay.components.TitleComponent;
 
-/** Persistent Mario-Party-style standings HUD: a "ROUND x/y" line once the game's actually started
+/** Persistent Mario-Party-style stats HUD: a "ROUND x/y" line once the game's actually started
  * (see RunePartyPlugin#getCurrentRound/getMaxRounds), then every seated (role PLAYER *and*
  * actually joined -- see the roster filter below, which excludes both spectators and a host-added
- * PLAYER who hasn't run the join flow yet) player's coin count and Golden Gnome count, ranked
- * highest-coins-first, each name in that player's own RunePartyColor with the current turn
- * highlighted on the stats side -- same fixed-corner overlay pattern Gnomeball's TimerOverlay uses
+ * PLAYER who hasn't run the join flow yet) player's coin count and Golden Gnome count, always in
+ * turn order (see the roster's own "number" field), each name in that player's own RunePartyColor
+ * with the current turn highlighted on the stats side -- a ranked view lives in
+ * AnnouncementOverlay's post-round "Current Standings" recap instead (see
+ * renderRoundCompleteBanner), so this persistent HUD stays stable/scannable rather than reshuffling
+ * every time someone's coin total changes. Same fixed-corner overlay pattern Gnomeball's TimerOverlay uses
  * (TOP_LEFT/ABOVE_WIDGETS), but built with PanelComponent/LineComponent since this is a multi-row
  * table rather than a single flashy clock line. Purely a renderer over RosterReducer/
  * RunePartyPlugin -- all the coin/Golden Gnome/round totals it reads are server-mutated (see
@@ -69,11 +72,11 @@ public class StatsOverlay extends Overlay
         }
         if (players.isEmpty()) return null;
 
-        // Ranked by coins (Mario Party's own standings order), Golden Gnomes as the tiebreak
-        // -- the whole point of the coin chase is buying those, so it's the natural secondary sort.
-        players.sort(Comparator
-            .comparingInt((RosterReducer.RosterEntry e) -> e.goldenGnomeCount).reversed()
-            .thenComparing(Comparator.comparingInt((RosterReducer.RosterEntry e) -> e.coins).reversed()));
+        // Turn order, not ranked -- a ranked view (highest-coins-first, Golden Gnomes as the
+        // tiebreak) now lives in AnnouncementOverlay's post-round "Current Standings" recap
+        // instead (see renderRoundCompleteBanner), so this persistent HUD reads left-to-right the
+        // same way turn order actually plays out at the table.
+        players.sort(Comparator.comparing((RosterReducer.RosterEntry e) -> e.number));
 
         panelComponent.getChildren().clear();
         panelComponent.getChildren().add(TitleComponent.builder()

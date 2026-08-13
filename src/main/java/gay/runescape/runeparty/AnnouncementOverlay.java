@@ -9,6 +9,9 @@ import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.client.ui.FontManager;
@@ -71,6 +74,12 @@ public class AnnouncementOverlay extends Overlay
     private static final long GAME_START_FADE_MS = 600;
     private static final float GAME_START_TITLE_SIZE = 58f;
 
+    private static final long ROUND_COMPLETE_FADE_MS = 500;
+    private static final float ROUND_COMPLETE_TITLE_SIZE = 46f; // "ROUND x"
+    private static final float ROUND_COMPLETE_SUBTITLE_SIZE = 20f; // "Current Standings"
+    private static final float ROUND_COMPLETE_LINE_SIZE = 18f; // each player's standings line
+    private static final int ROUND_COMPLETE_LINE_HEIGHT = 24;
+
     private static final Color SPIN_HINT_COLOR = new Color(255, 255, 255);
     private static final float SPIN_HINT_SIZE = 22f;
     private static final long SPIN_HINT_PULSE_PERIOD_MS = 1400; // gentle breathing alpha so a hint that has to persist (no fixed duration) doesn't just sit there static and easy to ignore
@@ -78,6 +87,7 @@ public class AnnouncementOverlay extends Overlay
 
     private static final float GOLDEN_GNOME_OFFER_TITLE_SIZE = 30f; // "You found a GOLDEN GNOME!"
     private static final float GOLDEN_GNOME_OFFER_SUBTITLE_SIZE = 20f; // "Would you like to buy one?"
+    private static final float GOLDEN_GNOME_OFFER_EMOTE_SIZE = 24f; // "'YES' emote: purchase" / "'NO' emote: decline"
     // Same breathing-alpha idea as the Spin hint -- this offer is also duration-less (it persists
     // until the local player's YES/NO emote resolves it), so it needs its own way to stay noticeable.
     private static final long GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS = 1400;
@@ -134,6 +144,7 @@ public class AnnouncementOverlay extends Overlay
         renderGoldenGnomeOffer(g);
         renderGoldenGnomeOutcome(g);
         renderMinigameBanner(g);
+        renderRoundCompleteBanner(g);
         renderDiceRoll(g);
 
         return null;
@@ -212,7 +223,9 @@ public class AnnouncementOverlay extends Overlay
     /** Draws the Golden Gnome offer -- "You found a GOLDEN GNOME!" (with "GOLDEN GNOME" in the
      * Mario Party Hudson font, same gold as "SHOWDOWN", stitched into the surrounding plain-white
      * text via drawLeftAlignedText the same way renderSpinHint stitches "SPIN"), "Would you like to
-     * buy one?" underneath, then the two emote instructions. Broadcast to everyone (like
+     * buy one?" underneath, then the two emote instructions -- "YES" and "NO" get the same
+     * Mario-Party-logo rainbow-letter treatment as "SPIN" (see drawLeftAlignedRainbowText and
+     * RAINBOW_LETTER_COLORS), stitched into the surrounding plain text the same way. Broadcast to everyone (like
      * renderMinigameBanner/renderGameStartBanner), not local-only, since it's a shared moment
      * everyone's watching even though only the finder's own YES/NO emote does anything (see
      * RunePartyPlugin#isLocalPlayerAwaitingGoldenGnomeResponse, which onAnimationChanged and this
@@ -256,9 +269,56 @@ public class AnnouncementOverlay extends Overlay
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE));
         drawCenteredText(g, "Would you like to buy one?", centerX, y + 32, Color.WHITE, alpha);
 
-        g.setFont(FontManager.getRunescapeSmallFont());
-        drawCenteredText(g, "'YES' emote: purchase", centerX, y + 58, Color.LIGHT_GRAY, alpha);
-        drawCenteredText(g, "'NO' emote: decline", centerX, y + 76, Color.LIGHT_GRAY, alpha);
+        Font emoteFont = FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
+        Font emoteWordFont = MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
+        drawEmoteInstruction(g, "YES", " emote: purchase", emoteFont, emoteWordFont, centerX, y + 66, alpha);
+        drawEmoteInstruction(g, "NO", " emote: decline", emoteFont, emoteWordFont, centerX, y + 96, alpha);
+    }
+
+    /** Draws one Golden Gnome emote instruction line -- {@code '<word>' emote: <suffix>} -- with
+     * the quoted emote name in the Mario Party rainbow font and the rest in plain bold, all
+     * centered as one line the same way renderGoldenGnomeOffer's own title stitches segments
+     * together (just centered instead of pre-positioned, since there's no fixed left edge here). */
+    private void drawEmoteInstruction(Graphics2D g, String word, String suffix, Font plainFont, Font wordFont, int centerX, int y, float alpha)
+    {
+        String prefix = "'";
+        String quoteSuffix = "'" + suffix;
+
+        g.setFont(plainFont);
+        int prefixWidth = g.getFontMetrics().stringWidth(prefix);
+        int suffixWidth = g.getFontMetrics().stringWidth(quoteSuffix);
+        g.setFont(wordFont);
+        int wordWidth = g.getFontMetrics().stringWidth(word);
+
+        int x = centerX - (prefixWidth + wordWidth + suffixWidth) / 2;
+
+        g.setFont(plainFont);
+        x = drawLeftAlignedText(g, prefix, x, y, Color.LIGHT_GRAY, alpha);
+        g.setFont(wordFont);
+        x = drawLeftAlignedRainbowText(g, word, RAINBOW_LETTER_COLORS, x, y, alpha);
+        g.setFont(plainFont);
+        drawLeftAlignedText(g, quoteSuffix, x, y, Color.LIGHT_GRAY, alpha);
+    }
+
+    /** Draws one renderRoundCompleteBanner standings row -- {@code <rank>  <name>   <stats>} -- as
+     * one centered line with the rank in light gray, the name in the player's own seat color, and
+     * the stats in light gray again, chained together the same segment-by-segment way
+     * drawEmoteInstruction stitches its own three-part line. */
+    private void drawStandingsLine(Graphics2D g, Font nameFont, Font statsFont, String rank, String name, Color nameColor, String stats, int centerX, int y, float alpha)
+    {
+        g.setFont(nameFont);
+        int rankWidth = g.getFontMetrics().stringWidth(rank);
+        int nameWidth = g.getFontMetrics().stringWidth(name);
+        g.setFont(statsFont);
+        int statsWidth = g.getFontMetrics().stringWidth(stats);
+
+        int x = centerX - (rankWidth + nameWidth + statsWidth) / 2;
+
+        g.setFont(nameFont);
+        x = drawLeftAlignedText(g, rank, x, y, Color.LIGHT_GRAY, alpha);
+        x = drawLeftAlignedText(g, name, x, y, nameColor, alpha);
+        g.setFont(statsFont);
+        drawLeftAlignedText(g, stats, x, y, Color.LIGHT_GRAY, alpha);
     }
 
     /** Draws the Golden Gnome offer's follow-up -- "You got a Golden Gnome!" on a purchase, or
@@ -308,6 +368,56 @@ public class AnnouncementOverlay extends Overlay
         {
             g.setFont(FontManager.getRunescapeSmallFont());
             drawCenteredText(g, instructions, centerX, y + 28, Color.LIGHT_GRAY, alpha);
+        }
+    }
+
+    /** Draws the post-round recap -- "ROUND x" in the same Mario-Party-logo rainbow treatment as
+     * "MINIGAME!"/"HERE WE GO!" (see drawCenteredRainbowText and RAINBOW_LETTER_COLORS), then
+     * "Current Standings" underneath, then every seated, joined PLAYER ranked highest-coins-first
+     * (Golden Gnomes as the tiebreak -- Mario Party's own standings order), each name in that
+     * player's own RunePartyColor same as StatsOverlay/PlayerOverlay color-code the same player.
+     * StatsOverlay's persistent HUD used to rank players this same way before it switched to
+     * always showing turn order (see StatsOverlay); this recap is now the one place a ranked view
+     * still exists. Triggered from RunePartyPlugin#triggerRoundCompleteBanner on MINIGAME_ENDED,
+     * which also extends turnEffectGateUntil so the new round's first TURN_STARTED banner waits
+     * behind this one instead of overlapping it. */
+    private void renderRoundCompleteBanner(Graphics2D g)
+    {
+        long remaining = plugin.getRoundCompleteBannerUntil() - System.currentTimeMillis();
+        if (remaining <= 0) return;
+
+        float alpha = remaining < ROUND_COMPLETE_FADE_MS ? remaining / (float) ROUND_COMPLETE_FADE_MS : 1f;
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 3;
+
+        g.setFont(MARIO_PARTY_FONT.deriveFont(ROUND_COMPLETE_TITLE_SIZE));
+        drawCenteredRainbowText(g, "ROUND " + plugin.getRoundCompleteRoundNumber(), RAINBOW_LETTER_COLORS, centerX, y, alpha);
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(ROUND_COMPLETE_SUBTITLE_SIZE));
+        drawCenteredText(g, "Current Standings", centerX, y + 34, Color.WHITE, alpha);
+
+        List<RosterReducer.RosterEntry> players = new ArrayList<>();
+        for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().snapshot())
+        {
+            if (entry.role == RunePartyRole.PLAYER && entry.joined) players.add(entry);
+        }
+        players.sort(Comparator
+            .comparingInt((RosterReducer.RosterEntry e) -> e.coins).reversed()
+            .thenComparing(Comparator.comparingInt((RosterReducer.RosterEntry e) -> e.goldenGnomeCount).reversed()));
+
+        Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
+        Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
+
+        int lineY = y + 66;
+        int rank = 1;
+        for (RosterReducer.RosterEntry entry : players)
+        {
+            RunePartyColor seatColor = RunePartyColor.forNumber(entry.number);
+            Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
+            String stats = "   " + entry.coins + " coins, " + entry.goldenGnomeCount + " GN";
+            drawStandingsLine(g, nameFont, statsFont, "#" + rank + "  ", entry.rsn, nameColor, stats, centerX, lineY, alpha);
+            lineY += ROUND_COMPLETE_LINE_HEIGHT;
+            rank++;
         }
     }
 
