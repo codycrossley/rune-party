@@ -8,6 +8,7 @@ import java.util.List;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import net.runelite.client.ui.*;
+import gay.runescape.runeparty.minigames.Minigames;
 
 /** Sidebar UI -- same CardLayout(Connect/In-Game) shape as GnomeballPanel in the sibling
  * gnomeball repo, content adapted to turn order/course-building instead of team assignment/field
@@ -36,11 +37,13 @@ public class RunePartyPanel extends PluginPanel
     private final JLabel statusLabel = new JLabel(" ");
     private final JButton showMapBtn = new JButton("Show Map");
 
-    // Mini-game
+    // Mini-game -- minigameControlSlot holds whichever Minigame's own control panel is active
+    // (see gay.runescape.runeparty.minigames.Minigames#get), rebuilt only when activeMinigameKey
+    // changes rather than on every refresh() -- see the Minigame#createControlPanel contract.
     private final JPanel minigamePanel = new JPanel();
     private final JLabel minigameInstructionsLabel = new JLabel(" ");
-    private final JSpinner minigameScoreSpinner = new JSpinner(new SpinnerNumberModel(0, 0, 999, 1));
-    private final JButton submitMinigameBtn = new JButton("Submit Result");
+    private final JPanel minigameControlSlot = new JPanel(new BorderLayout());
+    private String activeMinigameKey = null;
 
     // Roster/stats
     private final JPanel rosterTablePanel = new JPanel();
@@ -289,16 +292,11 @@ public class RunePartyPanel extends PluginPanel
         minigameInstructionsLabel.setForeground(Color.WHITE);
         minigameInstructionsLabel.setFont(FontManager.getRunescapeSmallFont());
 
-        JPanel submitRow = new JPanel(new BorderLayout(4, 0));
-        submitRow.setBackground(new Color(30, 30, 30));
-        minigameScoreSpinner.setMaximumSize(new Dimension(80, 24));
-        submitMinigameBtn.addActionListener(e -> plugin.submitMinigameResult((Integer) minigameScoreSpinner.getValue()));
-        submitRow.add(minigameScoreSpinner, BorderLayout.WEST);
-        submitRow.add(submitMinigameBtn, BorderLayout.CENTER);
+        minigameControlSlot.setOpaque(false);
 
         minigamePanel.add(minigameInstructionsLabel);
         minigamePanel.add(Box.createVerticalStrut(4));
-        minigamePanel.add(submitRow);
+        minigamePanel.add(minigameControlSlot);
     }
 
     /** Place mode is entered from here; rotation stays reachable only via the right-click "Rotate
@@ -379,10 +377,28 @@ public class RunePartyPanel extends PluginPanel
 
         showMapBtn.setVisible(phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE || phase == GamePhase.ENDED);
 
-        minigamePanel.setVisible(plugin.isMinigameActive());
-        if (plugin.isMinigameActive())
+        // Gated on isMinigamePlayable(), not isMinigameActive() -- while the selection
+        // spinner/instructions/ready-check sequence is still playing out in AnnouncementOverlay,
+        // this section stays hidden entirely (no panel presence at all), same as the Golden Gnome
+        // offer has none of its own either -- see RunePartyPlugin#isMinigamePlayable.
+        minigamePanel.setVisible(plugin.isMinigamePlayable());
+        if (plugin.isMinigamePlayable())
         {
             minigameInstructionsLabel.setText("<html>" + plugin.getMinigameInstructions() + "</html>");
+
+            String key = plugin.getMinigameKey();
+            if (!java.util.Objects.equals(key, activeMinigameKey))
+            {
+                activeMinigameKey = key;
+                minigameControlSlot.removeAll();
+                minigameControlSlot.add(Minigames.get(key).createControlPanel(plugin));
+                minigameControlSlot.revalidate();
+                minigameControlSlot.repaint();
+            }
+        }
+        else
+        {
+            activeMinigameKey = null; // next activation always rebuilds fresh, even for a repeat mini-game
         }
 
         hostControlsCard.setVisible(isHost && (phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE));

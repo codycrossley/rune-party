@@ -198,6 +198,21 @@ public class ApiClient
      * the winner and coin payout from all submitted results -- the payout amount is never
      * client-dictated -- but the underlying performance number is necessarily self-reported by
      * each client, the same trust boundary as every other client-observed claim in this model. */
+    /** Reports the local player's YES emote during the ready-check screen -- see the server's own
+     * minigame_ready, which inserts MINIGAME_COUNTDOWN_STARTED once every seated PLAYER's made
+     * this same call, same "report-then-server-decides" shape as confirmStart. */
+    public void confirmMinigameReady(String gameId, String playerRsn, String playerToken) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/minigame-ready", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Confirm mini-game ready failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     public void submitMinigameResult(String gameId, String playerRsn, String playerToken, int score) throws IOException
     {
         JsonObject body = new JsonObject();

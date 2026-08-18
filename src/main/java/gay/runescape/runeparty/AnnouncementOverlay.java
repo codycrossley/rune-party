@@ -7,11 +7,22 @@ import java.awt.Font;
 import java.awt.FontFormatException;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
+import java.awt.Polygon;
+import java.awt.RenderingHints;
+import java.awt.geom.Path2D;
+import java.awt.geom.Point2D;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
+import gay.runescape.runeparty.minigames.Minigame;
+import gay.runescape.runeparty.minigames.Minigames;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.client.ui.FontManager;
@@ -71,6 +82,31 @@ public class AnnouncementOverlay extends Overlay
     private static final long MINIGAME_FADE_MS = 500;
     private static final float MINIGAME_TITLE_SIZE = 58f;
 
+    // Mini-game selection spinner -- see renderMinigameSpinner. The wheel's segments reuse
+    // RAINBOW_LETTER_COLORS (same colors as "SPIN"/"MINIGAME!"), one per registered mini-game
+    // (see gay.runescape.runeparty.minigames.Minigames#all).
+    private static final long MINIGAME_SPINNER_FADE_MS = 400;
+    private static final int MINIGAME_SPINNER_MAX_SEGMENTS = 4; // see selectWheelEntries -- caps how many options the wheel ever shows, regardless of how many mini-games end up registered
+    private static final float MINIGAME_SPINNER_RADIUS = 90f;
+    private static final float MINIGAME_SPINNER_ICON_SIZE = 34f;
+    private static final int MINIGAME_SPINNER_EXTRA_SPINS = 3; // full rotations before settling, purely visual
+    private static final long MINIGAME_SPINNER_SETTLE_POP_MS = 220; // same overshoot-then-settle feel as the dice roll's DIE_SETTLE_POP_MS
+    private static final float MINIGAME_SPINNER_NAME_SIZE = 30f; // the mini-game's name, revealed once the wheel settles
+    private static final Color MINIGAME_SPINNER_POINTER_COLOR = new Color(255, 215, 0);
+
+    // Mini-game ready-check -- see renderMinigameReadyCheck. Duration-less like the Spin hint/
+    // Golden Gnome offer (it persists until every seated PLAYER's YES-emoted), so it gets the same
+    // breathing-alpha treatment to stay noticeable without a fade to draw the eye.
+    private static final long MINIGAME_READY_CHECK_PULSE_PERIOD_MS = 1400;
+    private static final float MINIGAME_READY_CHECK_MIN_ALPHA = 0.6f;
+
+    // Mini-game countdown ("3... 2... 1... BEGIN!") -- see renderMinigameCountdown. The numbers
+    // are a plain solid color (yellow, matching RAINBOW_YELLOW's tone) rather than rainbow -- only
+    // the final "BEGIN!" gets the rainbow logo treatment, as its own little payoff moment.
+    private static final float MINIGAME_COUNTDOWN_SIZE = 90f;
+    private static final long MINIGAME_COUNTDOWN_POP_MS = 260; // brief scale-in pop at the start of each tick, same idea as the dice roll's settle pop
+    private static final Color MINIGAME_COUNTDOWN_NUMBER_COLOR = RAINBOW_YELLOW;
+
     private static final long GAME_START_FADE_MS = 600;
     private static final float GAME_START_TITLE_SIZE = 58f;
 
@@ -79,6 +115,13 @@ public class AnnouncementOverlay extends Overlay
     private static final float ROUND_COMPLETE_SUBTITLE_SIZE = 20f; // "Current Standings"
     private static final float ROUND_COMPLETE_LINE_SIZE = 18f; // each player's standings line
     private static final int ROUND_COMPLETE_LINE_HEIGHT = 24;
+
+    private static final long MINIGAME_REWARDS_FADE_MS = 500;
+    private static final float MINIGAME_REWARDS_TITLE_SIZE = 46f; // "REWARDS"
+    private static final float MINIGAME_REWARDS_LINE_SIZE = 18f; // each player's reward line
+    private static final int MINIGAME_REWARDS_LINE_HEIGHT = 24;
+    private static final Color MINIGAME_REWARDS_COLOR = new Color(80, 220, 120); // "+N coins"
+    private static final Color MINIGAME_REWARDS_NONE_COLOR = Color.GRAY; // "no reward"
 
     private static final Color SPIN_HINT_COLOR = new Color(255, 255, 255);
     private static final float SPIN_HINT_SIZE = 22f;
@@ -144,6 +187,10 @@ public class AnnouncementOverlay extends Overlay
         renderGoldenGnomeOffer(g);
         renderGoldenGnomeOutcome(g);
         renderMinigameBanner(g);
+        renderMinigameSpinner(g);
+        renderMinigameReadyCheck(g);
+        renderMinigameCountdown(g);
+        renderMinigameRewardsBanner(g);
         renderRoundCompleteBanner(g);
         renderDiceRoll(g);
 
@@ -304,7 +351,7 @@ public class AnnouncementOverlay extends Overlay
      * one centered line with the rank in light gray, the name in the player's own seat color, and
      * the stats in light gray again, chained together the same segment-by-segment way
      * drawEmoteInstruction stitches its own three-part line. */
-    private void drawStandingsLine(Graphics2D g, Font nameFont, Font statsFont, String rank, String name, Color nameColor, String stats, int centerX, int y, float alpha)
+    private void drawStandingsLine(Graphics2D g, Font nameFont, Font statsFont, String rank, String name, Color nameColor, String stats, Color statsColor, int centerX, int y, float alpha)
     {
         g.setFont(nameFont);
         int rankWidth = g.getFontMetrics().stringWidth(rank);
@@ -318,7 +365,7 @@ public class AnnouncementOverlay extends Overlay
         x = drawLeftAlignedText(g, rank, x, y, Color.LIGHT_GRAY, alpha);
         x = drawLeftAlignedText(g, name, x, y, nameColor, alpha);
         g.setFont(statsFont);
-        drawLeftAlignedText(g, stats, x, y, Color.LIGHT_GRAY, alpha);
+        drawLeftAlignedText(g, stats, x, y, statsColor, alpha);
     }
 
     /** Draws the Golden Gnome offer's follow-up -- "You got a Golden Gnome!" on a purchase, or
@@ -346,11 +393,14 @@ public class AnnouncementOverlay extends Overlay
 
     /** Draws the "MINIGAME!" banner on a MINIGAME_STARTED event -- server-driven, so every client
      * shows it at the same moment, same Mario-Party-logo rainbow-letter treatment as "RUNE PARTY"
-     * (see drawCenteredRainbowText and RAINBOW_LETTER_COLORS), plus the mini-game's own
-     * instructions underneath if the server sent any. This is also the fix for TileOverlay's target
-     * arrow otherwise reappearing on the last roller of a round if they step off their landed tile
-     * during the mini-game -- see TileOverlay#renderTargetArrow, which now suppresses itself
-     * whenever isMinigameActive() is true instead of only reacting to this banner's presence. */
+     * (see drawCenteredRainbowText and RAINBOW_LETTER_COLORS). A pure title card now -- the
+     * mini-game's own instructions used to show underneath here, but that's the selection
+     * spinner/ready-check screen's job instead (see renderMinigameSpinner/
+     * renderMinigameReadyCheck, both chained to appear right after this banner), so showing them
+     * twice would be redundant. This is also the fix for TileOverlay's target arrow otherwise
+     * reappearing on the last roller of a round if they step off their landed tile during the
+     * mini-game -- see TileOverlay#renderTargetArrow, which now suppresses itself whenever
+     * isMinigameActive() is true instead of only reacting to this banner's presence. */
     private void renderMinigameBanner(Graphics2D g)
     {
         long remaining = plugin.getMinigameBannerUntil() - System.currentTimeMillis();
@@ -362,25 +412,340 @@ public class AnnouncementOverlay extends Overlay
 
         g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
         drawCenteredRainbowText(g, "MINIGAME!", RAINBOW_LETTER_COLORS, centerX, y, alpha);
+    }
+
+    /** Draws the mini-game selection spinner -- a rainbow prize wheel (RAINBOW_LETTER_COLORS,
+     * same colors as "SPIN"/"MINIGAME!"), one segment per gay.runescape.runeparty.minigames.
+     * Minigames#all entry, each showing that mini-game's own drawIcon. The mini-game itself was
+     * already picked server-side (see MINIGAME_STARTED's "key"/RunePartyPlugin#getMinigameKey) --
+     * this never gambles on the outcome, it only spins for MINIGAME_SPINNER_SPIN_PHASE_MS (eased
+     * to a stop, same overshoot-then-settle feel as the dice roll's die) and always lands exactly
+     * on the segment matching that key, then holds for MINIGAME_SPINNER_HOLD_MS with the mini-game's
+     * getDisplayName() revealed underneath -- the "landing announces the name" moment. Triggered
+     * from RunePartyPlugin#scheduleMinigameSpinner, chained behind the "MINIGAME!" banner. With
+     * only one mini-game registered the wheel is a single segment that always wins -- it'll read as
+     * a real spinner once more mini-games exist. */
+    private void renderMinigameSpinner(Graphics2D g)
+    {
+        long until = plugin.getMinigameSpinnerUntil();
+        if (until == 0) return;
+        long now = System.currentTimeMillis();
+        long remaining = until - now;
+        if (remaining <= 0) return;
+
+        List<Minigame> all = Minigames.all();
+        if (all.isEmpty()) return;
+
+        Minigame selected = Minigames.get(plugin.getMinigameKey());
+        List<Minigame> wheelEntries = selectWheelEntries(all, selected);
+        int targetIndex = Math.max(0, wheelEntries.indexOf(selected));
+        int n = wheelEntries.size();
+        float segmentDeg = 360f / n;
+        float targetCenterAngle = targetIndex * segmentDeg + segmentDeg / 2f;
+
+        long elapsed = now - plugin.getMinigameSpinnerStart();
+        boolean spinning = elapsed < RunePartyPlugin.MINIGAME_SPINNER_SPIN_PHASE_MS;
+        float totalRotationDeg = (360f - targetCenterAngle) + MINIGAME_SPINNER_EXTRA_SPINS * 360f;
+
+        float rotationDeg;
+        float scale = 1f;
+        if (spinning)
+        {
+            float t = elapsed / (float) RunePartyPlugin.MINIGAME_SPINNER_SPIN_PHASE_MS;
+            float eased = 1f - (float) Math.pow(1f - t, 3); // ease-out cubic, slows into the landing
+            rotationDeg = eased * totalRotationDeg;
+        }
+        else
+        {
+            rotationDeg = totalRotationDeg;
+            long sinceSettle = elapsed - RunePartyPlugin.MINIGAME_SPINNER_SPIN_PHASE_MS;
+            if (sinceSettle < MINIGAME_SPINNER_SETTLE_POP_MS)
+            {
+                float t = sinceSettle / (float) MINIGAME_SPINNER_SETTLE_POP_MS;
+                scale = 1.25f - 0.25f * t;
+            }
+        }
+
+        float alpha = remaining < MINIGAME_SPINNER_FADE_MS ? remaining / (float) MINIGAME_SPINNER_FADE_MS : 1f;
+
+        int cx = client.getCanvasWidth() / 2;
+        int cy = client.getCanvasHeight() / 2;
+        float radius = MINIGAME_SPINNER_RADIUS * scale;
+
+        Graphics2D wheel = (Graphics2D) g.create();
+        wheel.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        wheel.rotate(Math.toRadians(rotationDeg), cx, cy);
+
+        for (int i = 0; i < n; i++)
+        {
+            Color base = RAINBOW_LETTER_COLORS[i % RAINBOW_LETTER_COLORS.length];
+            drawWheelWedge(wheel, cx, cy, radius, i * segmentDeg, (i + 1) * segmentDeg, withAlpha(base, alpha * 0.85f));
+        }
+        wheel.setStroke(new BasicStroke(2f));
+        wheel.setColor(withAlpha(Color.WHITE, alpha));
+        wheel.drawOval(Math.round(cx - radius), Math.round(cy - radius), Math.round(radius * 2), Math.round(radius * 2));
+        for (int i = 0; i < n; i++)
+        {
+            float center = i * segmentDeg + segmentDeg / 2f;
+            Point2D.Float p = pointOnCircle(cx, cy, radius * 0.62f, center);
+            wheelEntries.get(i).drawIcon(wheel, Math.round(p.x), Math.round(p.y), Math.round(MINIGAME_SPINNER_ICON_SIZE), alpha);
+        }
+        wheel.dispose();
+
+        // Fixed pointer above the wheel -- doesn't rotate, the wheel spins under it.
+        int pointerTip = Math.round(cy - radius - 6);
+        Polygon pointer = new Polygon();
+        pointer.addPoint(cx - 10, pointerTip - 16);
+        pointer.addPoint(cx + 10, pointerTip - 16);
+        pointer.addPoint(cx, pointerTip);
+        g.setColor(withAlpha(MINIGAME_SPINNER_POINTER_COLOR, alpha));
+        g.fillPolygon(pointer);
+
+        if (!spinning && selected != null)
+        {
+            g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_SPINNER_NAME_SIZE));
+            drawCenteredRainbowText(g, selected.getDisplayName(), RAINBOW_LETTER_COLORS, cx, Math.round(cy + MINIGAME_SPINNER_RADIUS + 50), alpha);
+        }
+    }
+
+    /** Picks which mini-games actually appear on the wheel -- every one if there are
+     * MINIGAME_SPINNER_MAX_SEGMENTS or fewer registered, otherwise {@code selected} (it has to be
+     * showable, since the wheel always lands on it) plus a sample of the rest, so the wheel never
+     * grows unboundedly as more mini-games get added to the registry. Seeded off
+     * minigameSpinnerStart -- constant for this spin's whole animation -- rather than
+     * System.currentTimeMillis(), so the same sample holds steady across every frame instead of
+     * reshuffling on each one. */
+    private List<Minigame> selectWheelEntries(List<Minigame> all, Minigame selected)
+    {
+        if (all.size() <= MINIGAME_SPINNER_MAX_SEGMENTS) return all;
+
+        List<Minigame> others = new ArrayList<>(all);
+        others.remove(selected);
+        Collections.shuffle(others, new Random(plugin.getMinigameSpinnerStart()));
+
+        List<Minigame> entries = new ArrayList<>();
+        entries.add(selected);
+        entries.addAll(others.subList(0, MINIGAME_SPINNER_MAX_SEGMENTS - 1));
+        return entries;
+    }
+
+    /** Fills one wedge of the selection spinner's wheel -- a triangle fan from the center out to
+     * the circle, approximated with short line segments between {@code startAngleDeg} and
+     * {@code endAngleDeg} (clockwise from straight up, see pointOnCircle) rather than an Arc2D, so
+     * the angle convention here matches pointOnCircle's exactly instead of juggling two different
+     * ones. */
+    private void drawWheelWedge(Graphics2D g, int cx, int cy, float radius, float startAngleDeg, float endAngleDeg, Color fill)
+    {
+        Path2D.Float path = new Path2D.Float();
+        path.moveTo(cx, cy);
+        int steps = Math.max(2, Math.round((endAngleDeg - startAngleDeg) / 6f));
+        for (int i = 0; i <= steps; i++)
+        {
+            float a = startAngleDeg + (endAngleDeg - startAngleDeg) * i / steps;
+            Point2D.Float p = pointOnCircle(cx, cy, radius, a);
+            path.lineTo(p.x, p.y);
+        }
+        path.closePath();
+        g.setColor(fill);
+        g.fill(path);
+    }
+
+    /** A point on a circle of {@code radius} centered at (cx, cy), at {@code angleDeg} measured
+     * clockwise from straight up (0 = top, 90 = right, 180 = bottom, 270 = left) -- the "clock
+     * face" convention, chosen over Arc2D's mathematical (counterclockwise-from-3-o'clock) one
+     * specifically so every angle used by the spinner wheel means the same thing everywhere it's
+     * used. */
+    private static Point2D.Float pointOnCircle(int cx, int cy, float radius, float angleDeg)
+    {
+        double rad = Math.toRadians(angleDeg);
+        return new Point2D.Float((float) (cx + radius * Math.sin(rad)), (float) (cy - radius * Math.cos(rad)));
+    }
+
+    /** Draws the mini-game ready-check screen -- the mini-game's name and instructions (moved
+     * here from renderMinigameBanner's old sub-line), "Use the 'YES' emote when you're ready!" in
+     * the same rainbow-word treatment renderGoldenGnomeOffer uses for its own YES/NO instructions
+     * (see drawEmoteInstruction), then every seated, joined PLAYER in turn order (same order
+     * StatsOverlay uses) with a Ready/Waiting status pulled from RunePartyPlugin#
+     * getMinigameReadyRsns. Not timer-gated, like renderGoldenGnomeOffer -- it's a live read of
+     * plugin state, kept visible for MINIGAME_COUNTDOWN_START_DELAY_MS after the last player's
+     * ready lands (see the countdownRevealed check below) specifically so everyone gets a beat to
+     * actually see every player marked "Ready!" before the screen changes, rather than it flipping
+     * to the countdown the instant the last YES emote resolves.
+     * <p>
+     * Both gates here follow the same shape: real state (isMinigameCountdownStarted/
+     * isMinigameSpinnerSkippedForClient) always applies, but the cosmetic timestamp that actually
+     * reveals the *next* screen (getMinigameCountdownBannerUntil/getMinigameSpinnerUntil) only gets
+     * armed for a client watching things happen live -- checking "now &lt; until" directly would be
+     * wrong in both cases, since until legitimately sits at 0 both before that timestamp is armed
+     * *and* forever for a client that caught up after the fact, and those two need opposite
+     * behavior (keep waiting vs. skip straight through). isMinigameCountdownSkippedForClient()/
+     * isMinigameSpinnerSkippedForClient() are what tell them apart. */
+    private void renderMinigameReadyCheck(Graphics2D g)
+    {
+        if (!plugin.isMinigameActive()) return;
+
+        boolean countdownRevealed = plugin.isMinigameCountdownStarted()
+            && (plugin.isMinigameCountdownSkippedForClient() || plugin.getMinigameCountdownBannerUntil() != 0);
+        if (countdownRevealed) return;
+
+        long now = System.currentTimeMillis();
+        long spinnerUntil = plugin.getMinigameSpinnerUntil();
+        boolean spinnerDone = plugin.isMinigameSpinnerSkippedForClient() || (spinnerUntil != 0 && now >= spinnerUntil);
+        if (!spinnerDone) return;
+
+        long phaseMs = now % MINIGAME_READY_CHECK_PULSE_PERIOD_MS;
+        float pulse = (float) (0.5 + 0.5 * Math.sin(2 * Math.PI * phaseMs / MINIGAME_READY_CHECK_PULSE_PERIOD_MS));
+        float alpha = MINIGAME_READY_CHECK_MIN_ALPHA + (1f - MINIGAME_READY_CHECK_MIN_ALPHA) * pulse;
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 3;
+
+        String displayName = plugin.getMinigameDisplayName();
+        if (displayName != null)
+        {
+            g.setFont(MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_TITLE_SIZE));
+            drawCenteredText(g, displayName, centerX, y, WELCOME_TITLE_COLOR, alpha);
+        }
 
         String instructions = plugin.getMinigameInstructions();
         if (instructions != null)
         {
-            g.setFont(FontManager.getRunescapeSmallFont());
-            drawCenteredText(g, instructions, centerX, y + 28, Color.LIGHT_GRAY, alpha);
+            g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE));
+            drawCenteredText(g, instructions, centerX, y + 30, Color.WHITE, alpha);
+        }
+
+        Font emoteFont = FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
+        Font emoteWordFont = MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
+        drawEmoteInstruction(g, "YES", " emote when you're ready!", emoteFont, emoteWordFont, centerX, y + 66, alpha);
+
+        Set<String> ready = plugin.getMinigameReadyRsns();
+        List<RosterReducer.RosterEntry> players = new ArrayList<>();
+        for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().snapshot())
+        {
+            if (entry.role == RunePartyRole.PLAYER && entry.joined) players.add(entry);
+        }
+        players.sort(Comparator.comparing((RosterReducer.RosterEntry e) -> e.number));
+
+        Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
+        Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
+        int lineY = y + 100;
+        for (RosterReducer.RosterEntry entry : players)
+        {
+            RunePartyColor seatColor = RunePartyColor.forNumber(entry.number);
+            Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
+            boolean isReady = ready.contains(entry.rsn.toLowerCase());
+            String status = isReady ? "   Ready!" : "   Waiting...";
+            Color statusColor = isReady ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR;
+            drawStandingsLine(g, nameFont, statsFont, "", entry.rsn, nameColor, status, statusColor, centerX, lineY, alpha);
+            lineY += ROUND_COMPLETE_LINE_HEIGHT;
         }
     }
 
-    /** Draws the post-round recap -- "ROUND x" in the same Mario-Party-logo rainbow treatment as
-     * "MINIGAME!"/"HERE WE GO!" (see drawCenteredRainbowText and RAINBOW_LETTER_COLORS), then
-     * "Current Standings" underneath, then every seated, joined PLAYER ranked highest-coins-first
-     * (Golden Gnomes as the tiebreak -- Mario Party's own standings order), each name in that
-     * player's own RunePartyColor same as StatsOverlay/PlayerOverlay color-code the same player.
-     * StatsOverlay's persistent HUD used to rank players this same way before it switched to
-     * always showing turn order (see StatsOverlay); this recap is now the one place a ranked view
-     * still exists. Triggered from RunePartyPlugin#triggerRoundCompleteBanner on MINIGAME_ENDED,
-     * which also extends turnEffectGateUntil so the new round's first TURN_STARTED banner waits
-     * behind this one instead of overlapping it. */
+    /** Draws the "3... 2... 1... BEGIN!" countdown once every seated PLAYER's YES-emoted ready and
+     * the ready-check screen's own MINIGAME_COUNTDOWN_START_DELAY_MS pause has elapsed (see
+     * MINIGAME_COUNTDOWN_STARTED/RunePartyPlugin#getMinigameCountdownBannerUntil) -- one tick at a
+     * time, derived from elapsed time the same "shown = f(elapsed)" way renderDiceRoll cycles its
+     * die face, with a brief scale-in pop each time the tick changes. The numbers are a plain
+     * yellow (MINIGAME_COUNTDOWN_NUMBER_COLOR); the final "BEGIN!" switches to the same
+     * Mario-Party-logo rainbow treatment as "MINIGAME!"/"HERE WE GO!" as its own little payoff.
+     * Only a client watching this happen live ever sees it -- see isMinigamePlayable's catch-up
+     * split, the reason a reconnecting client skips straight to playable instead of waiting here. */
+    private void renderMinigameCountdown(Graphics2D g)
+    {
+        long until = plugin.getMinigameCountdownBannerUntil();
+        if (until == 0) return;
+        long remaining = until - System.currentTimeMillis();
+        if (remaining <= 0) return;
+
+        long elapsed = RunePartyPlugin.MINIGAME_COUNTDOWN_DURATION_MS - remaining;
+        int tick = (int) (elapsed / 1000); // 0, 1, 2 -> 3, 2, 1 ; 3 -> BEGIN!
+        int number = 3 - tick;
+
+        long withinTick = elapsed % 1000;
+        float scale = withinTick < MINIGAME_COUNTDOWN_POP_MS
+            ? 1.4f - 0.4f * (withinTick / (float) MINIGAME_COUNTDOWN_POP_MS)
+            : 1f;
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 2;
+
+        g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_COUNTDOWN_SIZE * scale));
+        if (number >= 1)
+        {
+            drawCenteredText(g, String.valueOf(number), centerX, y, MINIGAME_COUNTDOWN_NUMBER_COLOR, 1f);
+        }
+        else
+        {
+            drawCenteredRainbowText(g, "BEGIN!", RAINBOW_LETTER_COLORS, centerX, y, 1f);
+        }
+    }
+
+    /** Draws the mini-game rewards recap -- "REWARDS" in the same Mario-Party-logo rainbow
+     * treatment as "ROUND x"/"MINIGAME!", then every seated, joined PLAYER with the coins they
+     * received from the mini-game that just ended, highest reward first ("no reward" in gray for
+     * anyone not in that list) -- see RunePartyPlugin#triggerMinigameRewardsBanner, which parses
+     * MINIGAME_ENDED's own "payouts" list once at trigger time. Who's in that list and for how
+     * much is entirely up to whichever Minigame just ran (see app.py/minigames -- each one defines
+     * its own resolve_rewards()), this banner just displays whatever it decided. Shown *before*
+     * renderRoundCompleteBanner -- see RunePartyPlugin#scheduleRoundCompleteBanner, which defers
+     * that one behind this banner's own turnEffectGateUntil extension instead of both appearing at
+     * once. */
+    private void renderMinigameRewardsBanner(Graphics2D g)
+    {
+        long remaining = plugin.getMinigameRewardsBannerUntil() - System.currentTimeMillis();
+        if (remaining <= 0) return;
+
+        float alpha = remaining < MINIGAME_REWARDS_FADE_MS ? remaining / (float) MINIGAME_REWARDS_FADE_MS : 1f;
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 3;
+
+        g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_REWARDS_TITLE_SIZE));
+        drawCenteredRainbowText(g, "REWARDS", RAINBOW_LETTER_COLORS, centerX, y, alpha);
+
+        Map<String, Integer> rewardByRsn = new HashMap<>();
+        for (RunePartyPlugin.MinigameReward reward : plugin.getMinigameRewards())
+        {
+            rewardByRsn.put(reward.rsn.toLowerCase(), reward.coins);
+        }
+
+        List<RosterReducer.RosterEntry> players = new ArrayList<>();
+        for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().snapshot())
+        {
+            if (entry.role == RunePartyRole.PLAYER && entry.joined) players.add(entry);
+        }
+        players.sort(Comparator
+            .comparingInt((RosterReducer.RosterEntry e) -> rewardByRsn.getOrDefault(e.rsn.toLowerCase(), 0))
+            .reversed()
+            .thenComparing(e -> e.number));
+
+        Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(MINIGAME_REWARDS_LINE_SIZE);
+        Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(MINIGAME_REWARDS_LINE_SIZE);
+
+        int lineY = y + 40;
+        for (RosterReducer.RosterEntry entry : players)
+        {
+            RunePartyColor seatColor = RunePartyColor.forNumber(entry.number);
+            Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
+            Integer coins = rewardByRsn.get(entry.rsn.toLowerCase());
+            String stats = coins != null ? "   +" + coins + " coins" : "   no reward";
+            Color statsColor = coins != null ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR;
+            drawStandingsLine(g, nameFont, statsFont, "", entry.rsn, nameColor, stats, statsColor, centerX, lineY, alpha);
+            lineY += MINIGAME_REWARDS_LINE_HEIGHT;
+        }
+    }
+
+    /** Draws the post-round recap -- "ROUND x" (the *upcoming* round about to start, not the one
+     * that just finished -- see RunePartyPlugin#scheduleRoundCompleteBanner) in the same
+     * Mario-Party-logo rainbow treatment as "MINIGAME!"/"HERE WE GO!" (see drawCenteredRainbowText
+     * and RAINBOW_LETTER_COLORS), then "Current Standings" underneath, then every seated, joined
+     * PLAYER ranked highest-coins-first (Golden Gnomes as the tiebreak -- Mario Party's own
+     * standings order), each name in that player's own RunePartyColor same as
+     * StatsOverlay/PlayerOverlay color-code the same player. StatsOverlay's persistent HUD used to
+     * rank players this same way before it switched to always showing turn order (see
+     * StatsOverlay); this recap is now the one place a ranked view still exists. Triggered from
+     * RunePartyPlugin#scheduleRoundCompleteBanner on MINIGAME_ENDED, which also extends
+     * turnEffectGateUntil so the new round's first TURN_STARTED banner waits behind this one
+     * instead of overlapping it. */
     private void renderRoundCompleteBanner(Graphics2D g)
     {
         long remaining = plugin.getRoundCompleteBannerUntil() - System.currentTimeMillis();
@@ -415,7 +780,7 @@ public class AnnouncementOverlay extends Overlay
             RunePartyColor seatColor = RunePartyColor.forNumber(entry.number);
             Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
             String stats = "   " + entry.coins + " coins, " + entry.goldenGnomeCount + " GN";
-            drawStandingsLine(g, nameFont, statsFont, "#" + rank + "  ", entry.rsn, nameColor, stats, centerX, lineY, alpha);
+            drawStandingsLine(g, nameFont, statsFont, "#" + rank + "  ", entry.rsn, nameColor, stats, Color.LIGHT_GRAY, centerX, lineY, alpha);
             lineY += ROUND_COMPLETE_LINE_HEIGHT;
             rank++;
         }
