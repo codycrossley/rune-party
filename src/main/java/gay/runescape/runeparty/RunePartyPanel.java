@@ -5,9 +5,13 @@ import java.awt.datatransfer.StringSelection;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import net.runelite.client.ui.*;
+import gay.runescape.runeparty.items.Item;
+import gay.runescape.runeparty.items.Items;
 import gay.runescape.runeparty.minigames.Minigames;
 
 /** Sidebar UI -- same CardLayout(Connect/In-Game) shape as GnomeballPanel in the sibling
@@ -44,6 +48,13 @@ public class RunePartyPanel extends PluginPanel
     private final JLabel minigameInstructionsLabel = new JLabel(" ");
     private final JPanel minigameControlSlot = new JPanel(new BorderLayout());
     private String activeMinigameKey = null;
+
+    // Item use -- one button per distinct held item, visible only on the local player's own turn
+    // (see RunePartyPlugin#isLocalPlayerReadyToRoll), rebuilt only when the held items actually
+    // change rather than on every refresh() -- same "rebuild only when the key changes" shape as
+    // minigameControlSlot above.
+    private final JPanel itemUsePanel = new JPanel();
+    private String lastItemsKey = null;
 
     // Roster/stats
     private final JPanel rosterTablePanel = new JPanel();
@@ -196,6 +207,9 @@ public class RunePartyPanel extends PluginPanel
         buildMinigamePanel();
         minigamePanel.setAlignmentX(LEFT_ALIGNMENT);
 
+        buildItemUsePanel();
+        itemUsePanel.setAlignmentX(LEFT_ALIGNMENT);
+
         rosterTablePanel.setLayout(new BoxLayout(rosterTablePanel, BoxLayout.Y_AXIS));
         rosterTablePanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
         rosterTablePanel.setAlignmentX(LEFT_ALIGNMENT);
@@ -225,6 +239,8 @@ public class RunePartyPanel extends PluginPanel
         card.add(showMapBtn);
         card.add(Box.createVerticalStrut(8));
         card.add(minigamePanel);
+        card.add(Box.createVerticalStrut(8));
+        card.add(itemUsePanel);
         card.add(Box.createVerticalStrut(8));
         card.add(sectionLabel("Players"));
         card.add(rosterTablePanel);
@@ -297,6 +313,13 @@ public class RunePartyPanel extends PluginPanel
         minigamePanel.add(minigameInstructionsLabel);
         minigamePanel.add(Box.createVerticalStrut(4));
         minigamePanel.add(minigameControlSlot);
+    }
+
+    private void buildItemUsePanel()
+    {
+        itemUsePanel.setLayout(new BoxLayout(itemUsePanel, BoxLayout.Y_AXIS));
+        itemUsePanel.setBackground(new Color(30, 30, 30));
+        itemUsePanel.setBorder(new EmptyBorder(6, 6, 6, 6));
     }
 
     /** Place mode is entered from here; rotation stays reachable only via the right-click "Rotate
@@ -407,7 +430,68 @@ public class RunePartyPanel extends PluginPanel
         startGameBtn.setVisible(isHost && phase == GamePhase.LOBBY);
         endGameBtn.setVisible(isHost && phase == GamePhase.ACTIVE);
 
-        refreshRoster(plugin.getRosterReducer().snapshot());
+        List<RosterReducer.RosterEntry> entries = plugin.getRosterReducer().snapshot();
+        refreshItemUse(entries);
+        refreshRoster(entries);
+    }
+
+    /** Shows one "Use &lt;item&gt; (x&lt;count&gt;)" button per distinct item the local player
+     * holds, gated on isLocalPlayerReadyToRoll() -- the same "genuinely your turn to act" check
+     * the SPIN hint uses, and the same window the server's own use-item endpoint enforces -- so
+     * this section is entirely absent outside that window, once they hold nothing, or once
+     * isItemUsedThisTurn() is true (one item per turn, regardless of how many they still hold --
+     * see the server's own itemUsedThisTurn), matching how the mini-game section has no panel
+     * presence at all while its own sequence is still playing out. Rebuilt only when the held
+     * items actually change (see lastItemsKey), not on every refresh() call. */
+    private void refreshItemUse(List<RosterReducer.RosterEntry> entries)
+    {
+        RosterReducer.RosterEntry localEntry = null;
+        String localRsn = plugin.getLocalRsn();
+        if (localRsn != null)
+        {
+            for (RosterReducer.RosterEntry entry : entries)
+            {
+                if (entry.rsn.equalsIgnoreCase(localRsn)) { localEntry = entry; break; }
+            }
+        }
+
+        boolean showItems = plugin.isLocalPlayerReadyToRoll() && !plugin.isItemUsedThisTurn()
+            && localEntry != null && !localEntry.items.isEmpty();
+        itemUsePanel.setVisible(showItems);
+        if (!showItems)
+        {
+            lastItemsKey = null; // next activation always rebuilds fresh
+            return;
+        }
+
+        String key = buildItemsKey(localEntry.items);
+        if (key.equals(lastItemsKey)) return;
+        lastItemsKey = key;
+
+        itemUsePanel.removeAll();
+        for (Map.Entry<String, Integer> held : new TreeMap<>(localEntry.items).entrySet())
+        {
+            String itemKey = held.getKey();
+            Item item = Items.get(itemKey);
+            JButton useBtn = new JButton("Use " + item.getDisplayName() + " (x" + held.getValue() + ")");
+            useBtn.setAlignmentX(LEFT_ALIGNMENT);
+            useBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+            useBtn.addActionListener(e -> plugin.useItem(itemKey));
+            itemUsePanel.add(useBtn);
+            itemUsePanel.add(Box.createVerticalStrut(4));
+        }
+        itemUsePanel.revalidate();
+        itemUsePanel.repaint();
+    }
+
+    private static String buildItemsKey(Map<String, Integer> items)
+    {
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, Integer> e : new TreeMap<>(items).entrySet())
+        {
+            sb.append(e.getKey()).append(':').append(e.getValue()).append(';');
+        }
+        return sb.toString();
     }
 
     private String statusText(GamePhase phase)
@@ -437,7 +521,7 @@ public class RunePartyPanel extends PluginPanel
 
         rosterTablePanel.removeAll();
 
-        JPanel header = new JPanel(new GridLayout(1, 4));
+        JPanel header = new JPanel(new GridLayout(1, 5));
         header.setBackground(new Color(30, 30, 30));
         header.setBorder(new EmptyBorder(3, 6, 3, 6));
         header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
@@ -445,12 +529,13 @@ public class RunePartyPanel extends PluginPanel
         header.add(smallLabel("Player"));
         header.add(smallLabel("Coins"));
         header.add(smallLabel("Golden Gnomes"));
+        header.add(smallLabel("Items"));
         rosterTablePanel.add(header);
 
         for (int i = 0; i < entries.size(); i++)
         {
             RosterReducer.RosterEntry entry = entries.get(i);
-            JPanel row = new JPanel(new GridLayout(1, 4));
+            JPanel row = new JPanel(new GridLayout(1, 5));
             row.setBackground(i % 2 == 0 ? ROW_EVEN : ROW_ODD);
             row.setBorder(new EmptyBorder(3, 6, 3, 6));
             row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
@@ -465,6 +550,8 @@ public class RunePartyPanel extends PluginPanel
             row.add(nameLabel);
             row.add(smallLabel(String.valueOf(entry.coins)));
             row.add(smallLabel(String.valueOf(entry.goldenGnomeCount)));
+            int itemCount = entry.items.values().stream().mapToInt(Integer::intValue).sum();
+            row.add(smallLabel(String.valueOf(itemCount)));
 
             if (plugin.isHost() && entry.role == RunePartyRole.SPECTATOR && !plugin.isGameFull())
             {
@@ -521,7 +608,8 @@ public class RunePartyPanel extends PluginPanel
         {
             sb.append(e.rsn).append(':').append(e.role).append(':').append(e.number).append(':')
                 .append(e.online).append(':').append(e.joined).append(':')
-                .append(e.coins).append(':').append(e.goldenGnomeCount).append(';');
+                .append(e.coins).append(':').append(e.goldenGnomeCount).append(':')
+                .append(buildItemsKey(e.items)).append(';');
         }
         return sb.toString();
     }

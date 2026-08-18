@@ -286,6 +286,7 @@ public class RunePartyMapDialog extends JDialog
         if ("PENALTY_TILE".equals(tileType)) return new Color(220, 50, 50);
         if ("START".equals(tileType)) return new Color(60, 179, 74);
         if ("EVENT_TILE".equals(tileType)) return new Color(170, 80, 220);
+        if ("ITEM_TILE".equals(tileType)) return new Color(255, 140, 0);
         if ("GOLDEN_GNOME_TILE".equals(tileType)) return GOLDEN_GNOME_MARKER;
         return new Color(255, 255, 0);
     }

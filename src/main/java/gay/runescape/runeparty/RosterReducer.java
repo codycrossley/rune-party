@@ -16,6 +16,7 @@ public class RosterReducer
     private final ConcurrentHashMap<String, String> numberByPlayer = new ConcurrentHashMap<>(); // turn-order position ("1", "2", ...)
     private final ConcurrentHashMap<String, Integer> coinsByPlayer = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Integer> goldenGnomeCountByPlayer = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Map<String, Integer>> itemsByPlayer = new ConcurrentHashMap<>(); // itemKey -> count held
 
     public static final class RosterEntry
     {
@@ -26,8 +27,9 @@ public class RosterReducer
         public final boolean joined;
         public final int coins;
         public final int goldenGnomeCount;
+        public final Map<String, Integer> items;
 
-        public RosterEntry(String rsn, RunePartyRole role, boolean online, String number, boolean joined, int coins, int goldenGnomeCount)
+        public RosterEntry(String rsn, RunePartyRole role, boolean online, String number, boolean joined, int coins, int goldenGnomeCount, Map<String, Integer> items)
         {
             this.rsn = rsn;
             this.role = role;
@@ -36,6 +38,7 @@ public class RosterReducer
             this.joined = joined;
             this.coins = coins;
             this.goldenGnomeCount = goldenGnomeCount;
+            this.items = items;
         }
     }
 
@@ -63,6 +66,12 @@ public class RosterReducer
         return goldenGnomeCountByPlayer.getOrDefault(canonicalRsn.toLowerCase(Locale.ROOT), 0);
     }
 
+    public Map<String, Integer> getItems(String canonicalRsn)
+    {
+        if (canonicalRsn == null) return Collections.emptyMap();
+        return itemsByPlayer.getOrDefault(canonicalRsn.toLowerCase(Locale.ROOT), Collections.emptyMap());
+    }
+
     public boolean isOnline(String canonicalRsn)
     {
         if (canonicalRsn == null) return false;
@@ -81,6 +90,7 @@ public class RosterReducer
             actuallyJoined.put(key, p.joined);
             coinsByPlayer.put(key, p.coins);
             goldenGnomeCountByPlayer.put(key, p.goldenGnomeCount);
+            itemsByPlayer.put(key, p.items != null ? new HashMap<>(p.items) : new HashMap<>());
         }
     }
 
@@ -110,6 +120,7 @@ public class RosterReducer
         numberByPlayer.clear();
         coinsByPlayer.clear();
         goldenGnomeCountByPlayer.clear();
+        itemsByPlayer.clear();
     }
 
     public void loadSnapshot(List<ApiClient.RosterPlayerOut> players)
@@ -127,6 +138,7 @@ public class RosterReducer
             if (p.number != null) numberByPlayer.put(key, p.number);
             coinsByPlayer.put(key, p.coins);
             goldenGnomeCountByPlayer.put(key, p.goldenGnomeCount);
+            itemsByPlayer.put(key, p.items != null ? new HashMap<>(p.items) : new HashMap<>());
             RunePartyRole role = RunePartyRole.SPECTATOR;
             if (p.role != null)
             {
@@ -156,6 +168,7 @@ public class RosterReducer
                 roleByPlayer.putIfAbsent(key, RunePartyRole.SPECTATOR);
                 coinsByPlayer.putIfAbsent(key, 0);
                 goldenGnomeCountByPlayer.putIfAbsent(key, 0);
+                itemsByPlayer.putIfAbsent(key, new ConcurrentHashMap<>());
                 break;
             }
             case "ROLE_ASSIGNED":
@@ -188,6 +201,7 @@ public class RosterReducer
                 numberByPlayer.remove(key);
                 coinsByPlayer.remove(key);
                 goldenGnomeCountByPlayer.remove(key);
+                itemsByPlayer.remove(key);
                 break;
             }
             case "COINS_CHANGED":
@@ -210,6 +224,28 @@ public class RosterReducer
                 if (count != null) goldenGnomeCountByPlayer.put(key, count);
                 break;
             }
+            case "ITEM_GRANTED":
+            {
+                String playerRaw = safeStr(e.payload, "player");
+                String itemKey = safeStr(e.payload, "itemKey");
+                if (playerRaw == null || itemKey == null) return;
+                String key = canonicalKey(playerRaw);
+                if (key == null) return;
+                Map<String, Integer> inventory = itemsByPlayer.computeIfAbsent(key, k -> new ConcurrentHashMap<>());
+                inventory.merge(itemKey, 1, Integer::sum);
+                break;
+            }
+            case "ITEM_USED":
+            {
+                String playerRaw = safeStr(e.payload, "player");
+                String itemKey = safeStr(e.payload, "itemKey");
+                if (playerRaw == null || itemKey == null) return;
+                String key = canonicalKey(playerRaw);
+                if (key == null) return;
+                Map<String, Integer> inventory = itemsByPlayer.computeIfAbsent(key, k -> new ConcurrentHashMap<>());
+                inventory.compute(itemKey, (k, v) -> (v == null || v <= 1) ? null : v - 1);
+                break;
+            }
         }
     }
 
@@ -225,7 +261,8 @@ public class RosterReducer
             boolean joined = Boolean.TRUE.equals(actuallyJoined.get(key));
             int coins = coinsByPlayer.getOrDefault(key, 0);
             int goldenGnomeCount = goldenGnomeCountByPlayer.getOrDefault(key, 0);
-            out.add(new RosterEntry(display, role, online, number, joined, coins, goldenGnomeCount));
+            Map<String, Integer> items = new HashMap<>(itemsByPlayer.getOrDefault(key, Collections.emptyMap()));
+            out.add(new RosterEntry(display, role, online, number, joined, coins, goldenGnomeCount, items));
         }
         out.sort((a, b) ->
         {

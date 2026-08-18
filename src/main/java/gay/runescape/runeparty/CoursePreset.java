@@ -226,6 +226,16 @@ public final class CoursePreset
             tiles.set(0, new RelativeTile(first.dx, first.dy, "START", null, first.nextIndices));
         }
 
+        // Item Space, 4 steps out from START (distinct from the Golden Gnome tile below, 2 steps
+        // out) -- swapped in place the same way the very first tile above became START, so the
+        // default course is immediately testable without hand-building a custom one.
+        int itemTileIndex = 4;
+        if (tiles.size() > itemTileIndex)
+        {
+            RelativeTile itemTile = tiles.get(itemTileIndex);
+            tiles.set(itemTileIndex, new RelativeTile(itemTile.dx, itemTile.dy, "ITEM_TILE", null, itemTile.nextIndices));
+        }
+
         // Decorative Golden Gnome modifier, stacked on the PATH tile two steps out from START (see
         // RelativeTile#decorative's own doc for why this has to be appended *after* the real path
         // rather than spliced in at its logical dx/dy).

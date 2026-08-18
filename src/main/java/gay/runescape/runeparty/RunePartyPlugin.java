@@ -90,6 +90,15 @@ public class RunePartyPlugin extends Plugin
      * what actually gets stamped as minigameSpinnerUntil. */
     public static final long MINIGAME_SPINNER_DURATION_MS = MINIGAME_SPINNER_SPIN_PHASE_MS + MINIGAME_SPINNER_HOLD_MS;
 
+    /** Same shape as MINIGAME_SPINNER_SPIN_PHASE_MS/HOLD_MS/DURATION_MS above, but for the Item
+     * Space wheel (see ITEM_GRANTED handling/scheduleItemSpinner) -- kept as its own set of
+     * constants rather than reusing the mini-game ones so each wheel's pacing can be tuned
+     * independently, even though AnnouncementOverlay's actual wheel-drawing code (drawWheel) is
+     * fully shared between the two. */
+    public static final long ITEM_SPINNER_SPIN_PHASE_MS = 4000;
+    public static final long ITEM_SPINNER_HOLD_MS = 3000;
+    public static final long ITEM_SPINNER_DURATION_MS = ITEM_SPINNER_SPIN_PHASE_MS + ITEM_SPINNER_HOLD_MS;
+
     /** How long AnnouncementOverlay's "3... 2... 1... BEGIN!" countdown plays once every seated
      * PLAYER has YES-emoted ready (see MINIGAME_COUNTDOWN_STARTED) -- one second per tick: 3, 2,
      * 1, then BEGIN!. Only the client watching it happen live schedules this (see the
@@ -243,6 +252,7 @@ public class RunePartyPlugin extends Plugin
     private volatile ScheduledFuture<?> turnAnnounceTask;
     private volatile ScheduledFuture<?> minigameBannerTask;
     private volatile ScheduledFuture<?> minigameSpinnerTask;
+    private volatile ScheduledFuture<?> itemSpinnerTask;
 
     /** Rolling "nothing turn-concluding should appear before this" gate. Every turn-effect visual
      * with its own on-screen duration -- currently just the coin popup, but meant to grow as more
@@ -293,6 +303,17 @@ public class RunePartyPlugin extends Plugin
     // Never null, only ever empty.
     private volatile List<Integer> pendingTargetIndices = Collections.emptyList();
     private volatile boolean arrivalSubmitted = false; // guards confirm-arrival from firing every tick while the echo is in flight
+    // Real state, applied catch-up or not: whether the current turn's player has already spent
+    // their one-item-per-turn allowance -- reset on every TURN_STARTED, set by ITEM_USED. Mirrors
+    // the server's own itemUsedThisTurn (see app.py's use_item).
+    private volatile boolean itemUsedThisTurn = false;
+    // Recomputed once per game tick from onGameTick (the client thread) -- see
+    // isStandingOnTrackedPosition, whose Player#getWorldLocation() call asserts it's never invoked
+    // off the client thread. isLocalPlayerReadyToRoll() reads this cached copy instead of calling
+    // that check live, since it's also called from RunePartyPanel (Swing EDT, not the client
+    // thread) -- see refreshItemUse. A tick of staleness costs nothing here: OSRS positions only
+    // ever change on tick boundaries anyway, so this is exactly as fresh as a live read would be.
+    private volatile boolean standingOnTrackedPositionCached = false;
     private volatile boolean minigameActive = false;
     private volatile String minigameInstructions = null;
     // Which minigames/ registry entry is active -- see the server's own minigames package, whose
@@ -313,6 +334,17 @@ public class RunePartyPlugin extends Plugin
     // exactly like minigameCountdownStarted's split for the same reason -- see
     // AnnouncementOverlay#renderMinigameReadyCheck, the only consumer.
     private volatile boolean minigameSpinnerSkippedForClient = false;
+    // ---- item wheel reveal (cosmetic-only timing, chained behind whatever turn-effect is
+    // already showing -- see scheduleItemSpinner). itemGrantRsn/itemGrantKey identify who got
+    // what, needed by the reveal text ("You got..."/"<rsn> got...", mirroring
+    // renderGoldenGnomeOutcome's own per-viewer split). Unlike the mini-game spinner, nothing
+    // else needs to distinguish "hasn't started yet" from "this client only caught up after the
+    // fact" -- no other screen chains behind this one the way the ready-check chains behind the
+    // mini-game spinner, so there's no *SkippedForClient flag needed here. ----
+    private volatile long itemSpinnerStart = 0;
+    private volatile long itemSpinnerUntil = 0;
+    private volatile String itemGrantRsn = null;
+    private volatile String itemGrantKey = null;
     // ---- mini-game ready-check (server-driven, everyone sees it -- see MINIGAME_PLAYER_READY/
     // MINIGAME_COUNTDOWN_STARTED handling). minigameReadyRsns is real state (who's actually
     // YES-emoted so far), applied unconditionally catch-up or not -- same reasoning as
@@ -392,10 +424,15 @@ public class RunePartyPlugin extends Plugin
     // GOLDEN_GNOME_OFFER_RESOLVED handling). goldenGnomeOfferRsn is real state (non-null exactly
     // while a response is outstanding, same role pendingRoll plays for a roll) -- it gates whether
     // a YES/NO emote does anything (see isLocalPlayerAwaitingGoldenGnomeResponse) as well as the
-    // offer banner. goldenGnomeOutcome/goldenGnomeOutcomeBannerUntil are purely the follow-up
-    // announcement ("You got a Golden Gnome!"/"You can't afford this!"), cosmetic only. ----
+    // offer banner, and who AnnouncementOverlay#renderGoldenGnomeOffer addresses "You found..." to
+    // vs "<rsn> found...". goldenGnomeOutcome/goldenGnomeOutcomeRsn/goldenGnomeOutcomeBannerUntil
+    // are purely the follow-up announcement ("You got a Golden Gnome!"/"You can't afford this!"),
+    // cosmetic only -- goldenGnomeOutcomeRsn is what lets that banner address the actual buyer
+    // ("You...") differently from everyone else watching ("<rsn>..."), the same split
+    // goldenGnomeOfferRsn already does for the offer itself. ----
     private volatile String goldenGnomeOfferRsn = null;
     private volatile String goldenGnomeOutcome = null; // "purchased" | "declined" | "cant_afford"
+    private volatile String goldenGnomeOutcomeRsn = null;
     private volatile long goldenGnomeOutcomeBannerUntil = 0;
 
     // ---- Golden Gnome count popup (client-side timer -- see PlayerOverlay#drawGoldenGnomePopup,
@@ -760,6 +797,27 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
+    /** Spends one of the local player's held items -- called from RunePartyPanel's item-use
+     * buttons. A free action: doesn't touch pendingRoll or the turn, same as the server's own
+     * use-item endpoint, so the player can still SPIN normally afterward. */
+    public void useItem(String itemKey)
+    {
+        String self = localRsn();
+        final String gid = gameId;
+        final String token = playerToken;
+        if (self == null || gid == null || token == null || itemKey == null) return;
+
+        executor.submit(() ->
+        {
+            try { apiClient.useItem(gid, self, token, itemKey); }
+            catch (Exception e)
+            {
+                log.warn("Use item failed", e);
+                addChatMessage("Failed to use item: " + e.getMessage());
+            }
+        });
+    }
+
     public void leaveGame()
     {
         String self = localRsn();
@@ -929,6 +987,14 @@ public class RunePartyPlugin extends Plugin
     {
         if (phase != GamePhase.ACTIVE) return;
 
+        // Refreshed unconditionally, ahead of the early returns below -- isLocalPlayerReadyToRoll
+        // needs this cache kept current every tick regardless of pendingRoll/arrivalSubmitted/etc,
+        // since it's read from contexts (RunePartyPanel) that can't safely compute it live. See the
+        // field's own doc.
+        String self = localRsn();
+        Player selfPlayer = client.getLocalPlayer();
+        standingOnTrackedPositionCached = self != null && selfPlayer != null && isStandingOnTrackedPosition(selfPlayer, self);
+
         // GAME_STARTED fired but turn order hasn't begun yet (currentTurnRsn still null) -- this
         // is the gathering window AnnouncementOverlay/TileOverlay's start-tile arrow cover; watch
         // for the local player reaching the START tile instead of a rolled destination.
@@ -940,11 +1006,9 @@ public class RunePartyPlugin extends Plugin
 
         if (!pendingRoll || arrivalSubmitted) return;
 
-        String self = localRsn();
         if (self == null || !self.equalsIgnoreCase(currentTurnRsn)) return;
 
-        Player localPlayer = client.getLocalPlayer();
-        WorldPoint pos = localPlayer != null ? localPlayer.getWorldLocation() : null;
+        WorldPoint pos = selfPlayer != null ? selfPlayer.getWorldLocation() : null;
         if (pos == null) return;
 
         Integer indexHere = tileReducer.pathIndexAt(pos);
@@ -1092,7 +1156,10 @@ public class RunePartyPlugin extends Plugin
      * SPIN! emote" popping up before "Your Turn!" has even shown. Single source of truth for "can
      * I roll right now" -- onAnimationChanged gates the real roll on this, AnnouncementOverlay#
      * renderSpinHint gates the "Use the SPIN! emote" reminder on the exact same thing, so the two
-     * can never disagree about whether spinning would do anything. */
+     * can never disagree about whether spinning would do anything. Reads
+     * standingOnTrackedPositionCached rather than resolving the local player's position live, since
+     * this is also called from RunePartyPanel (Swing EDT) -- see that field's own doc for why a
+     * direct Player#getWorldLocation() call here would crash off the client thread. */
     public boolean isLocalPlayerReadyToRoll()
     {
         if (phase != GamePhase.ACTIVE || pendingRoll || rollRequestSubmitted || minigameActive) return false;
@@ -1102,8 +1169,24 @@ public class RunePartyPlugin extends Plugin
         String self = localRsn();
         if (self == null || !self.equalsIgnoreCase(currentTurnRsn)) return false;
 
-        Player localPlayer = client.getLocalPlayer();
-        return localPlayer != null && isStandingOnTrackedPosition(localPlayer, self);
+        return standingOnTrackedPositionCached;
+    }
+
+    /** Whether the table is genuinely waiting on *someone's* roll right now -- the same gating
+     * isLocalPlayerReadyToRoll uses, minus the two checks that only make sense from the mover's own
+     * perspective ("is it me" and "am I standing on my tracked tile", which a bystander has no way
+     * to verify for someone else anyway). Used by AnnouncementOverlay#renderSpinHint to show
+     * everyone *other* than the mover "Waiting for &lt;player&gt; to roll the dice..." instead of
+     * showing them nothing at all while the mover sees "Use the SPIN! emote...". Deliberately
+     * doesn't care whether the mover has actually walked back to their tile yet -- from a
+     * bystander's vantage point "it's their turn and nobody's rolled" is the whole story either
+     * way. */
+    public boolean isAwaitingSomeonesRoll()
+    {
+        if (phase != GamePhase.ACTIVE || pendingRoll || minigameActive) return false;
+        if (goldenGnomeOfferRsn != null) return false;
+        if (System.currentTimeMillis() < turnEffectGateUntil) return false;
+        return currentTurnRsn != null;
     }
 
     /** Whether the local player has a Golden Gnome offer awaiting their own YES/NO response --
@@ -1249,6 +1332,15 @@ public class RunePartyPlugin extends Plugin
         long delay = turnEffectGateUntil > now ? (turnEffectGateUntil - now) + POST_TURN_EFFECT_GRACE_MS : 0;
         extendTurnEffectGate(now + delay + durationMs);
 
+        // The panel (isLocalPlayerReadyToRoll-gated item/roll UI) only ever refreshes on an
+        // explicit refreshPanel() call, unlike AnnouncementOverlay's per-frame render() -- so
+        // without this, once turnEffectGateUntil lifts here with no new server event to trigger a
+        // refresh (e.g. sitting on a finished "Your Turn!" banner with nothing else happening),
+        // the item-use section/SPIN-adjacent panel state can go stale indefinitely. Fire one right
+        // as this effect's own reservation of the gate expires so the panel re-checks readiness
+        // the moment it's actually true, not just whenever the next unrelated event happens to land.
+        uiTimerExec.schedule(this::refreshPanel, delay + durationMs, TimeUnit.MILLISECONDS);
+
         return uiTimerExec.schedule(action, delay, TimeUnit.MILLISECONDS);
     }
 
@@ -1294,6 +1386,24 @@ public class RunePartyPlugin extends Plugin
             minigameSpinnerStart = System.currentTimeMillis();
             minigameSpinnerUntil = minigameSpinnerStart + MINIGAME_SPINNER_DURATION_MS;
             extendTurnEffectGate(minigameSpinnerUntil); // belt-and-suspenders, see scheduleMinigameBanner's identical comment
+        });
+    }
+
+    /** Schedules AnnouncementOverlay's item wheel reveal via scheduleAfterTurnEffects, so it waits
+     * behind whatever turn-effect visual is already showing (a coin popup from the same landing,
+     * the previous player's own effects still settling, etc.) instead of appearing on top of it.
+     * {@code rsn}/{@code itemKey} are captured here rather than read back off some "current grant"
+     * plugin field, since -- unlike the mini-game key, which stays put for the whole mini-game --
+     * an item grant is a one-off event with nothing else keeping track of it in between. */
+    private void scheduleItemSpinner(String rsn, String itemKey)
+    {
+        itemSpinnerTask = scheduleAfterTurnEffects(itemSpinnerTask, ITEM_SPINNER_DURATION_MS, () ->
+        {
+            itemGrantRsn = rsn;
+            itemGrantKey = itemKey;
+            itemSpinnerStart = System.currentTimeMillis();
+            itemSpinnerUntil = itemSpinnerStart + ITEM_SPINNER_DURATION_MS;
+            extendTurnEffectGate(itemSpinnerUntil);
         });
     }
 
@@ -1442,6 +1552,7 @@ public class RunePartyPlugin extends Plugin
                 lastDiceRoll = null;
                 pendingTargetIndices = Collections.emptyList();
                 arrivalSubmitted = false;
+                itemUsedThisTurn = false;
                 if (!catchingUp)
                 {
                     scheduleTurnAnnouncement(currentTurnRsn);
@@ -1516,6 +1627,7 @@ public class RunePartyPlugin extends Plugin
                 if (!catchingUp && "cant_afford".equals(safeStr(e.payload, "outcome")))
                 {
                     goldenGnomeOutcome = "cant_afford";
+                    goldenGnomeOutcomeRsn = safeStr(e.payload, "player");
                     goldenGnomeOutcomeBannerUntil = System.currentTimeMillis() + GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
                     extendTurnEffectGate(goldenGnomeOutcomeBannerUntil);
                     addChatMessage("Can't afford the Golden Gnome!");
@@ -1541,11 +1653,37 @@ public class RunePartyPlugin extends Plugin
                     extendTurnEffectGate(goldenGnomePopupUntil);
 
                     goldenGnomeOutcome = "purchased";
+                    goldenGnomeOutcomeRsn = goldenGnomePopupRsn; // same event, same player
                     goldenGnomeOutcomeBannerUntil = System.currentTimeMillis() + GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
                     extendTurnEffectGate(goldenGnomeOutcomeBannerUntil);
 
                     addChatMessage(goldenGnomePopupRsn + " got a Golden Gnome!");
                 }
+                break;
+            }
+
+            case "ITEM_GRANTED":
+            {
+                // Inventory itself is updated unconditionally by rosterReducer.apply above --
+                // everything here is purely the wheel reveal's own cosmetics.
+                if (!catchingUp)
+                {
+                    String rsn = safeStr(e.payload, "player");
+                    String itemKey = safeStr(e.payload, "itemKey");
+                    String itemDisplayName = safeStr(e.payload, "itemDisplayName");
+                    scheduleItemSpinner(rsn, itemKey);
+                    addChatMessage(rsn + " got " + itemDisplayName + "!");
+                }
+                break;
+            }
+
+            case "ITEM_USED":
+            {
+                // Real state, applied catch-up or not: an ITEM_USED can only ever be inserted for
+                // the current turn's player (see the server's _require_ready_to_act), so this is
+                // always the same turn TURN_STARTED just reset it for. Inventory itself is already
+                // decremented unconditionally by rosterReducer.apply above.
+                itemUsedThisTurn = true;
                 break;
             }
 
@@ -1598,13 +1736,15 @@ public class RunePartyPlugin extends Plugin
 
             case "COINS_CHANGED":
             {
-                // Only the standard-tile reward gets the popup treatment for now -- a purchase or
-                // mini-game payout already has its own feedback (the roster/stats panels update,
-                // and submitMinigameResult's caller sees the MINIGAME_ENDED chat line), so this
-                // stays scoped to the one case that otherwise had no visible feedback at all. The
-                // real coin total itself lives in rosterReducer (updated unconditionally above,
-                // catch-up or not) -- everything in this block is purely the popup's own cosmetics.
-                if (!catchingUp && "standard_tile".equals(safeStr(e.payload, "reason")))
+                // The standard-tile reward and an item's own coin effect both get the popup
+                // treatment -- a Golden Gnome purchase or mini-game payout already has its own
+                // feedback (the roster/stats panels update, and submitMinigameResult's caller sees
+                // the MINIGAME_ENDED chat line), so this stays scoped to the cases that otherwise
+                // had no visible feedback at all. The real coin total itself lives in rosterReducer
+                // (updated unconditionally above, catch-up or not) -- everything in this block is
+                // purely the popup's own cosmetics.
+                String coinsChangedReason = safeStr(e.payload, "reason");
+                if (!catchingUp && ("standard_tile".equals(coinsChangedReason) || "item".equals(coinsChangedReason)))
                 {
                     coinPopupRsn = safeStr(e.payload, "player");
                     Integer delta = safeInt(e.payload, "delta");
@@ -1679,15 +1819,26 @@ public class RunePartyPlugin extends Plugin
                     {
                         minigameCountdownBannerUntil = System.currentTimeMillis() + MINIGAME_COUNTDOWN_DURATION_MS;
                         extendTurnEffectGate(minigameCountdownBannerUntil);
+                        // RunePartyPanel only re-checks isMinigamePlayable() reactively, when
+                        // refreshPanel() runs -- unlike AnnouncementOverlay's per-frame render(),
+                        // the panel has no ordinary reason to refresh again once the countdown
+                        // naturally finishes a few seconds from now (no further server event marks
+                        // that moment). Without this, the panel's play controls silently never
+                        // appeared until some unrelated event happened to trigger a refresh
+                        // afterward. Chained here (nested inside this same callback) rather than
+                        // scheduled as its own independent MINIGAME_COUNTDOWN_START_DELAY_MS +
+                        // MINIGAME_COUNTDOWN_DURATION_MS delay off the original event -- two
+                        // separately-scheduled tasks race against each other under normal
+                        // scheduler jitter, and if this one's own delay ran even a couple of
+                        // milliseconds long, the independently-scheduled refresh could fire before
+                        // minigameCountdownBannerUntil above was actually reached, leaving
+                        // isMinigamePlayable() still false at the one moment anything checked it.
+                        // Nesting the schedule call here instead means its delay is always measured
+                        // from this exact point, so it's guaranteed to fire strictly after
+                        // minigameCountdownBannerUntil regardless of how long this task itself took
+                        // to actually run.
+                        uiTimerExec.schedule(this::refreshPanel, MINIGAME_COUNTDOWN_DURATION_MS, TimeUnit.MILLISECONDS);
                     }, MINIGAME_COUNTDOWN_START_DELAY_MS, TimeUnit.MILLISECONDS);
-                    // RunePartyPanel only re-checks isMinigamePlayable() reactively, when
-                    // refreshPanel() runs -- unlike AnnouncementOverlay's per-frame render(), the
-                    // panel has no ordinary reason to refresh again once the countdown naturally
-                    // finishes a few seconds from now (no further server event marks that moment).
-                    // Without this, the panel's play controls silently never appeared until some
-                    // unrelated event happened to trigger a refresh afterward.
-                    uiTimerExec.schedule(this::refreshPanel,
-                        MINIGAME_COUNTDOWN_START_DELAY_MS + MINIGAME_COUNTDOWN_DURATION_MS, TimeUnit.MILLISECONDS);
                 }
                 break;
 
@@ -1833,6 +1984,7 @@ public class RunePartyPlugin extends Plugin
         if (turnAnnounceTask != null) { turnAnnounceTask.cancel(false); turnAnnounceTask = null; }
         if (minigameBannerTask != null) { minigameBannerTask.cancel(false); minigameBannerTask = null; }
         if (minigameSpinnerTask != null) { minigameSpinnerTask.cancel(false); minigameSpinnerTask = null; }
+        if (itemSpinnerTask != null) { itemSpinnerTask.cancel(false); itemSpinnerTask = null; }
         if (roundCompleteBannerTask != null) { roundCompleteBannerTask.cancel(false); roundCompleteBannerTask = null; }
         turnEffectGateUntil = 0;
         gameId = null; writeKey = null; playerToken = null; joinCode = null; hostRsn = null;
@@ -1842,9 +1994,11 @@ public class RunePartyPlugin extends Plugin
         awaitingSpinFinish = false;
         awaitingGnomeYesFinish = false; awaitingGnomeNoFinish = false; awaitingMinigameReadyFinish = false;
         pendingTargetIndices = Collections.emptyList();
-        arrivalSubmitted = false; minigameActive = false; minigameInstructions = null; minigameKey = null;
+        arrivalSubmitted = false; itemUsedThisTurn = false; standingOnTrackedPositionCached = false;
+        minigameActive = false; minigameInstructions = null; minigameKey = null;
         minigameDisplayName = null;
         minigameSpinnerStart = 0; minigameSpinnerUntil = 0; minigameSpinnerSkippedForClient = false;
+        itemSpinnerStart = 0; itemSpinnerUntil = 0; itemGrantRsn = null; itemGrantKey = null;
         minigameReadyRsns.clear();
         minigameCountdownStarted = false; minigameCountdownSkippedForClient = false; minigameCountdownBannerUntil = 0;
         maxRounds = 0; completedRounds = 0;
@@ -1855,7 +2009,7 @@ public class RunePartyPlugin extends Plugin
         gameStartBannerUntil = 0;
         roundCompleteBannerUntil = 0; roundCompleteRoundNumber = 0;
         minigameRewardsBannerUntil = 0; minigameRewards = Collections.emptyList();
-        goldenGnomeOfferRsn = null; goldenGnomeOutcome = null; goldenGnomeOutcomeBannerUntil = 0;
+        goldenGnomeOfferRsn = null; goldenGnomeOutcome = null; goldenGnomeOutcomeRsn = null; goldenGnomeOutcomeBannerUntil = 0;
         goldenGnomePopupRsn = null; goldenGnomePopupNewTotal = 0; goldenGnomePopupStart = 0; goldenGnomePopupUntil = 0;
         goldenGnomeMoveOldPoint = null; goldenGnomeMoveHideOldAt = 0;
         goldenGnomeMoveNewPoint = null; goldenGnomeMoveShowNewAt = 0;
@@ -1883,6 +2037,7 @@ public class RunePartyPlugin extends Plugin
     public String getCurrentTurnRsn() { return currentTurnRsn; }
     public Integer getLastDiceRoll() { return lastDiceRoll; }
     public boolean isPendingRoll() { return pendingRoll; }
+    public boolean isItemUsedThisTurn() { return itemUsedThisTurn; }
     public List<Integer> getPendingTargetIndices() { return pendingTargetIndices; }
     public boolean isMinigameActive() { return minigameActive; }
     /** The board tile (pathIndex) {@code rsn} is currently standing at, per the last PLAYER_MOVED
@@ -1900,6 +2055,10 @@ public class RunePartyPlugin extends Plugin
     public long getMinigameSpinnerStart() { return minigameSpinnerStart; }
     public long getMinigameSpinnerUntil() { return minigameSpinnerUntil; }
     public boolean isMinigameSpinnerSkippedForClient() { return minigameSpinnerSkippedForClient; }
+    public long getItemSpinnerStart() { return itemSpinnerStart; }
+    public long getItemSpinnerUntil() { return itemSpinnerUntil; }
+    public String getItemGrantRsn() { return itemGrantRsn; }
+    public String getItemGrantKey() { return itemGrantKey; }
     public Set<String> getMinigameReadyRsns() { return minigameReadyRsns; }
     public boolean isMinigameCountdownStarted() { return minigameCountdownStarted; }
     public boolean isMinigameCountdownSkippedForClient() { return minigameCountdownSkippedForClient; }
@@ -1934,6 +2093,7 @@ public class RunePartyPlugin extends Plugin
     public long getDiceRollUntil() { return diceRollUntil; }
     public String getGoldenGnomeOfferRsn() { return goldenGnomeOfferRsn; }
     public String getGoldenGnomeOutcome() { return goldenGnomeOutcome; }
+    public String getGoldenGnomeOutcomeRsn() { return goldenGnomeOutcomeRsn; }
     public long getGoldenGnomeOutcomeBannerUntil() { return goldenGnomeOutcomeBannerUntil; }
     public String getGoldenGnomePopupRsn() { return goldenGnomePopupRsn; }
     public int getGoldenGnomePopupNewTotal() { return goldenGnomePopupNewTotal; }

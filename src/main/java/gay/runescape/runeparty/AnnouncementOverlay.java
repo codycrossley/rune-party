@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import gay.runescape.runeparty.items.Item;
+import gay.runescape.runeparty.items.Items;
 import gay.runescape.runeparty.minigames.Minigame;
 import gay.runescape.runeparty.minigames.Minigames;
 import lombok.extern.slf4j.Slf4j;
@@ -41,9 +43,12 @@ import net.runelite.client.util.Text;
  * until-timestamp when the triggering event lands (see RunePartyPlugin's
  * turnAnnounceRsn/turnAnnounceUntil, diceRollRsn/diceRollUntil, and welcomeBannerUntil), this
  * overlay just counts down and fades against it every frame. renderSpinHint is the one exception --
- * local-only and duration-less, it's just a live read of plugin state that shows/hides itself
- * instantly rather than fading on a clock. Meant to grow with more instructional banners as the
- * game does, not just these. */
+ * duration-less, it's just a live read of plugin state that shows/hides itself instantly rather
+ * than fading on a clock -- and it's addressed differently per viewer rather than local-only: the
+ * mover sees "Use the SPIN! emote...", everyone else sees "Waiting for &lt;player&gt; to roll the
+ * dice..." (see renderSpinHintSelf/renderSpinHintWaiting), the same "same moment, addressed per
+ * viewer" split renderTurnAnnouncement and renderGoldenGnomeOffer/renderGoldenGnomeOutcome also
+ * use. Meant to grow with more instructional banners as the game does, not just these. */
 @Slf4j
 public class AnnouncementOverlay extends Overlay
 {
@@ -82,17 +87,18 @@ public class AnnouncementOverlay extends Overlay
     private static final long MINIGAME_FADE_MS = 500;
     private static final float MINIGAME_TITLE_SIZE = 58f;
 
-    // Mini-game selection spinner -- see renderMinigameSpinner. The wheel's segments reuse
-    // RAINBOW_LETTER_COLORS (same colors as "SPIN"/"MINIGAME!"), one per registered mini-game
-    // (see gay.runescape.runeparty.minigames.Minigames#all).
-    private static final long MINIGAME_SPINNER_FADE_MS = 400;
-    private static final int MINIGAME_SPINNER_MAX_SEGMENTS = 4; // see selectWheelEntries -- caps how many options the wheel ever shows, regardless of how many mini-games end up registered
-    private static final float MINIGAME_SPINNER_RADIUS = 90f;
-    private static final float MINIGAME_SPINNER_ICON_SIZE = 34f;
-    private static final int MINIGAME_SPINNER_EXTRA_SPINS = 3; // full rotations before settling, purely visual
-    private static final long MINIGAME_SPINNER_SETTLE_POP_MS = 220; // same overshoot-then-settle feel as the dice roll's DIE_SETTLE_POP_MS
-    private static final float MINIGAME_SPINNER_NAME_SIZE = 30f; // the mini-game's name, revealed once the wheel settles
-    private static final Color MINIGAME_SPINNER_POINTER_COLOR = new Color(255, 215, 0);
+    // Shared spinner wheel -- see drawWheel, reused by both renderMinigameSpinner and
+    // renderItemSpinner. Segments reuse RAINBOW_LETTER_COLORS (same colors as "SPIN"/"MINIGAME!"),
+    // one per registered entry (see gay.runescape.runeparty.minigames.Minigames#all /
+    // gay.runescape.runeparty.items.Items#all).
+    private static final long WHEEL_FADE_MS = 400;
+    private static final int WHEEL_MAX_SEGMENTS = 4; // see selectWheelEntries -- caps how many options the wheel ever shows, regardless of how many entries end up registered
+    private static final float WHEEL_RADIUS = 90f;
+    private static final float WHEEL_ICON_SIZE = 34f;
+    private static final int WHEEL_EXTRA_SPINS = 3; // full rotations before settling, purely visual
+    private static final long WHEEL_SETTLE_POP_MS = 220; // same overshoot-then-settle feel as the dice roll's DIE_SETTLE_POP_MS
+    private static final float WHEEL_NAME_SIZE = 30f; // the settled entry's name, revealed once the wheel stops
+    private static final Color WHEEL_POINTER_COLOR = new Color(255, 215, 0);
 
     // Mini-game ready-check -- see renderMinigameReadyCheck. Duration-less like the Spin hint/
     // Golden Gnome offer (it persists until every seated PLAYER's YES-emoted), so it gets the same
@@ -186,6 +192,7 @@ public class AnnouncementOverlay extends Overlay
         renderSpinHint(g);
         renderGoldenGnomeOffer(g);
         renderGoldenGnomeOutcome(g);
+        renderItemSpinner(g);
         renderMinigameBanner(g);
         renderMinigameSpinner(g);
         renderMinigameReadyCheck(g);
@@ -217,33 +224,63 @@ public class AnnouncementOverlay extends Overlay
         drawCenteredText(g, text, client.getCanvasWidth() / 2, client.getCanvasHeight() / 4, color, alpha);
     }
 
-    /** Reminds the local player to "Use the SPIN! emote to roll the dice." -- local-only, unlike
-     * every other banner here: it's not tied to a server event or a fixed duration, it's a
-     * continuous read of RunePartyPlugin#isLocalPlayerReadyToRoll() (the same check
-     * onAnimationChanged gates the real roll on), so it's visible for exactly as long as spinning
-     * would actually do something and disappears the instant that stops being true -- whether
-     * because they rolled, a mini-game started, or their turn simply ended. Deliberately never
-     * shown while they still need to walk back to their tile first (isLocalPlayerReadyToRoll
-     * already requires that), so this and TileOverlay's "Return Here!" arrow are always mutually
-     * exclusive rather than both nagging at once. Sits just under the turn banner's own slot and
-     * gently pulses since, unlike that banner, it has no fade-out to naturally draw the eye. "SPIN!"
-     * itself gets the same Mario-Party-logo rainbow-letter treatment as "RUNE PARTY"/"MINIGAME!"
-     * (see drawLeftAlignedRainbowText and RAINBOW_LETTER_COLORS -- "SPIN!" is only 5 characters, so
-     * it just uses the first 5 entries of that 9-entry sequence), stitched into the plain-white rest
-     * of the sentence via drawLeftAlignedText -- both return the x just past what they drew, so the
-     * three segments chain into one still-centered line despite switching font and color partway
-     * through. */
+    /** Dispatches to whichever half of the Spin hint applies to the local viewer -- "Use the SPIN!
+     * emote..." (renderSpinHintSelf) for whoever's actually up, "Waiting for &lt;player&gt; to roll
+     * the dice..." (renderSpinHintWaiting) for everyone else at the table, mirroring
+     * renderTurnAnnouncement/renderGoldenGnomeOffer's own "same moment, addressed per viewer"
+     * pattern. Neither half is tied to a server event or a fixed duration -- both are continuous
+     * reads of plugin state (isLocalPlayerReadyToRoll / isAwaitingSomeonesRoll) that disappear the
+     * instant they stop being true, same as before this split. The bystander half explicitly checks
+     * it isn't looking at its own mover first, so someone who's wandered off their tile mid-turn
+     * (isLocalPlayerReadyToRoll false for them, since they still need to walk back -- see
+     * TileOverlay's "Return Here!" arrow) never sees "Waiting for themselves". */
     private void renderSpinHint(Graphics2D g)
     {
-        if (!plugin.isLocalPlayerReadyToRoll()) return;
+        if (plugin.isLocalPlayerReadyToRoll())
+        {
+            renderSpinHintSelf(g);
+            return;
+        }
 
+        String moverRsn = plugin.getCurrentTurnRsn();
+        if (moverRsn == null) return;
+        String localRsn = localRsn();
+        if (localRsn != null && localRsn.equalsIgnoreCase(moverRsn)) return;
+        if (!plugin.isAwaitingSomeonesRoll()) return;
+
+        renderSpinHintWaiting(g, moverRsn);
+    }
+
+    /** Reminds the local player, when it's their turn, to "Use the SPIN! emote to roll the
+     * dice." -- or, if they're currently holding at least one item and haven't already spent this
+     * turn's one-item allowance (see RosterReducer#getItems and RunePartyPlugin#isItemUsedThisTurn,
+     * both live reads re-checked every frame, same as everything else here), "...or use an item in
+     * the panel." tacked on instead, so the hint automatically reverts to the plain phrasing the
+     * instant an item gets used -- whether or not any remain -- with no event of its own needed to
+     * notice that. Only the wording changes; RunePartyPanel#refreshItemUse is what actually gates
+     * the item buttons themselves. Deliberately never shown while they still need to walk back to their tile first
+     * (isLocalPlayerReadyToRoll already requires that), so this and TileOverlay's "Return Here!"
+     * arrow are always mutually exclusive rather than both nagging at once. Sits just under the
+     * turn banner's own slot and gently pulses since, unlike that banner, it has no fade-out to
+     * naturally draw the eye. "SPIN!" itself gets the same Mario-Party-logo rainbow-letter
+     * treatment as "RUNE PARTY"/"MINIGAME!" (see drawLeftAlignedRainbowText and
+     * RAINBOW_LETTER_COLORS -- "SPIN!" is only 5 characters, so it just uses the first 5 entries of
+     * that 9-entry sequence), stitched into the plain-white rest of the sentence via
+     * drawLeftAlignedText -- both return the x just past what they drew, so the three segments
+     * chain into one still-centered line despite switching font and color partway through. */
+    private void renderSpinHintSelf(Graphics2D g)
+    {
         long phaseMs = System.currentTimeMillis() % SPIN_HINT_PULSE_PERIOD_MS;
         float pulse = (float) (0.5 + 0.5 * Math.sin(2 * Math.PI * phaseMs / SPIN_HINT_PULSE_PERIOD_MS));
         float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * pulse;
 
+        String self = localRsn();
+        boolean hasItems = self != null && !plugin.isItemUsedThisTurn()
+            && !plugin.getRosterReducer().getItems(self).isEmpty();
+
         String prefix = "Use the ";
         String spinWord = "SPIN";
-        String suffix = " emote to roll the dice.";
+        String suffix = hasItems ? " emote to roll the dice, or use an item in the panel." : " emote to roll the dice.";
 
         Font normalFont = FontManager.getRunescapeBoldFont().deriveFont(SPIN_HINT_SIZE);
         Font spinFont = MARIO_PARTY_FONT.deriveFont(SPIN_HINT_SIZE);
@@ -267,22 +304,55 @@ public class AnnouncementOverlay extends Overlay
         drawLeftAlignedText(g, suffix, x, y, SPIN_HINT_COLOR, alpha);
     }
 
+    /** The bystander half of the Spin hint -- "Waiting for &lt;player&gt; to roll the dice..." in
+     * the mover's own seat color for their name, same position/size/pulse as renderSpinHintSelf so
+     * the two feel like the same hint just addressed differently, the way
+     * renderTurnAnnouncement's "Your Turn!"/"&lt;rsn&gt;'s Turn" already do. */
+    private void renderSpinHintWaiting(Graphics2D g, String rsn)
+    {
+        long phaseMs = System.currentTimeMillis() % SPIN_HINT_PULSE_PERIOD_MS;
+        float pulse = (float) (0.5 + 0.5 * Math.sin(2 * Math.PI * phaseMs / SPIN_HINT_PULSE_PERIOD_MS));
+        float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * pulse;
+
+        String prefix = "Waiting for ";
+        String suffix = " to roll the dice...";
+
+        Font font = FontManager.getRunescapeBoldFont().deriveFont(SPIN_HINT_SIZE);
+        g.setFont(font);
+        int prefixWidth = g.getFontMetrics().stringWidth(prefix);
+        int nameWidth = g.getFontMetrics().stringWidth(rsn);
+        int suffixWidth = g.getFontMetrics().stringWidth(suffix);
+
+        int y = client.getCanvasHeight() / 4 + 40;
+        int x = client.getCanvasWidth() / 2 - (prefixWidth + nameWidth + suffixWidth) / 2;
+
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getNumber(rsn));
+        Color nameColor = seatColor != null ? seatColor.awt : SPIN_HINT_COLOR;
+
+        x = drawLeftAlignedText(g, prefix, x, y, SPIN_HINT_COLOR, alpha);
+        x = drawLeftAlignedText(g, rsn, x, y, nameColor, alpha);
+        drawLeftAlignedText(g, suffix, x, y, SPIN_HINT_COLOR, alpha);
+    }
+
     /** Draws the Golden Gnome offer -- "You found a GOLDEN GNOME!" (with "GOLDEN GNOME" in the
      * Mario Party Hudson font, same gold as "SHOWDOWN", stitched into the surrounding plain-white
-     * text via drawLeftAlignedText the same way renderSpinHint stitches "SPIN"), "Would you like to
-     * buy one?" underneath, then the two emote instructions -- "YES" and "NO" get the same
-     * Mario-Party-logo rainbow-letter treatment as "SPIN" (see drawLeftAlignedRainbowText and
-     * RAINBOW_LETTER_COLORS), stitched into the surrounding plain text the same way. Broadcast to everyone (like
-     * renderMinigameBanner/renderGameStartBanner), not local-only, since it's a shared moment
-     * everyone's watching even though only the finder's own YES/NO emote does anything (see
-     * RunePartyPlugin#isLocalPlayerAwaitingGoldenGnomeResponse, which onAnimationChanged and this
-     * method's own instructions both key off of implicitly -- the offer text itself doesn't change
-     * per viewer, same as the dice-roll reveal). Duration-less like renderSpinHint -- it's a live
-     * read of goldenGnomeOfferRsn, not a timed fade, so it pulses instead for the same "needs to
-     * stay noticeable without a fade to draw the eye" reason. */
+     * text via drawLeftAlignedText the same way renderSpinHint stitches "SPIN"), then a subtitle and
+     * either the real YES/NO emote instructions (see drawEmoteInstruction, "YES"/"NO" get the same
+     * Mario-Party-logo rainbow-letter treatment as "SPIN") or a "waiting on them" line underneath,
+     * depending on who's looking. Broadcast to everyone (like renderMinigameBanner/
+     * renderGameStartBanner), not local-only, since it's a shared moment everyone's watching -- but
+     * addressed differently per viewer the same way renderTurnAnnouncement already is: the finder
+     * (goldenGnomeOfferRsn, compared against localRsn()) sees "You found..." plus the actual
+     * actionable instructions, since only their own YES/NO emote does anything (see
+     * RunePartyPlugin#isLocalPlayerAwaitingGoldenGnomeResponse); everyone else sees "&lt;rsn&gt;
+     * found..." plus a plain "waiting on them" line instead of instructions that don't apply to
+     * them. Duration-less like renderSpinHint -- it's a live read of goldenGnomeOfferRsn, not a
+     * timed fade, so it pulses instead for the same "needs to stay noticeable without a fade to draw
+     * the eye" reason. */
     private void renderGoldenGnomeOffer(Graphics2D g)
     {
-        if (plugin.getGoldenGnomeOfferRsn() == null) return;
+        String finderRsn = plugin.getGoldenGnomeOfferRsn();
+        if (finderRsn == null) return;
 
         long phaseMs = System.currentTimeMillis() % GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS;
         float pulse = (float) (0.5 + 0.5 * Math.sin(2 * Math.PI * phaseMs / GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS));
@@ -291,7 +361,10 @@ public class AnnouncementOverlay extends Overlay
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 3;
 
-        String prefix = "You found a ";
+        String localRsn = localRsn();
+        boolean isLocal = localRsn != null && localRsn.equalsIgnoreCase(finderRsn);
+
+        String prefix = isLocal ? "You found a " : finderRsn + " found a ";
         String goldenGnome = "GOLDEN GNOME";
         String suffix = "!";
 
@@ -314,12 +387,22 @@ public class AnnouncementOverlay extends Overlay
         drawLeftAlignedText(g, suffix, x, y, Color.WHITE, alpha);
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE));
-        drawCenteredText(g, "Would you like to buy one?", centerX, y + 32, Color.WHITE, alpha);
+        if (isLocal)
+        {
+            drawCenteredText(g, "Would you like to buy one?", centerX, y + 32, Color.WHITE, alpha);
 
-        Font emoteFont = FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
-        Font emoteWordFont = MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
-        drawEmoteInstruction(g, "YES", " emote: purchase", emoteFont, emoteWordFont, centerX, y + 66, alpha);
-        drawEmoteInstruction(g, "NO", " emote: decline", emoteFont, emoteWordFont, centerX, y + 96, alpha);
+            Font emoteFont = FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
+            Font emoteWordFont = MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
+            drawEmoteInstruction(g, "YES", " emote: purchase", emoteFont, emoteWordFont, centerX, y + 66, alpha);
+            drawEmoteInstruction(g, "NO", " emote: decline", emoteFont, emoteWordFont, centerX, y + 96, alpha);
+        }
+        else
+        {
+            drawCenteredText(g, "Would " + finderRsn + " like to buy one?", centerX, y + 32, Color.WHITE, alpha);
+
+            g.setFont(FontManager.getRunescapeSmallFont());
+            drawCenteredText(g, "Waiting for " + finderRsn + " to decide...", centerX, y + 66, Color.LIGHT_GRAY, alpha);
+        }
     }
 
     /** Draws one Golden Gnome emote instruction line -- {@code '<word>' emote: <suffix>} -- with
@@ -372,16 +455,34 @@ public class AnnouncementOverlay extends Overlay
      * "You can't afford this!" if they accepted without enough coins (a decline gets no banner at
      * all, see RunePartyPlugin's GOLDEN_GNOME_OFFER_RESOLVED handling) -- fires immediately rather
      * than waiting on scheduleAfterTurnEffects, same as the coin/dice popups; it's the *next* turn's
-     * own announcement that waits for this one via extendTurnEffectGate instead. */
+     * own announcement that waits for this one via extendTurnEffectGate instead. Addressed to
+     * whoever the outcome actually belongs to (goldenGnomeOutcomeRsn) the same way
+     * renderTurnAnnouncement/renderGoldenGnomeOffer already are -- "You..." for that player, "
+     * &lt;rsn&gt;..." for everyone else watching, rather than every client showing "You..." for an
+     * outcome that may well belong to someone else. */
     private void renderGoldenGnomeOutcome(Graphics2D g)
     {
         long remaining = plugin.getGoldenGnomeOutcomeBannerUntil() - System.currentTimeMillis();
         if (remaining <= 0) return;
 
         String outcome = plugin.getGoldenGnomeOutcome();
-        String text = "purchased".equals(outcome) ? "You got a Golden Gnome!"
-            : "cant_afford".equals(outcome) ? "You can't afford this!"
-            : null;
+        String rsn = plugin.getGoldenGnomeOutcomeRsn();
+        String localRsn = localRsn();
+        boolean isLocal = rsn != null && localRsn != null && localRsn.equalsIgnoreCase(rsn);
+
+        String text;
+        if ("purchased".equals(outcome))
+        {
+            text = isLocal ? "You got a Golden Gnome!" : rsn != null ? rsn + " got a Golden Gnome!" : null;
+        }
+        else if ("cant_afford".equals(outcome))
+        {
+            text = isLocal ? "You can't afford this!" : rsn != null ? rsn + " can't afford this!" : null;
+        }
+        else
+        {
+            text = null;
+        }
         if (text == null) return;
 
         float alpha = remaining < GOLDEN_GNOME_OUTCOME_FADE_MS ? remaining / (float) GOLDEN_GNOME_OUTCOME_FADE_MS : 1f;
@@ -424,7 +525,9 @@ public class AnnouncementOverlay extends Overlay
      * getDisplayName() revealed underneath -- the "landing announces the name" moment. Triggered
      * from RunePartyPlugin#scheduleMinigameSpinner, chained behind the "MINIGAME!" banner. With
      * only one mini-game registered the wheel is a single segment that always wins -- it'll read as
-     * a real spinner once more mini-games exist. */
+     * a real spinner once more mini-games exist. The actual wheel drawing is shared with
+     * renderItemSpinner via drawWheel -- this method only works out the timing/easing/target
+     * segment, which differs per wheel "menu" (different underlying timestamps and entry lists). */
     private void renderMinigameSpinner(Graphics2D g)
     {
         long until = plugin.getMinigameSpinnerUntil();
@@ -437,40 +540,100 @@ public class AnnouncementOverlay extends Overlay
         if (all.isEmpty()) return;
 
         Minigame selected = Minigames.get(plugin.getMinigameKey());
-        List<Minigame> wheelEntries = selectWheelEntries(all, selected);
+        List<Minigame> wheelEntries = selectWheelEntries(all, selected, plugin.getMinigameSpinnerStart());
         int targetIndex = Math.max(0, wheelEntries.indexOf(selected));
-        int n = wheelEntries.size();
-        float segmentDeg = 360f / n;
-        float targetCenterAngle = targetIndex * segmentDeg + segmentDeg / 2f;
 
         long elapsed = now - plugin.getMinigameSpinnerStart();
         boolean spinning = elapsed < RunePartyPlugin.MINIGAME_SPINNER_SPIN_PHASE_MS;
-        float totalRotationDeg = (360f - targetCenterAngle) + MINIGAME_SPINNER_EXTRA_SPINS * 360f;
+        float rotationDeg = wheelRotationDeg(wheelEntries.size(), targetIndex, elapsed, RunePartyPlugin.MINIGAME_SPINNER_SPIN_PHASE_MS, spinning);
+        float scale = wheelSettleScale(elapsed, RunePartyPlugin.MINIGAME_SPINNER_SPIN_PHASE_MS, spinning);
+        float alpha = remaining < WHEEL_FADE_MS ? remaining / (float) WHEEL_FADE_MS : 1f;
 
-        float rotationDeg;
-        float scale = 1f;
-        if (spinning)
-        {
-            float t = elapsed / (float) RunePartyPlugin.MINIGAME_SPINNER_SPIN_PHASE_MS;
-            float eased = 1f - (float) Math.pow(1f - t, 3); // ease-out cubic, slows into the landing
-            rotationDeg = eased * totalRotationDeg;
-        }
-        else
-        {
-            rotationDeg = totalRotationDeg;
-            long sinceSettle = elapsed - RunePartyPlugin.MINIGAME_SPINNER_SPIN_PHASE_MS;
-            if (sinceSettle < MINIGAME_SPINNER_SETTLE_POP_MS)
-            {
-                float t = sinceSettle / (float) MINIGAME_SPINNER_SETTLE_POP_MS;
-                scale = 1.25f - 0.25f * t;
-            }
-        }
+        drawWheel(g, wheelEntries, targetIndex, rotationDeg, scale, alpha, spinning, selected.getDisplayName());
+    }
 
-        float alpha = remaining < MINIGAME_SPINNER_FADE_MS ? remaining / (float) MINIGAME_SPINNER_FADE_MS : 1f;
+    /** Draws the Item Space wheel -- the same shared drawWheel routine renderMinigameSpinner
+     * uses, one segment per gay.runescape.runeparty.items.Items#all entry. The item itself was
+     * already picked server-side (see ITEM_GRANTED's "itemKey"/RunePartyPlugin#getItemGrantKey)
+     * -- this never gambles on the outcome, the same relationship the mini-game wheel has with
+     * its own pick. Once settled, reveals "You got &lt;item&gt;!" for whoever actually landed on
+     * the tile, "&lt;rsn&gt; got &lt;item&gt;!" for everyone else watching -- the same per-viewer
+     * split renderGoldenGnomeOutcome uses. Triggered from RunePartyPlugin#scheduleItemSpinner,
+     * chained behind whatever turn-effect visual (a coin popup, etc.) was already showing. */
+    private void renderItemSpinner(Graphics2D g)
+    {
+        long until = plugin.getItemSpinnerUntil();
+        if (until == 0) return;
+        long now = System.currentTimeMillis();
+        long remaining = until - now;
+        if (remaining <= 0) return;
+
+        List<Item> all = Items.all();
+        if (all.isEmpty()) return;
+
+        Item selected = Items.get(plugin.getItemGrantKey());
+        List<Item> wheelEntries = selectWheelEntries(all, selected, plugin.getItemSpinnerStart());
+        int targetIndex = Math.max(0, wheelEntries.indexOf(selected));
+
+        long elapsed = now - plugin.getItemSpinnerStart();
+        boolean spinning = elapsed < RunePartyPlugin.ITEM_SPINNER_SPIN_PHASE_MS;
+        float rotationDeg = wheelRotationDeg(wheelEntries.size(), targetIndex, elapsed, RunePartyPlugin.ITEM_SPINNER_SPIN_PHASE_MS, spinning);
+        float scale = wheelSettleScale(elapsed, RunePartyPlugin.ITEM_SPINNER_SPIN_PHASE_MS, spinning);
+        float alpha = remaining < WHEEL_FADE_MS ? remaining / (float) WHEEL_FADE_MS : 1f;
+
+        String grantRsn = plugin.getItemGrantRsn();
+        String localRsn = localRsn();
+        boolean isLocal = grantRsn != null && localRsn != null && localRsn.equalsIgnoreCase(grantRsn);
+        String revealText = grantRsn == null ? null
+            : isLocal ? "You got " + selected.getDisplayName() + "!"
+            : grantRsn + " got " + selected.getDisplayName() + "!";
+
+        drawWheel(g, wheelEntries, targetIndex, rotationDeg, scale, alpha, spinning, revealText);
+    }
+
+    /** How far the wheel has rotated at {@code elapsed} into its spin -- eased to a stop
+     * (ease-out cubic) across {@code spinPhaseMs}, then held fixed on the target once settled.
+     * Shared timing math for both renderMinigameSpinner and renderItemSpinner. */
+    private static float wheelRotationDeg(int entryCount, int targetIndex, long elapsed, long spinPhaseMs, boolean spinning)
+    {
+        float segmentDeg = 360f / entryCount;
+        float targetCenterAngle = targetIndex * segmentDeg + segmentDeg / 2f;
+        float totalRotationDeg = (360f - targetCenterAngle) + WHEEL_EXTRA_SPINS * 360f;
+
+        if (!spinning) return totalRotationDeg;
+
+        float t = elapsed / (float) spinPhaseMs;
+        float eased = 1f - (float) Math.pow(1f - t, 3); // ease-out cubic, slows into the landing
+        return eased * totalRotationDeg;
+    }
+
+    /** The brief overshoot-then-settle scale pop right after the wheel stops -- same feel as the
+     * dice roll's DIE_SETTLE_POP_MS. 1f while still spinning or once the pop's finished. */
+    private static float wheelSettleScale(long elapsed, long spinPhaseMs, boolean spinning)
+    {
+        if (spinning) return 1f;
+        long sinceSettle = elapsed - spinPhaseMs;
+        if (sinceSettle >= WHEEL_SETTLE_POP_MS) return 1f;
+        float t = sinceSettle / (float) WHEEL_SETTLE_POP_MS;
+        return 1.25f - 0.25f * t;
+    }
+
+    /** Draws one frame of a spinner wheel -- wedges, border, each entry's icon, a fixed pointer
+     * above it, and (once settled) {@code revealText} shown underneath in the Mario-Party-logo
+     * rainbow treatment. Shared by renderMinigameSpinner and renderItemSpinner -- everything
+     * wheel-specific (which entries, how far rotated, what scale/alpha, and what the reveal
+     * actually says once settled -- the mini-game wheel just shows the plain name, the item wheel
+     * phrases it as "You got..."/"&lt;rsn&gt; got...", see renderItemSpinner) is worked out by the
+     * caller; this only knows how to paint one. {@code revealText} is ignored while
+     * {@code spinning}, and skipped entirely if null. */
+    private <T extends WheelEntry> void drawWheel(Graphics2D g, List<T> wheelEntries, int targetIndex, float rotationDeg, float scale, float alpha, boolean spinning, String revealText)
+    {
+        int n = wheelEntries.size();
+        float segmentDeg = 360f / n;
 
         int cx = client.getCanvasWidth() / 2;
         int cy = client.getCanvasHeight() / 2;
-        float radius = MINIGAME_SPINNER_RADIUS * scale;
+        float radius = WHEEL_RADIUS * scale;
 
         Graphics2D wheel = (Graphics2D) g.create();
         wheel.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
@@ -488,7 +651,18 @@ public class AnnouncementOverlay extends Overlay
         {
             float center = i * segmentDeg + segmentDeg / 2f;
             Point2D.Float p = pointOnCircle(cx, cy, radius * 0.62f, center);
-            wheelEntries.get(i).drawIcon(wheel, Math.round(p.x), Math.round(p.y), Math.round(MINIGAME_SPINNER_ICON_SIZE), alpha);
+            // Counter-rotate by -rotationDeg around the icon's own (already-orbited) position:
+            // cancels out just the local tumble the wheel's own rotate() would otherwise put on
+            // each icon's drawing, leaving the orbit (their position swinging around the center as
+            // the wheel spins) intact. Without this, every icon spins in place along with its
+            // wedge, landing at whatever arbitrary tilt the settle angle happens to be -- including
+            // the revealed winner, which is the most visible case. Upright icons orbiting a
+            // spinning wheel is the standard prize-wheel look (e.g. Mario Party's own item
+            // roulette) precisely because raw wedge-locked icons read as broken/awkward instead.
+            Graphics2D icon = (Graphics2D) wheel.create();
+            icon.rotate(Math.toRadians(-rotationDeg), p.x, p.y);
+            wheelEntries.get(i).drawIcon(icon, Math.round(p.x), Math.round(p.y), Math.round(WHEEL_ICON_SIZE), alpha);
+            icon.dispose();
         }
         wheel.dispose();
 
@@ -498,34 +672,34 @@ public class AnnouncementOverlay extends Overlay
         pointer.addPoint(cx - 10, pointerTip - 16);
         pointer.addPoint(cx + 10, pointerTip - 16);
         pointer.addPoint(cx, pointerTip);
-        g.setColor(withAlpha(MINIGAME_SPINNER_POINTER_COLOR, alpha));
+        g.setColor(withAlpha(WHEEL_POINTER_COLOR, alpha));
         g.fillPolygon(pointer);
 
-        if (!spinning && selected != null)
+        if (!spinning && revealText != null)
         {
-            g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_SPINNER_NAME_SIZE));
-            drawCenteredRainbowText(g, selected.getDisplayName(), RAINBOW_LETTER_COLORS, cx, Math.round(cy + MINIGAME_SPINNER_RADIUS + 50), alpha);
+            g.setFont(MARIO_PARTY_FONT.deriveFont(WHEEL_NAME_SIZE));
+            drawCenteredRainbowText(g, revealText, RAINBOW_LETTER_COLORS, cx, Math.round(cy + WHEEL_RADIUS + 50), alpha);
         }
     }
 
-    /** Picks which mini-games actually appear on the wheel -- every one if there are
-     * MINIGAME_SPINNER_MAX_SEGMENTS or fewer registered, otherwise {@code selected} (it has to be
-     * showable, since the wheel always lands on it) plus a sample of the rest, so the wheel never
-     * grows unboundedly as more mini-games get added to the registry. Seeded off
-     * minigameSpinnerStart -- constant for this spin's whole animation -- rather than
-     * System.currentTimeMillis(), so the same sample holds steady across every frame instead of
-     * reshuffling on each one. */
-    private List<Minigame> selectWheelEntries(List<Minigame> all, Minigame selected)
+    /** Picks which entries actually appear on the wheel -- every one if there are
+     * WHEEL_MAX_SEGMENTS or fewer registered, otherwise {@code selected} (it has to be showable,
+     * since the wheel always lands on it) plus a sample of the rest, so the wheel never grows
+     * unboundedly as more mini-games/items get added to their registries. Seeded off
+     * {@code seed} -- each caller passes its own spin's start timestamp, constant for that spin's
+     * whole animation, rather than System.currentTimeMillis() -- so the same sample holds steady
+     * across every frame instead of reshuffling on each one. */
+    private <T extends WheelEntry> List<T> selectWheelEntries(List<T> all, T selected, long seed)
     {
-        if (all.size() <= MINIGAME_SPINNER_MAX_SEGMENTS) return all;
+        if (all.size() <= WHEEL_MAX_SEGMENTS) return all;
 
-        List<Minigame> others = new ArrayList<>(all);
+        List<T> others = new ArrayList<>(all);
         others.remove(selected);
-        Collections.shuffle(others, new Random(plugin.getMinigameSpinnerStart()));
+        Collections.shuffle(others, new Random(seed));
 
-        List<Minigame> entries = new ArrayList<>();
+        List<T> entries = new ArrayList<>();
         entries.add(selected);
-        entries.addAll(others.subList(0, MINIGAME_SPINNER_MAX_SEGMENTS - 1));
+        entries.addAll(others.subList(0, WHEEL_MAX_SEGMENTS - 1));
         return entries;
     }
 

@@ -38,6 +38,7 @@ public class TileOverlay extends Overlay
     // committed, same as every other tile type there, so it keeps the simple color-fill look.
     private static final Color COLOR_GOLDEN_GNOME_TILE = new Color(255, 210, 0);
     private static final Color COLOR_EVENT_TILE    = new Color(170, 80, 220);
+    private static final Color COLOR_ITEM_TILE     = new Color(255, 140, 0); // landing spins the item wheel (see AnnouncementOverlay#renderItemSpinner) and grants a random item
     private static final Color COLOR_ROUTE_LINE    = new Color(255, 255, 255, 100);
     private static final Color COLOR_TARGET_ARROW  = new Color(255, 215, 0);
 
@@ -507,6 +508,7 @@ public class TileOverlay extends Overlay
         if ("START".equals(tileType)) return COLOR_START;
         if ("GOLDEN_GNOME_TILE".equals(tileType)) return COLOR_GOLDEN_GNOME_TILE;
         if ("EVENT_TILE".equals(tileType)) return COLOR_EVENT_TILE;
+        if ("ITEM_TILE".equals(tileType)) return COLOR_ITEM_TILE;
         return COLOR_UNKNOWN_TYPE;
     }
 

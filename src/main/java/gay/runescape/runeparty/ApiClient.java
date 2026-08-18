@@ -6,7 +6,9 @@ import com.google.gson.JsonObject;
 import okhttp3.*;
 import java.io.IOException;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 public class ApiClient
@@ -191,6 +193,22 @@ public class ApiClient
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Respond to Golden Gnome offer failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** Spends one of the local player's held items on their own turn -- see the server's own
+     * use-item endpoint, which applies the item's effect and 409s if they don't actually hold it
+     * or it isn't genuinely their turn to act. */
+    public void useItem(String gameId, String playerRsn, String playerToken, String itemKey) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("itemKey", itemKey);
+
+        try (Response resp = post("/v1/games/" + gameId + "/use-item", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Use item failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -504,6 +522,7 @@ public class ApiClient
         public String number; // turn-order position ("1", "2", ...), same field shape RosterReducer already expects
         public int coins;
         public int goldenGnomeCount;
+        public Map<String, Integer> items = new HashMap<>(); // itemKey -> count held, defaulted so an older server response without this field doesn't NPE
     }
 
     public static class TilesResponse
