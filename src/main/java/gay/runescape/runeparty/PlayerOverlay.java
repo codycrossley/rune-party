@@ -98,9 +98,10 @@ public class PlayerOverlay extends Overlay
                 && rsn.equalsIgnoreCase(plugin.getCurrentTurnRsn());
             drawToken(g, p, c, onTurn);
 
-            if (phase == GamePhase.ACTIVE && rsn.equalsIgnoreCase(plugin.getCoinPopupRsn()))
+            RunePartyPlugin.CoinPopup coinPopup = phase == GamePhase.ACTIVE ? plugin.getCoinPopup(rsn) : null;
+            if (coinPopup != null)
             {
-                drawCoinPopup(g, p);
+                drawCoinPopup(g, p, coinPopup);
             }
 
             if (phase == GamePhase.ACTIVE && rsn.equalsIgnoreCase(plugin.getGoldenGnomePopupRsn()))
@@ -147,28 +148,25 @@ public class PlayerOverlay extends Overlay
         }
     }
 
-    /** Floats "+3" (or "-3" for a penalty tile) above a player's head after a standard-tile
-     * reward, then swaps to their new running total for the rest of the popup's life -- same
-     * client-side start/until-timestamp pattern as AnnouncementOverlay's turn banner (see
-     * RunePartyPlugin's COINS_CHANGED handling, which stamps coinPopupStart/coinPopupUntil), not
-     * anything the server tracks the duration of. coinPopupStart can be stamped into the future --
-     * see the "now < start" guard below -- when a Golden Gnome popup for the same player is still
-     * showing, so this one waits its turn instead of overlapping it; nothing renders at all until
-     * that future start time actually arrives. */
-    private void drawCoinPopup(Graphics2D g, Player p)
+    /** Floats "+3" (or "-3" for a penalty tile, or a Coin Trap steal's -20/+20 on the victim/owner
+     * respectively) above a player's head, then swaps to their new running total for the rest of
+     * the popup's life -- same client-side start/until-timestamp pattern as AnnouncementOverlay's
+     * turn banner (see RunePartyPlugin's COINS_CHANGED handling, which stamps each CoinPopup's own
+     * start/until). {@code popup.start} can be stamped into the future -- see the "now < start"
+     * guard below -- when a Golden Gnome popup, or an earlier coin popup, for the same player is
+     * still showing, so this one waits its turn instead of overlapping it; nothing renders at all
+     * until that future start time actually arrives. */
+    private void drawCoinPopup(Graphics2D g, Player p, RunePartyPlugin.CoinPopup popup)
     {
         long now = System.currentTimeMillis();
-        long start = plugin.getCoinPopupStart();
-        if (now < start) return; // RunePartyPlugin can push this into the future to wait out a still-showing Golden Gnome popup for the same player
-        long until = plugin.getCoinPopupUntil();
-        long remaining = until - now;
+        if (now < popup.start) return; // RunePartyPlugin can push this into the future to wait out a still-showing popup for the same player
+        long remaining = popup.until - now;
         if (remaining <= 0) return;
 
-        long elapsed = now - start;
+        long elapsed = now - popup.start;
         boolean showTotal = elapsed >= RunePartyPlugin.COIN_POPUP_DELTA_PHASE_MS;
-        int delta = plugin.getCoinPopupDelta();
-        String text = showTotal ? (plugin.getCoinPopupNewTotal() + " coins") : ((delta >= 0 ? "+" : "") + delta + " coins");
-        Color color = showTotal ? Color.WHITE : (delta >= 0 ? COIN_POPUP_GAIN_COLOR : COIN_POPUP_LOSS_COLOR);
+        String text = showTotal ? (popup.newTotal + " coins") : ((popup.delta >= 0 ? "+" : "") + popup.delta + " coins");
+        Color color = showTotal ? Color.WHITE : (popup.delta >= 0 ? COIN_POPUP_GAIN_COLOR : COIN_POPUP_LOSS_COLOR);
 
         float alpha = remaining < RunePartyPlugin.COIN_POPUP_FADE_MS ? remaining / (float) RunePartyPlugin.COIN_POPUP_FADE_MS : 1f;
         int rise = (int) Math.min(COIN_POPUP_MAX_RISE, elapsed / 50);

@@ -1,7 +1,10 @@
 package gay.runescape.runeparty;
 
+import net.runelite.api.Animation;
 import net.runelite.api.Client;
+import net.runelite.api.JagexColor;
 import net.runelite.api.Model;
+import net.runelite.api.ModelData;
 import net.runelite.api.Perspective;
 import net.runelite.api.Player;
 import net.runelite.api.RuneLiteObject;
@@ -53,6 +56,21 @@ public class TileOverlay extends Overlay
     // scene, instead of a color fill -- see updateGoldenGnomeModels.
     private static final int GOLDEN_GNOME_MODEL_ID = 32303;
 
+    // A committed Coin Trap tile renders the same way, as object 8972's own model ("Net trap") --
+    // see updateCoinTrapModels -- but fully recolored gold rather than left in its own natural
+    // rope/wood palette, per how the item was asked for ("color the model to be the yellow coin
+    // color"); see buildCoinTrapGoldModel for how that recolored model actually gets built.
+    private static final int COIN_TRAP_MODEL_ID = 19934;
+    // "Gold" web color -- a plain, unambiguous coin-yellow reference rather than sampling any
+    // specific in-game sprite. JagexColor#rgbToHSL's own brightnessFactor parameter (1.0 = no
+    // adjustment) converts it into the packed-HSL space every model color is actually stored in.
+    private static final int COIN_TRAP_GOLD_RGB = 0xFFD700;
+    // Object 8972's own animationID -- played once (not looped) the moment a trap actually
+    // triggers (see updateCoinTrapModels/RunePartyPlugin's COIN_TRAP_TRIGGERED handling), not while
+    // it's just sitting armed.
+    private static final int COIN_TRAP_SPRING_ANIMATION_ID = 5268;
+    private static final Color COLOR_PLACEMENT_ARROW = new Color(255, 140, 0);
+
     private final Client client;
     private final RunePartyConfig config;
     private final RunePartyPlugin plugin;
@@ -66,6 +84,24 @@ public class TileOverlay extends Overlay
     // of each loadModel() attempt once per point instead of every frame, so the client log shows
     // whether it's failing to load at all vs. loading but not showing up.
     private final Set<WorldPoint> goldenGnomeModelLoadLogged = new HashSet<>();
+
+    // Same shape as goldenGnomeModels, for Coin Trap tiles -- see updateCoinTrapModels/
+    // clearCoinTrapModels.
+    private final Map<WorldPoint, RuneLiteObject> coinTrapModels = new HashMap<>();
+    // The one point (if any) currently mid-trigger-animation, so updateCoinTrapModels only calls
+    // setAnimation once per trigger rather than re-arming it every single frame the force-persist
+    // window (RunePartyPlugin#getCoinTrapTriggerUntil) stays open -- see that method's own doc.
+    private WorldPoint coinTrapAnimatedTriggerPoint = null;
+
+    // Built once, lazily, the first time COIN_TRAP_MODEL_ID's raw ModelData successfully loads --
+    // see buildCoinTrapGoldModel, the only writer. Every currently-spawned Coin Trap RuneLiteObject
+    // shares this exact same recolored Model instance (same "build once, every instance points at
+    // the shared result" relationship updateGoldenGnomeModels doesn't need since it uses the
+    // object's own natural palette). Null until the load succeeds (and forever, if it never does),
+    // in which case updateCoinTrapModels falls back to the model's own natural palette rather than
+    // never spawning anything at all.
+    private Model coinTrapGoldModel;
+    private boolean coinTrapGoldModelLoadFailed;
 
     public TileOverlay(Client client, RunePartyConfig config, RunePartyPlugin plugin, TileReducer tileReducer)
     {
@@ -84,12 +120,14 @@ public class TileOverlay extends Overlay
         if (!config.showTileOverlay())
         {
             clearGoldenGnomeModels();
+            clearCoinTrapModels();
             return null;
         }
         GamePhase phase = plugin.getPhase();
         if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE)
         {
             clearGoldenGnomeModels();
+            clearCoinTrapModels();
             return null;
         }
 
@@ -105,6 +143,7 @@ public class TileOverlay extends Overlay
         renderTargetArrow(g);
         renderReturnToPositionArrow(g);
         renderStartArrow(g);
+        renderItemPlacementArrows(g);
 
         return null;
     }
@@ -116,11 +155,13 @@ public class TileOverlay extends Overlay
         for (TileReducer.TileEntry entry : entries)
         {
             if ("GOLDEN_GNOME_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see updateGoldenGnomeModels below
+            if ("COIN_TRAP_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see updateCoinTrapModels below
             Color base = resolveColor(entry.color, entry.tileType);
             renderFilledTile(g, entry.point, withAlpha(base, FILL_ALPHA), withAlpha(base, BORDER_ALPHA), SOLID_STROKE);
         }
 
         updateGoldenGnomeModels(entries);
+        updateCoinTrapModels(entries);
         renderRouteLines(g, entries);
     }
 
@@ -219,6 +260,138 @@ public class TileOverlay extends Overlay
             obj.setActive(false);
         }
         goldenGnomeModels.clear();
+    }
+
+    /** Same "diff the live set against currently-spawned RuneLiteObjects" shape as
+     * updateGoldenGnomeModels, for Coin Trap tiles -- except a Coin Trap never relocates, it just
+     * disappears for good once triggered (see the server's own TILE_UNMARKED right after
+     * COIN_TRAP_TRIGGERED), so there's only one force-persist window to honor here (via
+     * RunePartyPlugin#getCoinTrapTriggerPoint/Until), not the two-sided old/new choreography a
+     * Golden Gnome relocation needs. That same window is also when the object's own spring
+     * animation (COIN_TRAP_SPRING_ANIMATION_ID) actually plays -- fired once per trigger, guarded
+     * by coinTrapAnimatedTriggerPoint so it doesn't re-arm every frame the window stays open. */
+    private void updateCoinTrapModels(List<TileReducer.TileEntry> entries)
+    {
+        Set<WorldPoint> current = new HashSet<>();
+        for (TileReducer.TileEntry entry : entries)
+        {
+            if ("COIN_TRAP_TILE".equals(entry.tileType)) current.add(entry.point);
+        }
+
+        long now = System.currentTimeMillis();
+        WorldPoint triggerPoint = plugin.getCoinTrapTriggerPoint();
+        boolean triggerActive = triggerPoint != null && now < plugin.getCoinTrapTriggerUntil();
+        if (triggerActive)
+        {
+            current.add(triggerPoint);
+        }
+        else
+        {
+            coinTrapAnimatedTriggerPoint = null; // window closed -- a future trigger at the same point can animate again
+        }
+
+        coinTrapModels.entrySet().removeIf(e ->
+        {
+            if (current.contains(e.getKey())) return false;
+            e.getValue().setActive(false);
+            return true;
+        });
+
+        for (WorldPoint point : current)
+        {
+            RuneLiteObject obj = coinTrapModels.computeIfAbsent(point, p -> client.createRuneLiteObject());
+
+            if (obj.getModel() == null)
+            {
+                if (coinTrapGoldModel == null) buildCoinTrapGoldModel();
+                Model model = coinTrapGoldModel != null ? coinTrapGoldModel : client.loadModel(COIN_TRAP_MODEL_ID);
+                if (model != null) obj.setModel(model);
+            }
+
+            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), point);
+            if (lp == null)
+            {
+                obj.setActive(false);
+                continue;
+            }
+
+            obj.setLocation(lp, point.getPlane());
+            if (obj.getModel() != null && !obj.isActive()) obj.setActive(true);
+
+            if (triggerActive && point.equals(triggerPoint) && !point.equals(coinTrapAnimatedTriggerPoint))
+            {
+                Animation anim = client.loadAnimation(COIN_TRAP_SPRING_ANIMATION_ID);
+                if (anim != null)
+                {
+                    obj.setShouldLoop(false);
+                    obj.setAnimation(anim);
+                    coinTrapAnimatedTriggerPoint = point;
+                }
+            }
+        }
+    }
+
+    /** Builds coinTrapGoldModel the first time it's needed -- a no-op once already built (or once
+     * a load attempt has already failed, see coinTrapGoldModelLoadFailed). Same technique
+     * Gnomeball's CheerleaderRenderer#buildHueShiftedModel/hueShift uses to recolor the
+     * Cheerleader NPC per-team, and for the same underlying reason: {@code Client#loadModel(id,
+     * recolorFind, recolorReplace)}'s own recolor args only match colors against a swap slot the
+     * model's own cache definition explicitly declared ({@code recolorToFind}/{@code
+     * recolorToReplace}) -- object 8972 declares exactly one such slot (see this class's own
+     * history/the object's cache JSON), nowhere near enough to recolor "as much of the model as
+     * possible" the way this was asked for. Operating on the model's raw, pre-lit {@link
+     * ModelData} instead (via {@code Client#loadModelData}) exposes literally every face color the
+     * mesh has, with no swap-slot limit -- {@code ModelData#recolor(short, short)} rewrites any of
+     * them directly, and {@code ModelData#light()} is what actually bakes the now-recolored mesh
+     * into a final renderable {@link Model} afterward. Every distinct color found gets mapped to a
+     * golden HSL sharing that color's own luminance (see JagexColor#unpackLuminance/packHSL) --
+     * preserving whatever shading the model's real palette had (a lit top face reads as bright
+     * gold, a shadowed underside as darker gold) rather than flattening the whole model into one
+     * indistinguishable color, same reasoning CheerleaderRenderer's hueShift documents for keeping
+     * saturation/luminance and only overriding hue -- this goes one step further and overrides
+     * saturation too (not just hue), since the goal here is everything reading as unambiguously
+     * gold rather than each part keeping its own natural vibrancy. Retried on the next
+     * updateCoinTrapModels call if the raw load itself returns null (same brief just-after-startup
+     * window updateGoldenGnomeModels' own loadModel retry documents), but only ever actually builds
+     * the model once. */
+    private void buildCoinTrapGoldModel()
+    {
+        if (coinTrapGoldModel != null || coinTrapGoldModelLoadFailed) return;
+
+        ModelData raw = client.loadModelData(COIN_TRAP_MODEL_ID);
+        if (raw == null) return; // not loaded yet -- retried next call
+
+        short[] faceColors = raw.getFaceColors();
+        if (faceColors == null || faceColors.length == 0)
+        {
+            coinTrapGoldModelLoadFailed = true;
+            return;
+        }
+
+        Set<Short> distinct = new HashSet<>();
+        for (short c : faceColors) distinct.add(c);
+
+        int goldHue = JagexColor.unpackHue(JagexColor.rgbToHSL(COIN_TRAP_GOLD_RGB, 1.0));
+        int goldSaturation = JagexColor.unpackSaturation(JagexColor.rgbToHSL(COIN_TRAP_GOLD_RGB, 1.0));
+
+        ModelData result = raw;
+        for (short original : distinct)
+        {
+            short recolored = JagexColor.packHSL(goldHue, goldSaturation, JagexColor.unpackLuminance(original));
+            result = result.recolor(original, recolored);
+        }
+        coinTrapGoldModel = result.light();
+    }
+
+    /** Despawns and forgets every Coin Trap RuneLiteObject -- same reasoning/call sites as
+     * clearGoldenGnomeModels. */
+    public void clearCoinTrapModels()
+    {
+        for (RuneLiteObject obj : coinTrapModels.values())
+        {
+            obj.setActive(false);
+        }
+        coinTrapModels.clear();
     }
 
     /** Draws a bouncing, pulsing arrow -- in the mover's own RunePartyColor (see
@@ -363,6 +536,20 @@ public class TileOverlay extends Overlay
         if (start == null) return;
 
         drawBouncingArrowWithLabel(g, start.point, "Start Here!", COLOR_START);
+    }
+
+    /** "Place" arrows over the two candidate tiles (one step ahead, one step behind the local
+     * player's own current course position) while a requires_placement item is armed -- see
+     * RunePartyPlugin#beginItemPlacement/getItemPlacementCandidates. Local-only: nobody but the
+     * player actually placing sees these, since only they can act on the right-click "Place
+     * &lt;item&gt;" entry these tiles carry (see RunePartyPlugin#onMenuEntryAdded). */
+    private void renderItemPlacementArrows(Graphics2D g)
+    {
+        if (plugin.getItemPlacementKey() == null) return;
+        for (WorldPoint point : plugin.getItemPlacementCandidates())
+        {
+            drawBouncingArrowWithLabel(g, point, "Place", COLOR_PLACEMENT_ARROW);
+        }
     }
 
     private Player findPlayerByRsn(String rsn)

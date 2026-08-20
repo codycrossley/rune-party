@@ -31,4 +31,24 @@ public interface Item extends WheelEntry
     {
         return null;
     }
+
+    /** The banner's verb -- "You &lt;verb&gt; &lt;name&gt;!" -- only ever read when
+     * hasUseAnnouncement() is true. "Used" fits an instant-effect item; a requires_placement item
+     * like CoinTrapItem overrides this to "placed", since ITEM_USED for one of these actually
+     * lands at the moment the tile gets marked (see app.py's place_coin_trap), not at some earlier
+     * "used" moment "placed" wouldn't already cover. */
+    default String getUseAnnounceVerb()
+    {
+        return "used";
+    }
+
+    /** True for an item spent by placing it on a tile (see CoinTrapItem) rather than by an instant
+     * effect -- RunePartyPanel's "Use"/"Place" button routes one of these to
+     * RunePartyPlugin#beginItemPlacement instead of #useItem, since the server never even sees a
+     * use-item call for it (see the server's own Item.requires_placement, which use_item checks
+     * before ever reaching apply_effect). False by default. */
+    default boolean requiresPlacement()
+    {
+        return false;
+    }
 }

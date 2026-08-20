@@ -212,6 +212,26 @@ public class ApiClient
         }
     }
 
+    /** Spends a held Coin Trap by placing it at (x, y, plane) -- see the server's own
+     * place-coin-trap endpoint, which both consumes the item and marks the tile in one call (there's
+     * no separate "use" step for a requires_placement item, see Item#requiresPlacement). 409s if
+     * the tile isn't one of the two directly adjacent to the player's own current position, or if
+     * it isn't genuinely their turn to act. */
+    public void placeCoinTrap(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("x", x);
+        body.addProperty("y", y);
+        body.addProperty("plane", plane);
+
+        try (Response resp = post("/v1/games/" + gameId + "/place-coin-trap", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Place Coin Trap failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     /** Submits this player's raw result for the currently-active mini-game. The server determines
      * the winner and coin payout from all submitted results -- the payout amount is never
      * client-dictated -- but the underlying performance number is necessarily self-reported by

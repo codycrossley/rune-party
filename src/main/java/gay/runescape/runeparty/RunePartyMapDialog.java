@@ -5,6 +5,7 @@ import net.runelite.client.ui.FontManager;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -33,6 +34,8 @@ public class RunePartyMapDialog extends JDialog
     private static final Color ROUTE_LINE = new Color(255, 255, 255, 90);
     private static final Color GOLDEN_GNOME_MARKER = new Color(255, 215, 0);
     private static final Color GOLDEN_GNOME_MARKER_BORDER = Color.BLACK;
+    private static final Color COIN_TRAP_MARKER = new Color(150, 80, 30);
+    private static final Color COIN_TRAP_MARKER_BORDER = Color.BLACK;
     private static final Color PLAYER_LABEL = Color.WHITE;
     private static final Color PLAYER_DOT_BORDER = Color.BLACK;
     private static final Color LOCAL_PLAYER_RING = Color.WHITE;
@@ -51,7 +54,14 @@ public class RunePartyMapDialog extends JDialog
         MapPanel mapPanel = new MapPanel();
         JScrollPane scrollPane = new JScrollPane(mapPanel);
         scrollPane.setPreferredSize(new Dimension(420, 320));
-        setContentPane(scrollPane);
+
+        // Legend fixed at the bottom (always visible, no scrolling needed to see it) -- see
+        // buildLegend. Per-tile detail beyond a color/marker's own short label is instead a hover
+        // tooltip on the map itself, see MapPanel#getToolTipText.
+        JPanel content = new JPanel(new BorderLayout());
+        content.add(scrollPane, BorderLayout.CENTER);
+        content.add(buildLegend(), BorderLayout.SOUTH);
+        setContentPane(content);
         setResizable(true);
 
         refreshTimer = new Timer((int) REFRESH_PERIOD_MS, e -> mapPanel.repaint());
@@ -82,10 +92,17 @@ public class RunePartyMapDialog extends JDialog
 
     private class MapPanel extends JPanel
     {
+        // Cached from the most recent paintComponent -- see getToolTipText, which needs the same
+        // bounds/plane paintComponent just used to lay tiles out, to map a mouse point back to the
+        // WorldPoint under it. Null (via boundsKnown) whenever there's no course to hover at all.
+        private int lastMinX, lastMaxY, lastPlane;
+        private boolean boundsKnown = false;
+
         MapPanel()
         {
             setBackground(BACKGROUND);
             setPreferredSize(new Dimension(300, 200));
+            setToolTipText(""); // registers this component with ToolTipManager -- see getToolTipText for the real per-tile content
         }
 
         @Override
@@ -98,6 +115,7 @@ public class RunePartyMapDialog extends JDialog
             List<TileReducer.TileEntry> tiles = plugin.getTileReducer().snapshot();
             if (tiles.isEmpty())
             {
+                boundsKnown = false;
                 g.setColor(EMPTY_TEXT);
                 g.setFont(FontManager.getRunescapeFont());
                 g.drawString("No course marked yet.", PADDING, PADDING + 12);
@@ -125,6 +143,11 @@ public class RunePartyMapDialog extends JDialog
                 maxY = Math.max(maxY, t.point.getY());
             }
 
+            lastMinX = minX;
+            lastMaxY = maxY;
+            lastPlane = plane;
+            boundsKnown = true;
+
             int width = (maxX - minX + 1) * CELL_SIZE + PADDING * 2;
             int height = (maxY - minY + 1) * CELL_SIZE + PADDING * 2;
             Dimension size = new Dimension(width, height);
@@ -150,12 +173,14 @@ public class RunePartyMapDialog extends JDialog
                 }
             }
 
-            // Tile fills -- Golden Gnome modifiers are drawn as a marker over their underlying
-            // PATH tile afterward (see below), not as a fill of their own, same "decorative
-            // overlay, not its own course stop" treatment TileOverlay gives them in-world.
+            // Tile fills -- Golden Gnome/Coin Trap modifiers are drawn as a marker over their
+            // underlying PATH tile afterward (see below), not as a fill of their own, same
+            // "decorative overlay, not its own course stop" treatment TileOverlay gives them
+            // in-world.
             for (TileReducer.TileEntry t : tiles)
             {
-                if (t.point.getPlane() != plane || "GOLDEN_GNOME_TILE".equals(t.tileType)) continue;
+                if (t.point.getPlane() != plane) continue;
+                if ("GOLDEN_GNOME_TILE".equals(t.tileType) || "COIN_TRAP_TILE".equals(t.tileType)) continue;
                 Point topLeft = cellTopLeft(t.point, minX, maxY);
                 int s = CELL_SIZE - TILE_GAP;
                 Color color = tileColor(t.tileType, t.color);
@@ -172,7 +197,89 @@ public class RunePartyMapDialog extends JDialog
                 drawGnomeMarker(g, cellCenter(t.point, minX, maxY));
             }
 
+            // Coin Trap markers.
+            for (TileReducer.TileEntry t : tiles)
+            {
+                if (t.point.getPlane() != plane || !"COIN_TRAP_TILE".equals(t.tileType)) continue;
+                drawCoinTrapMarker(g, cellCenter(t.point, minX, maxY));
+            }
+
             paintPlayers(g, minX, maxY, plane);
+        }
+
+        /** Per-tile detail on hover -- see buildLegend's own doc for how this complements rather
+         * than duplicates the fixed legend strip. Maps the mouse point back to whichever WorldPoint
+         * cell it's over using the same bounds/plane the most recent paintComponent laid tiles out
+         * against (see lastMinX/lastMaxY/lastPlane), then lists every tile stacked there (a
+         * modifier and its underlying course tile share a cell) plus who's currently standing on
+         * it. Null -- no tooltip at all -- off the course entirely or before a course exists. */
+        @Override
+        public String getToolTipText(MouseEvent event)
+        {
+            if (!boundsKnown) return null;
+            WorldPoint wp = worldPointAt(event.getPoint(), lastMinX, lastMaxY, lastPlane);
+            return wp != null ? tileInfoHtml(wp) : null;
+        }
+
+        private WorldPoint worldPointAt(Point p, int minX, int maxY, int plane)
+        {
+            int col = Math.floorDiv(p.x - PADDING, CELL_SIZE);
+            int row = Math.floorDiv(p.y - PADDING, CELL_SIZE);
+            if (col < 0 || row < 0) return null;
+            return new WorldPoint(minX + col, maxY - row, plane);
+        }
+
+        private String tileInfoHtml(WorldPoint wp)
+        {
+            List<TileReducer.TileEntry> here = new ArrayList<>();
+            for (TileReducer.TileEntry t : plugin.getTileReducer().snapshot())
+            {
+                if (t.point.equals(wp)) here.add(t);
+            }
+
+            List<String> standing = new ArrayList<>();
+            for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().snapshot())
+            {
+                if (entry.role != RunePartyRole.PLAYER || !entry.joined) continue;
+                TileReducer.TileEntry playerTile = plugin.getTileReducer().tileAtIndex(plugin.getPlayerPosition(entry.rsn));
+                if (playerTile != null && playerTile.point.equals(wp)) standing.add(entry.rsn);
+            }
+
+            if (here.isEmpty() && standing.isEmpty()) return null;
+
+            StringBuilder sb = new StringBuilder("<html>");
+            for (TileReducer.TileEntry t : here)
+            {
+                if (sb.length() > 6) sb.append("<br>");
+                sb.append(tileDescription(t));
+            }
+            if (!standing.isEmpty())
+            {
+                if (sb.length() > 6) sb.append("<br>");
+                sb.append("Standing here: ").append(String.join(", ", standing));
+            }
+            sb.append("</html>");
+            return sb.toString();
+        }
+
+        /** Plain-English gloss for one tile/modifier -- see buildLegend for the same reward
+         * numbers' short-form color-swatch summary; this is the fuller per-tile version, including
+         * its pathIndex where that's meaningful. Numbers here mirror app.py's own
+         * STANDARD_TILE_REWARD/PENALTY_TILE_PENALTY/GOLDEN_GNOME_PRICE/COIN_TRAP_STEAL_AMOUNT --
+         * duplicated rather than shared, same as tileColor's own doc explains for this file. */
+        private String tileDescription(TileReducer.TileEntry t)
+        {
+            switch (t.tileType)
+            {
+                case "START": return "Start";
+                case "PATH": return "Standard tile (pathIndex " + t.pathIndex + ") -- +3 coins";
+                case "PENALTY_TILE": return "Penalty tile (pathIndex " + t.pathIndex + ") -- -3 coins";
+                case "ITEM_TILE": return "Item Space (pathIndex " + t.pathIndex + ") -- grants a random item";
+                case "EVENT_TILE": return "Event tile (pathIndex " + t.pathIndex + ") -- TBD";
+                case "GOLDEN_GNOME_TILE": return "Golden Gnome -- buy for 20 coins";
+                case "COIN_TRAP_TILE": return "Coin Trap -- steals up to 20 coins from anyone but its owner";
+                default: return t.tileType;
+            }
         }
 
         /** One dot per seated, joined PLAYER at their live board position (see
@@ -258,6 +365,26 @@ public class RunePartyMapDialog extends JDialog
             g.drawPolygon(triangle);
         }
 
+        /** A diamond -- distinct from the Golden Gnome's triangle and every player's circular dot
+         * -- for a Coin Trap modifier. */
+        private void drawCoinTrapMarker(Graphics2D g, Point center)
+        {
+            int r = CELL_SIZE * 7 / 20;
+
+            Polygon diamond = new Polygon();
+            diamond.addPoint(center.x, center.y - r);
+            diamond.addPoint(center.x + r, center.y);
+            diamond.addPoint(center.x, center.y + r);
+            diamond.addPoint(center.x - r, center.y);
+
+            g.setColor(COIN_TRAP_MARKER);
+            g.fillPolygon(diamond);
+
+            g.setStroke(new BasicStroke(1.3f));
+            g.setColor(COIN_TRAP_MARKER_BORDER);
+            g.drawPolygon(diamond);
+        }
+
         private Point cellTopLeft(WorldPoint wp, int minX, int maxY)
         {
             int x = PADDING + (wp.getX() - minX) * CELL_SIZE;
@@ -270,6 +397,58 @@ public class RunePartyMapDialog extends JDialog
             Point topLeft = cellTopLeft(wp, minX, maxY);
             return new Point(topLeft.x + CELL_SIZE / 2, topLeft.y + CELL_SIZE / 2);
         }
+    }
+
+    /** Fixed reference strip along the bottom of the dialog, always visible without scrolling --
+     * one swatch/marker-color per tile type, so a color you can't place from memory (there are a
+     * lot of them once Golden Gnome/Coin Trap markers are added on top of the plain fills) is one
+     * glance away instead of a guess. Complements rather than duplicates MapPanel's own hover
+     * tooltip (see getToolTipText) -- this is the quick "what does orange mean" reference, the
+     * tooltip is the per-tile detail (exact reward numbers, a Golden Gnome/Coin Trap's own state,
+     * who's standing there). */
+    private JPanel buildLegend()
+    {
+        JPanel legend = new JPanel();
+        legend.setLayout(new BoxLayout(legend, BoxLayout.Y_AXIS));
+        legend.setBackground(BACKGROUND);
+        legend.setBorder(BorderFactory.createEmptyBorder(6, PADDING, 8, PADDING));
+
+        legend.add(legendRow(tileColor("START", null), "Start"));
+        legend.add(legendRow(tileColor("PATH", null), "Standard tile (+3 coins)"));
+        legend.add(legendRow(tileColor("PENALTY_TILE", null), "Penalty tile (-3 coins)"));
+        legend.add(legendRow(tileColor("ITEM_TILE", null), "Item Space (random item)"));
+        legend.add(legendRow(tileColor("EVENT_TILE", null), "Event tile (TBD)"));
+        legend.add(legendRow(GOLDEN_GNOME_MARKER, "Golden Gnome (▲ marker -- buy for 20 coins)"));
+        legend.add(legendRow(COIN_TRAP_MARKER, "Coin Trap (◆ marker -- steals up to 20 coins)"));
+
+        JLabel hint = new JLabel("Hover a tile on the map above for details");
+        hint.setForeground(EMPTY_TEXT);
+        hint.setFont(FontManager.getRunescapeSmallFont());
+        hint.setAlignmentX(Component.LEFT_ALIGNMENT);
+        legend.add(Box.createVerticalStrut(4));
+        legend.add(hint);
+
+        return legend;
+    }
+
+    private static JPanel legendRow(Color swatchColor, String label)
+    {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 1));
+        row.setBackground(BACKGROUND);
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JPanel swatch = new JPanel();
+        swatch.setPreferredSize(new Dimension(12, 12));
+        swatch.setBackground(swatchColor);
+        swatch.setBorder(BorderFactory.createLineBorder(Color.BLACK));
+        row.add(swatch);
+
+        JLabel text = new JLabel(label);
+        text.setForeground(EMPTY_TEXT);
+        text.setFont(FontManager.getRunescapeSmallFont());
+        row.add(text);
+
+        return row;
     }
 
     /** Same tile-type-to-color mapping as TileOverlay#resolveColor/defaultColorFor -- duplicated

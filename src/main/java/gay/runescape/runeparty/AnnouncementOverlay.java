@@ -112,6 +112,11 @@ public class AnnouncementOverlay extends Overlay
     private static final float ITEM_USED_ANNOUNCE_TITLE_SIZE = 28f;
     private static final float ITEM_USED_ANNOUNCE_SUBTITLE_SIZE = 20f;
 
+    // "You/<rsn> landed on a Coin Trap!" -- see renderCoinTrapAnnouncement. Plain single-line
+    // title card, sized like the Golden Gnome outcome banner it's most similar to.
+    private static final long COIN_TRAP_ANNOUNCE_FADE_MS = 500;
+    private static final float COIN_TRAP_ANNOUNCE_TITLE_SIZE = 32f;
+
     // "+N"/"-N" bonus label beside the die once a bonus-carrying roll reaches its badge phase --
     // see renderDiceRoll's bonus phases (RunePartyPlugin.DICE_ROLL_BONUS_BADGE_MS/FLIP_MS). Same
     // gain/loss palette as PlayerOverlay's own coin popup (COIN_POPUP_GAIN_COLOR/LOSS_COLOR),
@@ -241,6 +246,7 @@ public class AnnouncementOverlay extends Overlay
         renderItemSpinner(g);
         renderItemCapBlocked(g);
         renderItemUsedAnnouncement(g);
+        renderCoinTrapAnnouncement(g);
         renderMinigameBanner(g);
         renderMinigameSpinner(g);
         renderMinigameReadyCheck(g);
@@ -695,7 +701,8 @@ public class AnnouncementOverlay extends Overlay
         String localRsn = localRsn();
         boolean isLocal = localRsn != null && localRsn.equalsIgnoreCase(rsn);
 
-        String title = (isLocal ? "You used " : rsn + " used ") + item.getDisplayName() + "!";
+        String verb = item.getUseAnnounceVerb();
+        String title = (isLocal ? "You " + verb + " " : rsn + " " + verb + " ") + item.getDisplayName() + "!";
         String subtitle = item.getUseAnnouncementSubtitle(isLocal);
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_TITLE_SIZE));
@@ -706,6 +713,29 @@ public class AnnouncementOverlay extends Overlay
             g.setFont(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_SUBTITLE_SIZE));
             drawCenteredText(g, subtitle, centerX, y + 28, Color.LIGHT_GRAY, alpha);
         }
+    }
+
+    /** Draws "You/&lt;rsn&gt; landed on a Coin Trap!" on COIN_TRAP_TRIGGERED -- plain single-line
+     * title card, same per-viewer split as every other outcome banner here, no subtitle: the actual
+     * numbers (the victim's -N, the owner's +N) are each player's own coin popup's job, not this
+     * banner's (see PlayerOverlay#drawCoinPopup). */
+    private void renderCoinTrapAnnouncement(Graphics2D g)
+    {
+        long remaining = plugin.getCoinTrapAnnounceUntil() - System.currentTimeMillis();
+        if (remaining <= 0) return;
+        String rsn = plugin.getCoinTrapAnnounceRsn();
+        if (rsn == null) return;
+
+        float alpha = remaining < COIN_TRAP_ANNOUNCE_FADE_MS ? remaining / (float) COIN_TRAP_ANNOUNCE_FADE_MS : 1f;
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 3;
+
+        String localRsn = localRsn();
+        boolean isLocal = localRsn != null && localRsn.equalsIgnoreCase(rsn);
+        String title = (isLocal ? "You" : rsn) + " landed on a Coin Trap!";
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(COIN_TRAP_ANNOUNCE_TITLE_SIZE));
+        drawCenteredText(g, title, centerX, y, Color.WHITE, alpha);
     }
 
     /** How far the wheel has rotated at {@code elapsed} into its spin -- eased to a stop

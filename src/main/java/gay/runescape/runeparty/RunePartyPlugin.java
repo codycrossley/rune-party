@@ -12,12 +12,14 @@ import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -111,6 +113,15 @@ public class RunePartyPlugin extends Plugin
      * fired on ITEM_USED for whichever items opt in via Item#hasUseAnnouncement (see
      * scheduleItemUsedAnnouncement), same plain fixed-duration shape as ITEM_CAP_BLOCKED_DURATION_MS. */
     public static final long ITEM_USED_ANNOUNCE_DURATION_MS = 3000;
+
+    /** How long AnnouncementOverlay's "You/&lt;rsn&gt; landed on a coin trap!" banner stays up --
+     * fired on COIN_TRAP_TRIGGERED, same fixed-duration shape as ITEM_USED_ANNOUNCE_DURATION_MS. */
+    public static final long COIN_TRAP_ANNOUNCE_DURATION_MS = 3000;
+    /** How long TileOverlay#updateCoinTrapModels keeps a triggered Coin Trap's model spawned (and
+     * its spring animation playing) after COIN_TRAP_TRIGGERED, even though the server's paired
+     * TILE_UNMARKED has already dropped it from TileReducer's live set -- long enough for
+     * COIN_TRAP_SPRING_ANIMATION_ID to actually finish playing before the model just vanishes. */
+    public static final long COIN_TRAP_TRIGGER_PERSIST_MS = 1500;
 
     /** How long AnnouncementOverlay's "3... 2... 1... BEGIN!" countdown plays once every seated
      * PLAYER has YES-emoted ready (see MINIGAME_COUNTDOWN_STARTED) -- one second per tick: 3, 2,
@@ -369,6 +380,12 @@ public class RunePartyPlugin extends Plugin
     // their one-item-per-turn allowance -- reset on every TURN_STARTED, set by ITEM_USED. Mirrors
     // the server's own itemUsedThisTurn (see app.py's use_item).
     private volatile boolean itemUsedThisTurn = false;
+    // Non-null while a requires_placement item (see Item#requiresPlacement) is armed -- set by
+    // beginItemPlacement, cleared by cancelItemPlacement or a successful placement. Client-local
+    // only: the server never hears about this until the actual place-coin-trap call goes out, so
+    // there's no "used but not yet placed" state to reconcile if the player backs out. See
+    // getItemPlacementCandidates for the two tiles this arms "Place <item>" on.
+    private volatile String itemPlacementKey = null;
     // Recomputed once per game tick from onGameTick (the client thread) -- see
     // isStandingOnTrackedPosition, whose Player#getWorldLocation() call asserts it's never invoked
     // off the client thread. isLocalPlayerReadyToRoll() reads this cached copy instead of calling
@@ -422,6 +439,19 @@ public class RunePartyPlugin extends Plugin
     private volatile long itemUsedAnnounceUntil = 0;
     private volatile String itemUsedAnnounceRsn = null;
     private volatile String itemUsedAnnounceItemKey = null;
+    // ---- Coin Trap trigger (cosmetic-only timing, chained the same way as the item-used
+    // announcement above -- see scheduleCoinTrapTriggerAnnouncement). coinTrapAnnounceRsn is
+    // whoever landed on it (the victim) -- the owner's own feedback is purely their coin popup, no
+    // banner of their own. ----
+    private volatile ScheduledFuture<?> coinTrapAnnounceTask;
+    private volatile long coinTrapAnnounceUntil = 0;
+    private volatile String coinTrapAnnounceRsn = null;
+    // Real-time (not chained behind scheduleAfterTurnEffects -- see COIN_TRAP_TRIGGERED handling's
+    // own doc): where TileOverlay#updateCoinTrapModels should force-persist the model and fire its
+    // spring animation for COIN_TRAP_TRIGGER_PERSIST_MS after the server's own TILE_UNMARKED would
+    // otherwise have already made it vanish.
+    private volatile WorldPoint coinTrapTriggerPoint = null;
+    private volatile long coinTrapTriggerUntil = 0;
     // ---- mini-game ready-check (server-driven, everyone sees it -- see MINIGAME_PLAYER_READY/
     // MINIGAME_COUNTDOWN_STARTED handling). minigameReadyRsns is real state (who's actually
     // YES-emoted so far), applied unconditionally catch-up or not -- same reasoning as
@@ -553,12 +583,41 @@ public class RunePartyPlugin extends Plugin
     private volatile WorldPoint goldenGnomeMoveNewPoint = null;
     private volatile long goldenGnomeMoveShowNewAt = 0; // model force-hidden at goldenGnomeMoveNewPoint until this passes, even though TileReducer already has it
 
-    // ---- coin popup (client-side timer -- see PlayerOverlay#drawCoinPopup) ----
-    private volatile String coinPopupRsn = null;
-    private volatile int coinPopupDelta = 0;
-    private volatile int coinPopupNewTotal = 0;
-    private volatile long coinPopupStart = 0;
-    private volatile long coinPopupUntil = 0;
+    // ---- coin popup (client-side timer -- see PlayerOverlay#drawCoinPopup). Keyed per player
+    // (player_lower -> an ordered queue of not-yet-expired popups for them) rather than one global
+    // slot, so two different players' coins changing out of the same landing -- see
+    // COIN_TRAP_TRIGGERED's paired COINS_CHANGED events, victim and owner both -- can show at once
+    // instead of the second clobbering the first before it's even rendered a frame. A *queue*, not
+    // a single latest-value slot, for the same reason within one player: a Coin Trap steal's own
+    // COINS_CHANGED is immediately followed by the underlying tile's own standard-tile payout for
+    // that same victim (see _resolve_tile_effect_and_advance's steal-then-fall-through-to-normal-
+    // effect shape) -- two popups for one player, back-to-back, both needing their own full
+    // display window. A single-slot design here previously meant the second one's arrival
+    // overwrote the first in the map before it had rendered even one frame, silently discarding it
+    // -- getCoinPopup below instead peeks the head of this queue and only advances past an entry
+    // once its own `until` has actually passed, so every queued popup gets its turn. See the
+    // COINS_CHANGED handler for how a new popup's start gets computed against the queue's current
+    // tail (queuing behind it) rather than against "now". ----
+    private final Map<String, Deque<CoinPopup>> coinPopups = new ConcurrentHashMap<>();
+
+    /** One player's coin popup snapshot -- immutable, appended wholesale to coinPopups's per-player
+     * queue rather than mutated in place. See CoinPopup's own doc on RunePartyPlugin's
+     * COINS_CHANGED handling for how start/until get computed. */
+    public static final class CoinPopup
+    {
+        public final int delta;
+        public final int newTotal;
+        public final long start;
+        public final long until;
+
+        CoinPopup(int delta, int newTotal, long start, long until)
+        {
+            this.delta = delta;
+            this.newTotal = newTotal;
+            this.start = start;
+            this.until = until;
+        }
+    }
 
     // ---- dice roll popup (client-side timer -- see PlayerOverlay#drawDiceRoll) ----
     private volatile String diceRollRsn = null;
@@ -924,6 +983,78 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
+    /** Arms a requires_placement item (see Item#requiresPlacement) -- called from RunePartyPanel's
+     * item buttons instead of useItem() for one of these, since there's no server call to make
+     * yet: it's client-local until the player actually right-clicks a candidate tile's "Place
+     * &lt;item&gt;" entry (see onMenuEntryAdded/placeCoinTrapAt). Refuses silently (same "not
+     * actually your turn to act right now" guard useItem itself relies on the server to enforce,
+     * just checked locally here first) rather than arming a placement that'd only 409 anyway. */
+    public void beginItemPlacement(String itemKey)
+    {
+        if (itemKey == null || !isLocalPlayerReadyToRoll() || isItemUsedThisTurn()) return;
+        if (!Items.get(itemKey).requiresPlacement()) return;
+        itemPlacementKey = itemKey;
+        refreshPanel();
+    }
+
+    /** Backs out of an armed placement -- called from RunePartyPanel's Cancel button and the
+     * in-world "Cancel" menu entry (see addItemPlacementMenuEntries). Purely client-local, same as
+     * beginItemPlacement: the server never heard about the item being "used" in the first place, so
+     * there's nothing to undo server-side. */
+    public void cancelItemPlacement()
+    {
+        itemPlacementKey = null;
+        refreshPanel();
+    }
+
+    /** The two tiles a placement arms "Place &lt;item&gt;" on -- one step ahead, one step behind
+     * the local player's own current course position, by plain pathIndex +-1 (not graph-aware, same
+     * V1 simplification the server's own place-coin-trap endpoint uses -- forks aren't this
+     * feature's concern). Empty if nothing's armed, the course is empty, or the local player isn't
+     * tracked yet. */
+    public List<WorldPoint> getItemPlacementCandidates()
+    {
+        if (itemPlacementKey == null) return Collections.emptyList();
+        String self = localRsn();
+        if (self == null) return Collections.emptyList();
+        int length = tileReducer.courseLength();
+        if (length == 0) return Collections.emptyList();
+
+        int pos = getPlayerPosition(self);
+        List<WorldPoint> candidates = new ArrayList<>(2);
+        TileReducer.TileEntry front = tileReducer.tileAtIndex((pos + 1) % length);
+        TileReducer.TileEntry behind = tileReducer.tileAtIndex((pos - 1 + length) % length);
+        if (front != null) candidates.add(front.point);
+        if (behind != null) candidates.add(behind.point);
+        return candidates;
+    }
+
+    /** Spends the armed Coin Trap by placing it at {@code point} -- called from the in-world
+     * "Place Coin Trap" menu entry (see addItemPlacementMenuEntries), which only ever offers this
+     * on one of getItemPlacementCandidates()'s own two tiles. Clears placement mode optimistically
+     * before the call even goes out, same as every other fire-and-forget action method here (a 409
+     * still surfaces as a chat message, it just doesn't re-arm placement automatically -- the
+     * player can start over via the panel if they want to retry). */
+    private void placeCoinTrapAt(WorldPoint point)
+    {
+        String self = localRsn();
+        final String gid = gameId;
+        final String token = playerToken;
+        itemPlacementKey = null;
+        refreshPanel();
+        if (self == null || gid == null || token == null) return;
+
+        executor.submit(() ->
+        {
+            try { apiClient.placeCoinTrap(gid, self, token, point.getX(), point.getY(), point.getPlane()); }
+            catch (Exception e)
+            {
+                log.warn("Place Coin Trap failed", e);
+                addChatMessage("Failed to place Coin Trap: " + e.getMessage());
+            }
+        });
+    }
+
     public void leaveGame()
     {
         String self = localRsn();
@@ -1052,6 +1183,34 @@ public class RunePartyPlugin extends Plugin
             .onClick(me -> commitPreset(center));
     }
 
+    /** Same "Walk here" -> custom RUNELITE entries idiom as addPresetMenuEntries, for an armed
+     * requires_placement item -- only offered on the exact tile the cursor's currently over, and
+     * only when that tile is genuinely one of getItemPlacementCandidates()'s own two (the server
+     * would 409 on anything else anyway, this just keeps the menu from offering a doomed option).
+     * Coin Trap is the only requires_placement item so far, hence the direct placeCoinTrapAt call
+     * rather than a more general dispatch -- generalize this once a second one exists. */
+    private void addItemPlacementMenuEntries()
+    {
+        Tile tile = client.getTopLevelWorldView().getSelectedSceneTile();
+        if (tile == null) return;
+        WorldPoint point = tile.getWorldLocation();
+        if (point == null) return;
+        String itemKey = itemPlacementKey;
+        if (itemKey == null || !getItemPlacementCandidates().contains(point)) return;
+
+        client.createMenuEntry(-1)
+            .setOption("Cancel")
+            .setTarget("")
+            .setType(MenuAction.RUNELITE)
+            .onClick(me -> cancelItemPlacement());
+
+        client.createMenuEntry(-1)
+            .setOption("<col=00FF00>Place " + Items.get(itemKey).getDisplayName() + "</col>")
+            .setTarget("")
+            .setType(MenuAction.RUNELITE)
+            .onClick(me -> placeCoinTrapAt(point));
+    }
+
     private void commitPreset(WorldPoint center)
     {
         CoursePreset preset = selectedPreset;
@@ -1167,6 +1326,11 @@ public class RunePartyPlugin extends Plugin
         if (phase == GamePhase.LOBBY && isHost() && coursePlacementMode)
         {
             addPresetMenuEntries();
+            return;
+        }
+        if (phase == GamePhase.ACTIVE && itemPlacementKey != null)
+        {
+            addItemPlacementMenuEntries();
         }
     }
 
@@ -1540,6 +1704,21 @@ public class RunePartyPlugin extends Plugin
             itemUsedAnnounceItemKey = itemKey;
             itemUsedAnnounceUntil = System.currentTimeMillis() + ITEM_USED_ANNOUNCE_DURATION_MS;
             extendTurnEffectGate(itemUsedAnnounceUntil);
+        });
+    }
+
+    /** Schedules AnnouncementOverlay's "You/&lt;rsn&gt; landed on a Coin Trap!" banner via
+     * scheduleAfterTurnEffects -- fired on COIN_TRAP_TRIGGERED, same shape as
+     * scheduleItemUsedAnnouncement. {@code victimRsn} is whoever landed on it, not the trap's
+     * owner -- the owner's own feedback is purely their +N coin popup (see the COINS_CHANGED
+     * handler), no banner of their own. */
+    private void scheduleCoinTrapTriggerAnnouncement(String victimRsn)
+    {
+        coinTrapAnnounceTask = scheduleAfterTurnEffects(coinTrapAnnounceTask, COIN_TRAP_ANNOUNCE_DURATION_MS, () ->
+        {
+            coinTrapAnnounceRsn = victimRsn;
+            coinTrapAnnounceUntil = System.currentTimeMillis() + COIN_TRAP_ANNOUNCE_DURATION_MS;
+            extendTurnEffectGate(coinTrapAnnounceUntil);
         });
     }
 
@@ -2006,37 +2185,82 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
+            case "COIN_TRAP_TRIGGERED":
+            {
+                // Real-time, not chained behind scheduleAfterTurnEffects -- unlike the announcement
+                // banner below, the model/animation choreography is tied to a specific spot on the
+                // board (see TileOverlay#updateCoinTrapModels), not the screen-centered UI other
+                // "what happened" banners share a queue for, so delaying it to wait its turn would
+                // just look like the trap sprang for no visible reason moments after the player
+                // actually landed on it.
+                if (!catchingUp)
+                {
+                    String victim = safeStr(e.payload, "player");
+                    String owner = safeStr(e.payload, "owner");
+                    Integer stolen = safeInt(e.payload, "stolen");
+                    Integer x = safeInt(e.payload, "x");
+                    Integer y = safeInt(e.payload, "y");
+                    Integer plane = safeInt(e.payload, "plane");
+                    if (x != null && y != null && plane != null)
+                    {
+                        coinTrapTriggerPoint = new WorldPoint(x, y, plane);
+                        coinTrapTriggerUntil = System.currentTimeMillis() + COIN_TRAP_TRIGGER_PERSIST_MS;
+                    }
+                    if (victim != null)
+                    {
+                        scheduleCoinTrapTriggerAnnouncement(victim);
+                        addChatMessage(victim + " landed on a Coin Trap" + (owner != null ? " set by " + owner : "")
+                            + "! " + (stolen != null ? stolen : 0) + " coins stolen.");
+                    }
+                }
+                break;
+            }
+
             case "COINS_CHANGED":
             {
-                // The standard-tile reward and an item's own coin effect both get the popup
-                // treatment -- a Golden Gnome purchase or mini-game payout already has its own
-                // feedback (the roster/stats panels update, and submitMinigameResult's caller sees
-                // the MINIGAME_ENDED chat line), so this stays scoped to the cases that otherwise
-                // had no visible feedback at all. The real coin total itself lives in rosterReducer
-                // (updated unconditionally above, catch-up or not) -- everything in this block is
-                // purely the popup's own cosmetics.
+                // The standard-tile reward, an item's own coin effect, and a Coin Trap steal all
+                // get the popup treatment -- a Golden Gnome purchase or mini-game payout already
+                // has its own feedback (the roster/stats panels update, and submitMinigameResult's
+                // caller sees the MINIGAME_ENDED chat line), so this stays scoped to the cases that
+                // otherwise had no visible feedback at all. The real coin total itself lives in
+                // rosterReducer (updated unconditionally above, catch-up or not) -- everything in
+                // this block is purely the popup's own cosmetics.
                 String coinsChangedReason = safeStr(e.payload, "reason");
-                if (!catchingUp && ("standard_tile".equals(coinsChangedReason) || "item".equals(coinsChangedReason)))
+                if (!catchingUp && ("standard_tile".equals(coinsChangedReason) || "item".equals(coinsChangedReason) || "coin_trap".equals(coinsChangedReason)))
                 {
-                    coinPopupRsn = safeStr(e.payload, "player");
+                    String coinsChangedRsn = safeStr(e.payload, "player");
                     Integer delta = safeInt(e.payload, "delta");
                     Integer total = safeInt(e.payload, "coins");
-                    coinPopupDelta = delta != null ? delta : 0;
-                    coinPopupNewTotal = total != null ? total : 0;
 
-                    // A Golden Gnome purchase always resolves before the underlying tile's own
-                    // effect (see the server's confirm_arrival/respond_golden_gnome_offer split),
-                    // so both popups can land back-to-back for the same player within milliseconds
-                    // of each other. Rather than show them at once, the coin popup waits for the
-                    // Golden Gnome one to fully finish first -- its disappearance is what marks the
-                    // Golden Gnome tile effect as actually over. Doesn't apply if the still-showing
-                    // Golden Gnome popup belongs to someone else, or there isn't one right now.
-                    long now = System.currentTimeMillis();
-                    boolean samePlayerGnomePopupShowing = coinPopupRsn != null && coinPopupRsn.equalsIgnoreCase(goldenGnomePopupRsn)
-                        && goldenGnomePopupUntil > now;
-                    coinPopupStart = samePlayerGnomePopupShowing ? goldenGnomePopupUntil : now;
-                    coinPopupUntil = coinPopupStart + COIN_POPUP_DURATION_MS;
-                    extendTurnEffectGate(coinPopupUntil);
+                    if (coinsChangedRsn != null)
+                    {
+                        String key = coinsChangedRsn.toLowerCase(Locale.ROOT);
+                        long now = System.currentTimeMillis();
+
+                        // A Golden Gnome purchase always resolves before the underlying tile's own
+                        // effect (see the server's confirm_arrival/respond_golden_gnome_offer
+                        // split), and a Coin Trap steal always resolves before it too (see
+                        // _resolve_tile_effect_and_advance), so two or even three popups can land
+                        // back-to-back for the same player within milliseconds of each other.
+                        // Rather than show them at once, each new one queues behind whichever's
+                        // already showing *for this same player* -- the Golden Gnome popup
+                        // specifically (it's tracked separately, not in this queue) or the tail of
+                        // this player's own coin-popup queue (see coinPopups's own doc for why this
+                        // has to be a real queue, appended to, rather than a single slot overwritten
+                        // each time). Doesn't apply to a different player, who gets their own popup
+                        // immediately regardless of what's showing for anyone else (see the Coin
+                        // Trap owner's simultaneous +N popup).
+                        Deque<CoinPopup> queue = coinPopups.computeIfAbsent(key, k -> new ConcurrentLinkedDeque<>());
+                        CoinPopup tailPopup = queue.peekLast();
+                        boolean samePlayerGnomePopupShowing = coinsChangedRsn.equalsIgnoreCase(goldenGnomePopupRsn) && goldenGnomePopupUntil > now;
+                        long start = samePlayerGnomePopupShowing ? goldenGnomePopupUntil
+                            : (tailPopup != null && tailPopup.until > now) ? tailPopup.until
+                            : now;
+                        long until = start + COIN_POPUP_DURATION_MS;
+
+                        queue.addLast(new CoinPopup(delta != null ? delta : 0, total != null ? total : 0, start, until));
+                        extendTurnEffectGate(until);
+                    }
                 }
                 break;
             }
@@ -2267,6 +2491,7 @@ public class RunePartyPlugin extends Plugin
         if (itemSpinnerTask != null) { itemSpinnerTask.cancel(false); itemSpinnerTask = null; }
         if (itemCapBlockedTask != null) { itemCapBlockedTask.cancel(false); itemCapBlockedTask = null; }
         if (itemUsedAnnounceTask != null) { itemUsedAnnounceTask.cancel(false); itemUsedAnnounceTask = null; }
+        if (coinTrapAnnounceTask != null) { coinTrapAnnounceTask.cancel(false); coinTrapAnnounceTask = null; }
         if (roundCompleteBannerTask != null) { roundCompleteBannerTask.cancel(false); roundCompleteBannerTask = null; }
         if (gameOverTask != null) { gameOverTask.cancel(false); gameOverTask = null; }
         turnEffectGateUntil = 0;
@@ -2278,12 +2503,15 @@ public class RunePartyPlugin extends Plugin
         awaitingGnomeYesFinish = false; awaitingGnomeNoFinish = false; awaitingMinigameReadyFinish = false;
         pendingTargetIndices = Collections.emptyList();
         arrivalSubmitted = false; itemUsedThisTurn = false; standingOnTrackedPositionCached = false;
+        itemPlacementKey = null;
         minigameActive = false; minigameInstructions = null; minigameKey = null;
         minigameDisplayName = null;
         minigameSpinnerStart = 0; minigameSpinnerUntil = 0; minigameSpinnerSkippedForClient = false;
         itemSpinnerStart = 0; itemSpinnerUntil = 0; itemGrantRsn = null; itemGrantKey = null;
         itemCapBlockedUntil = 0; itemCapBlockedRsn = null; itemCapBlockedCap = 0;
         itemUsedAnnounceUntil = 0; itemUsedAnnounceRsn = null; itemUsedAnnounceItemKey = null;
+        coinTrapAnnounceUntil = 0; coinTrapAnnounceRsn = null;
+        coinTrapTriggerPoint = null; coinTrapTriggerUntil = 0;
         minigameReadyRsns.clear();
         minigameCountdownStarted = false; minigameCountdownSkippedForClient = false; minigameCountdownBannerUntil = 0;
         maxRounds = 0; completedRounds = 0;
@@ -2301,7 +2529,7 @@ public class RunePartyPlugin extends Plugin
         goldenGnomePopupRsn = null; goldenGnomePopupNewTotal = 0; goldenGnomePopupStart = 0; goldenGnomePopupUntil = 0;
         goldenGnomeMoveOldPoint = null; goldenGnomeMoveHideOldAt = 0;
         goldenGnomeMoveNewPoint = null; goldenGnomeMoveShowNewAt = 0;
-        coinPopupRsn = null; coinPopupDelta = 0; coinPopupNewTotal = 0; coinPopupStart = 0; coinPopupUntil = 0;
+        coinPopups.clear();
         diceRollRsn = null; diceRollValue = 0; diceRollBonus = 0; diceRollStart = 0; diceRollUntil = 0;
         if (rosterReducer != null) rosterReducer.reset();
         if (tileReducer != null) tileReducer.reset();
@@ -2353,6 +2581,11 @@ public class RunePartyPlugin extends Plugin
     public long getItemUsedAnnounceUntil() { return itemUsedAnnounceUntil; }
     public String getItemUsedAnnounceRsn() { return itemUsedAnnounceRsn; }
     public String getItemUsedAnnounceItemKey() { return itemUsedAnnounceItemKey; }
+    public long getCoinTrapAnnounceUntil() { return coinTrapAnnounceUntil; }
+    public String getCoinTrapAnnounceRsn() { return coinTrapAnnounceRsn; }
+    public WorldPoint getCoinTrapTriggerPoint() { return coinTrapTriggerPoint; }
+    public long getCoinTrapTriggerUntil() { return coinTrapTriggerUntil; }
+    public String getItemPlacementKey() { return itemPlacementKey; }
     public Set<String> getMinigameReadyRsns() { return minigameReadyRsns; }
     public boolean isMinigameCountdownStarted() { return minigameCountdownStarted; }
     public boolean isMinigameCountdownSkippedForClient() { return minigameCountdownSkippedForClient; }
@@ -2388,11 +2621,25 @@ public class RunePartyPlugin extends Plugin
     public long getWinnerRevealUntil() { return winnerRevealUntil; }
     public String getWinnerRsn() { return winnerRsn; }
     public long getConfettiUntil() { return confettiUntil; }
-    public String getCoinPopupRsn() { return coinPopupRsn; }
-    public int getCoinPopupDelta() { return coinPopupDelta; }
-    public int getCoinPopupNewTotal() { return coinPopupNewTotal; }
-    public long getCoinPopupStart() { return coinPopupStart; }
-    public long getCoinPopupUntil() { return coinPopupUntil; }
+    /** {@code rsn}'s currently-showing coin popup, or null if none -- see PlayerOverlay#
+     * drawCoinPopup, the only consumer. Drops expired entries off the front of this player's queue
+     * first (see coinPopups's own doc for why it's a queue, not a single slot) so an old, already-
+     * finished popup can never mask the one that's actually due to be showing right now; called
+     * every render frame, so there's no need to prune anywhere else. */
+    public CoinPopup getCoinPopup(String rsn)
+    {
+        if (rsn == null) return null;
+        Deque<CoinPopup> queue = coinPopups.get(rsn.toLowerCase(Locale.ROOT));
+        if (queue == null) return null;
+
+        long now = System.currentTimeMillis();
+        CoinPopup head;
+        while ((head = queue.peekFirst()) != null && head.until <= now)
+        {
+            queue.pollFirst();
+        }
+        return head;
+    }
     public String getDiceRollRsn() { return diceRollRsn; }
     public int getDiceRollValue() { return diceRollValue; }
     public int getDiceRollBonus() { return diceRollBonus; }

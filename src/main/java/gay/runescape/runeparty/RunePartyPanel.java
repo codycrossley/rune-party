@@ -468,6 +468,36 @@ public class RunePartyPanel extends PluginPanel
      * items actually change (see lastItemsKey), not on every refresh() call. */
     private void refreshItemUse(List<RosterReducer.RosterEntry> entries)
     {
+        // Mid-placement (see RunePartyPlugin#beginItemPlacement) takes over this card entirely --
+        // right-clicking the highlighted "Place <item>" tile is the real confirm step (see
+        // RunePartyPlugin#onMenuEntryAdded), this is just a status readout plus an escape hatch,
+        // same as course placement mode has no panel presence beyond its own "Place"/dropdown
+        // controls and relies on the in-world menu for the rest.
+        String placementKey = plugin.getItemPlacementKey();
+        if (placementKey != null)
+        {
+            lastItemsKey = null; // next non-placement activation always rebuilds fresh
+            itemsCard.setVisible(true);
+            String key = "placing:" + placementKey;
+            if (key.equals(lastItemsKey)) return;
+            lastItemsKey = key;
+
+            itemUsePanel.removeAll();
+            JLabel hint = new JLabel("<html>Right-click the highlighted tile to place your "
+                + Items.get(placementKey).getDisplayName() + ", or Cancel below.</html>");
+            hint.setAlignmentX(LEFT_ALIGNMENT);
+            itemUsePanel.add(hint);
+            itemUsePanel.add(Box.createVerticalStrut(6));
+            JButton cancelBtn = new JButton("Cancel");
+            cancelBtn.setAlignmentX(LEFT_ALIGNMENT);
+            cancelBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+            cancelBtn.addActionListener(e -> plugin.cancelItemPlacement());
+            itemUsePanel.add(cancelBtn);
+            itemUsePanel.revalidate();
+            itemUsePanel.repaint();
+            return;
+        }
+
         RosterReducer.RosterEntry localEntry = null;
         String localRsn = plugin.getLocalRsn();
         if (localRsn != null)
@@ -496,10 +526,14 @@ public class RunePartyPanel extends PluginPanel
         {
             String itemKey = held.getKey();
             Item item = Items.get(itemKey);
-            JButton useBtn = new JButton("Use " + item.getDisplayName() + " (x" + held.getValue() + ")");
+            String verb = item.requiresPlacement() ? "Place " : "Use ";
+            JButton useBtn = new JButton(verb + item.getDisplayName() + " (x" + held.getValue() + ")");
             useBtn.setAlignmentX(LEFT_ALIGNMENT);
             useBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-            useBtn.addActionListener(e -> plugin.useItem(itemKey));
+            useBtn.addActionListener(e -> {
+                if (item.requiresPlacement()) plugin.beginItemPlacement(itemKey);
+                else plugin.useItem(itemKey);
+            });
             itemUsePanel.add(useBtn);
             itemUsePanel.add(Box.createVerticalStrut(4));
         }
