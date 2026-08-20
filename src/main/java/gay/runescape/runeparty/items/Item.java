@@ -15,4 +15,20 @@ public interface Item extends WheelEntry
      * string the matching server-side Item subclass sets as its own `key` attribute (see
      * app.py/items). */
     String getKey();
+
+    /** Whether AnnouncementOverlay should show a "You used/&lt;rsn&gt; used &lt;name&gt;!" banner
+     * (see renderItemUsedAnnouncement) the moment this item's ITEM_USED lands. False by default --
+     * PlaceholderItem's coin change already gets its own feedback from the coin popup, so most
+     * items don't need a second banner on top of that. */
+    default boolean hasUseAnnouncement()
+    {
+        return false;
+    }
+
+    /** The banner's subtitle, phrased for the given viewer ("your"/"their") -- only ever read when
+     * hasUseAnnouncement() is true. */
+    default String getUseAnnouncementSubtitle(boolean isLocalPlayer)
+    {
+        return null;
+    }
 }

@@ -52,7 +52,10 @@ public class RunePartyPanel extends PluginPanel
     // Item use -- one button per distinct held item, visible only on the local player's own turn
     // (see RunePartyPlugin#isLocalPlayerReadyToRoll), rebuilt only when the held items actually
     // change rather than on every refresh() -- same "rebuild only when the key changes" shape as
-    // minigameControlSlot above.
+    // minigameControlSlot above. itemsCard is the titled "ITEMS" grouping card wrapping it, same
+    // bordered-card look as hostControlsCard's "HOST CONTROLS" -- only itemsCard's own visibility
+    // is toggled (see refreshItemUse); itemUsePanel itself just holds the buttons.
+    private final JPanel itemsCard = new JPanel();
     private final JPanel itemUsePanel = new JPanel();
     private String lastItemsKey = null;
 
@@ -207,8 +210,8 @@ public class RunePartyPanel extends PluginPanel
         buildMinigamePanel();
         minigamePanel.setAlignmentX(LEFT_ALIGNMENT);
 
-        buildItemUsePanel();
-        itemUsePanel.setAlignmentX(LEFT_ALIGNMENT);
+        buildItemsCard();
+        itemsCard.setAlignmentX(LEFT_ALIGNMENT);
 
         rosterTablePanel.setLayout(new BoxLayout(rosterTablePanel, BoxLayout.Y_AXIS));
         rosterTablePanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -240,7 +243,7 @@ public class RunePartyPanel extends PluginPanel
         card.add(Box.createVerticalStrut(8));
         card.add(minigamePanel);
         card.add(Box.createVerticalStrut(8));
-        card.add(itemUsePanel);
+        card.add(itemsCard);
         card.add(Box.createVerticalStrut(8));
         card.add(sectionLabel("Players"));
         card.add(rosterTablePanel);
@@ -315,11 +318,31 @@ public class RunePartyPanel extends PluginPanel
         minigamePanel.add(minigameControlSlot);
     }
 
-    private void buildItemUsePanel()
+    /** Groups the item-use buttons under one titled, bordered card -- same "HOST CONTROLS" look
+     * buildHostControlsCard uses, just its own blue accent (matching PlaceholderItem's own icon
+     * color) instead of the host's orange/brown, so the two grouping cards read as distinct at a
+     * glance. Only itemsCard's own visibility is ever toggled (see refreshItemUse) -- itemUsePanel
+     * inside it stays permanently visible and just holds whichever buttons are currently built. */
+    private void buildItemsCard()
     {
+        itemsCard.setLayout(new BoxLayout(itemsCard, BoxLayout.Y_AXIS));
+        itemsCard.setBackground(new Color(24, 30, 38));
+        itemsCard.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(40, 75, 115), 1),
+            new EmptyBorder(8, 8, 8, 8)));
+        itemsCard.setVisible(false);
+
+        JLabel title = new JLabel("ITEMS");
+        title.setForeground(new Color(110, 170, 230));
+        title.setFont(FontManager.getRunescapeSmallFont());
+        title.setAlignmentX(LEFT_ALIGNMENT);
+
         itemUsePanel.setLayout(new BoxLayout(itemUsePanel, BoxLayout.Y_AXIS));
-        itemUsePanel.setBackground(new Color(30, 30, 30));
-        itemUsePanel.setBorder(new EmptyBorder(6, 6, 6, 6));
+        itemUsePanel.setAlignmentX(LEFT_ALIGNMENT);
+
+        itemsCard.add(title);
+        itemsCard.add(Box.createVerticalStrut(6));
+        itemsCard.add(itemUsePanel);
     }
 
     /** Place mode is entered from here; rotation stays reachable only via the right-click "Rotate
@@ -457,7 +480,7 @@ public class RunePartyPanel extends PluginPanel
 
         boolean showItems = plugin.isLocalPlayerReadyToRoll() && !plugin.isItemUsedThisTurn()
             && localEntry != null && !localEntry.items.isEmpty();
-        itemUsePanel.setVisible(showItems);
+        itemsCard.setVisible(showItems);
         if (!showItems)
         {
             lastItemsKey = null; // next activation always rebuilds fresh

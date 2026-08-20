@@ -4,12 +4,14 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.inject.Provides;
+import gay.runescape.runeparty.items.Items;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -99,6 +101,17 @@ public class RunePartyPlugin extends Plugin
     public static final long ITEM_SPINNER_HOLD_MS = 3000;
     public static final long ITEM_SPINNER_DURATION_MS = ITEM_SPINNER_SPIN_PHASE_MS + ITEM_SPINNER_HOLD_MS;
 
+    /** How long AnnouncementOverlay's "already have N items" announcement stays up -- fired on
+     * ITEM_CAP_BLOCKED instead of the item wheel (see scheduleItemCapBlockedAnnouncement), when a
+     * player lands on an Item Space already holding the server's ITEM_CAP. No wheel spin, so this
+     * is a plain fixed-duration banner rather than a spin+hold pair like ITEM_SPINNER_DURATION_MS. */
+    public static final long ITEM_CAP_BLOCKED_DURATION_MS = 4000;
+
+    /** How long AnnouncementOverlay's "You used/&lt;rsn&gt; used &lt;item&gt;!" banner stays up --
+     * fired on ITEM_USED for whichever items opt in via Item#hasUseAnnouncement (see
+     * scheduleItemUsedAnnouncement), same plain fixed-duration shape as ITEM_CAP_BLOCKED_DURATION_MS. */
+    public static final long ITEM_USED_ANNOUNCE_DURATION_MS = 3000;
+
     /** How long AnnouncementOverlay's "3... 2... 1... BEGIN!" countdown plays once every seated
      * PLAYER has YES-emoted ready (see MINIGAME_COUNTDOWN_STARTED) -- one second per tick: 3, 2,
      * 1, then BEGIN!. Only the client watching it happen live schedules this (see the
@@ -139,6 +152,35 @@ public class RunePartyPlugin extends Plugin
      * it's the *next* turn's announcement (TURN_STARTED/MINIGAME!) that waits for this one, the
      * count popup, and the underlying tile's own coin popup to all finish settling. */
     public static final long GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS = 2600;
+
+    /** How long AnnouncementOverlay's "GAME OVER!" title card stays up -- the first step of the
+     * end-game ceremony (see triggerGameOverSequence), gated behind scheduleAfterTurnEffects so it
+     * waits out whatever round-complete/rewards recap the final MINIGAME_ENDED just queued --
+     * GAME_ENDED can land in the very same event batch when the last round hits maxRounds -- rather
+     * than stomping over it. */
+    public static final long GAME_OVER_TITLE_DURATION_MS = 3000;
+
+    /** How long "Now it's time to see the winner..." holds before the reveal countdown begins. */
+    public static final long WINNER_INTRO_DURATION_MS = 3000;
+
+    /** How long each "In Nth place..." reveal holds before advancing to the next -- see
+     * schedulePlaceReveal, which walks the final standings worst-to-best, stopping once only the
+     * top two players remain (they get the "And the winner is..." showdown instead of an
+     * individual reveal). */
+    public static final long PLACE_REVEAL_DURATION_MS = 2800;
+
+    /** How long "And the winner is..." holds before the winner's own name actually appears. */
+    public static final long WINNER_SUSPENSE_DURATION_MS = 2500;
+
+    /** How long the winner's name (plus ConfettiOverlay's burst) stays on screen -- the last step
+     * of the ceremony, so this is also how long it lingers before the table just sits on
+     * GamePhase.ENDED with nothing further scheduled. */
+    public static final long WINNER_REVEAL_DURATION_MS = 9000;
+
+    /** How long ConfettiOverlay's burst actually rains for, kicked off the instant the winner
+     * reveal fires -- shorter than WINNER_REVEAL_DURATION_MS so the confetti finishes settling
+     * while the winner's name is still up, rather than both cutting off at the same instant. */
+    public static final long CONFETTI_DURATION_MS = 6000;
 
     /** Default lifetime for a spotanim spawned via triggerSpotAnimAtWorldPoint, in ~20ms client
      * cycles (not the 600ms game tick) -- long enough for most one-shot effects to finish playing
@@ -211,6 +253,25 @@ public class RunePartyPlugin extends Plugin
      * hardcode this independently again. */
     public static final long DICE_ROLL_DURATION_MS = DICE_ROLL_SPIN_PHASE_MS + DICE_ROLL_HOLD_MS;
 
+    /** Extra reveal phases spliced in after the die settles, only for a roll that carried an item
+     * bonus (see DICE_ROLLED's "bonus" field/getDiceRollBonus) -- the die first settles on the
+     * bare base roll same as always, holds for BADGE_MS while AnnouncementOverlay#renderDiceRoll
+     * pops a "+N" label in beside it, then FLIP_MS flips the die itself over to the bonus-inclusive
+     * total (label becomes "+N = total"), which then itself holds for RESULT_HOLD_MS so that merged
+     * label actually has time to be read before it disappears and the timeline joins the normal
+     * hold/fade with the die alone. A plain roll (bonus == 0) skips all three phases entirely, so
+     * its timeline is unchanged. TileOverlay's renderTargetArrow also waits out this whole window
+     * (on top of DICE_ROLL_SPIN_PHASE_MS) so the "where to walk" arrow never appears before the
+     * bonus reveal has actually finished. */
+    public static final long DICE_ROLL_BONUS_BADGE_MS = 1000;
+    public static final long DICE_ROLL_BONUS_FLIP_MS = 550;
+    public static final long DICE_ROLL_BONUS_RESULT_HOLD_MS = 1100;
+    public static final long DICE_ROLL_BONUS_REVEAL_MS =
+        DICE_ROLL_BONUS_BADGE_MS + DICE_ROLL_BONUS_FLIP_MS + DICE_ROLL_BONUS_RESULT_HOLD_MS;
+    /** Total time the die stays visible after a bonus-carrying DICE_ROLLED -- used in place of
+     * DICE_ROLL_DURATION_MS above whenever this roll's bonus is nonzero. */
+    public static final long DICE_ROLL_BONUS_DURATION_MS = DICE_ROLL_SPIN_PHASE_MS + DICE_ROLL_BONUS_REVEAL_MS + DICE_ROLL_HOLD_MS;
+
     @Inject private Client client;
     @Inject private ClientThread clientThread;
     @Inject private ConfigManager configManager;
@@ -226,6 +287,7 @@ public class RunePartyPlugin extends Plugin
     private StatsOverlay statsOverlay;
     private PlayerOverlay playerOverlay;
     private AnnouncementOverlay announcementOverlay;
+    private ConfettiOverlay confettiOverlay;
     private RosterReducer rosterReducer;
     private ApiClient apiClient;
     private EventSocket eventSocket;
@@ -345,6 +407,21 @@ public class RunePartyPlugin extends Plugin
     private volatile long itemSpinnerUntil = 0;
     private volatile String itemGrantRsn = null;
     private volatile String itemGrantKey = null;
+    // ---- item cap announcement (cosmetic-only timing, chained the same way as the item spinner
+    // above -- see scheduleItemCapBlockedAnnouncement). Fires instead of the item wheel when
+    // ITEM_CAP_BLOCKED lands, so at most one of {itemSpinnerUntil, itemCapBlockedUntil} is ever
+    // "live" for the same landing. ----
+    private volatile ScheduledFuture<?> itemCapBlockedTask;
+    private volatile long itemCapBlockedUntil = 0;
+    private volatile String itemCapBlockedRsn = null;
+    private volatile int itemCapBlockedCap = 0;
+    // ---- item-used announcement (cosmetic-only timing, chained the same way as the item cap
+    // banner above -- see scheduleItemUsedAnnouncement). Only fired for items that opt in via
+    // Item#hasUseAnnouncement -- PlaceholderItem's coin change already has its own feedback. ----
+    private volatile ScheduledFuture<?> itemUsedAnnounceTask;
+    private volatile long itemUsedAnnounceUntil = 0;
+    private volatile String itemUsedAnnounceRsn = null;
+    private volatile String itemUsedAnnounceItemKey = null;
     // ---- mini-game ready-check (server-driven, everyone sees it -- see MINIGAME_PLAYER_READY/
     // MINIGAME_COUNTDOWN_STARTED handling). minigameReadyRsns is real state (who's actually
     // YES-emoted so far), applied unconditionally catch-up or not -- same reasoning as
@@ -420,6 +497,28 @@ public class RunePartyPlugin extends Plugin
         }
     }
 
+    // ---- end-game awards ceremony (server-driven, everyone sees it -- see GAME_ENDED handling and
+    // triggerGameOverSequence). A chain of banners, each scheduled behind the last via
+    // scheduleAfterTurnEffects: "GAME OVER!" -> "Now it's time to see the winner..." -> one
+    // "In Nth place..." reveal per eliminated player (worst to best, stopping once only the top two
+    // remain) -> "And the winner is..." -> the winner's name plus ConfettiOverlay's burst.
+    // gameOverStandings is the final ranking (coins desc, Golden Gnomes tiebreak, same order
+    // renderRoundCompleteBanner already uses), snapshotted once at trigger time since no further
+    // coin/gnome changes are possible once the server's flipped the game out of ACTIVE. ----
+    private volatile ScheduledFuture<?> gameOverTask;
+    private volatile List<RosterReducer.RosterEntry> gameOverStandings = Collections.emptyList();
+    private volatile long gameOverBannerUntil = 0;
+    private volatile long winnerIntroBannerUntil = 0;
+    private volatile long placeRevealUntil = 0;
+    private volatile String placeRevealRsn = null;
+    private volatile int placeRevealRank = 0; // 1-based rank within gameOverStandings
+    private volatile int placeRevealCoins = 0;
+    private volatile int placeRevealGoldenGnomes = 0;
+    private volatile long winnerSuspenseUntil = 0;
+    private volatile long winnerRevealUntil = 0;
+    private volatile String winnerRsn = null;
+    private volatile long confettiUntil = 0;
+
     // ---- Golden Gnome offer (server-driven, everyone sees it -- see GOLDEN_GNOME_OFFERED/
     // GOLDEN_GNOME_OFFER_RESOLVED handling). goldenGnomeOfferRsn is real state (non-null exactly
     // while a response is outstanding, same role pendingRoll plays for a roll) -- it gates whether
@@ -464,6 +563,9 @@ public class RunePartyPlugin extends Plugin
     // ---- dice roll popup (client-side timer -- see PlayerOverlay#drawDiceRoll) ----
     private volatile String diceRollRsn = null;
     private volatile int diceRollValue = 0;
+    // How much of diceRollValue came from a banked item bonus (see DICE_ROLLED's "bonus" field) --
+    // 0 for a plain roll, in which case AnnouncementOverlay#renderDiceRoll's timeline is unchanged.
+    private volatile int diceRollBonus = 0;
     private volatile long diceRollStart = 0;
     private volatile long diceRollUntil = 0;
 
@@ -487,6 +589,9 @@ public class RunePartyPlugin extends Plugin
 
         announcementOverlay = new AnnouncementOverlay(client, config, this);
         overlayManager.add(announcementOverlay);
+
+        confettiOverlay = new ConfettiOverlay(client, this);
+        overlayManager.add(confettiOverlay);
 
         panel = new RunePartyPanel(this);
         navButton = NavigationButton.builder()
@@ -515,6 +620,7 @@ public class RunePartyPlugin extends Plugin
         if (statsOverlay != null) overlayManager.remove(statsOverlay);
         if (playerOverlay != null) overlayManager.remove(playerOverlay);
         if (announcementOverlay != null) overlayManager.remove(announcementOverlay);
+        if (confettiOverlay != null) overlayManager.remove(confettiOverlay);
         if (navButton != null) clientToolbar.removeNavigation(navButton);
         if (mapDialog != null) { mapDialog.dispose(); mapDialog = null; }
         resetState();
@@ -1407,6 +1513,36 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
+    /** Schedules AnnouncementOverlay's "already have N items" announcement via
+     * scheduleAfterTurnEffects -- fired instead of scheduleItemSpinner when the server's own
+     * ITEM_CAP_BLOCKED lands (see app.py's ITEM_TILE handling), so it waits behind whatever
+     * turn-effect visual is already showing the same way the item wheel itself would have. */
+    private void scheduleItemCapBlockedAnnouncement(String rsn, int cap)
+    {
+        itemCapBlockedTask = scheduleAfterTurnEffects(itemCapBlockedTask, ITEM_CAP_BLOCKED_DURATION_MS, () ->
+        {
+            itemCapBlockedRsn = rsn;
+            itemCapBlockedCap = cap;
+            itemCapBlockedUntil = System.currentTimeMillis() + ITEM_CAP_BLOCKED_DURATION_MS;
+            extendTurnEffectGate(itemCapBlockedUntil);
+        });
+    }
+
+    /** Schedules AnnouncementOverlay's "You used/&lt;rsn&gt; used &lt;item&gt;!" banner via
+     * scheduleAfterTurnEffects -- fired on ITEM_USED for whichever item opts in via
+     * Item#hasUseAnnouncement (see that handler), so it waits behind whatever turn-effect visual is
+     * already showing, same as scheduleItemCapBlockedAnnouncement. */
+    private void scheduleItemUsedAnnouncement(String rsn, String itemKey)
+    {
+        itemUsedAnnounceTask = scheduleAfterTurnEffects(itemUsedAnnounceTask, ITEM_USED_ANNOUNCE_DURATION_MS, () ->
+        {
+            itemUsedAnnounceRsn = rsn;
+            itemUsedAnnounceItemKey = itemKey;
+            itemUsedAnnounceUntil = System.currentTimeMillis() + ITEM_USED_ANNOUNCE_DURATION_MS;
+            extendTurnEffectGate(itemUsedAnnounceUntil);
+        });
+    }
+
     /** Arms AnnouncementOverlay's mini-game rewards recap ("who got what") -- called from the
      * MINIGAME_ENDED handler, parsing its own "payouts" list once here rather than having
      * AnnouncementOverlay re-parse the raw event payload every frame. Extends turnEffectGateUntil
@@ -1425,7 +1561,9 @@ public class RunePartyPlugin extends Plugin
      * instead of both appearing at once. Snapshots getCurrentRound() -- the round about to start,
      * not the one that just finished (completedRounds is already incremented by the time this
      * runs, so getCurrentRound() here is the same "upcoming round" number the next TURN_STARTED's
-     * own banner and StatsOverlay's live "ROUND x/y" line would show). */
+     * own banner and StatsOverlay's live "ROUND x/y" line would show). Not called at all for the
+     * game's final round -- see the MINIGAME_ENDED handler -- since triggerGameOverSequence reveals
+     * those same standings itself right after, and this plain recap would spoil that. */
     private void scheduleRoundCompleteBanner()
     {
         roundCompleteBannerTask = scheduleAfterTurnEffects(roundCompleteBannerTask, ROUND_COMPLETE_BANNER_DURATION_MS, () ->
@@ -1433,6 +1571,111 @@ public class RunePartyPlugin extends Plugin
             roundCompleteRoundNumber = getCurrentRound();
             roundCompleteBannerUntil = System.currentTimeMillis() + ROUND_COMPLETE_BANNER_DURATION_MS;
             extendTurnEffectGate(roundCompleteBannerUntil); // belt-and-suspenders, see scheduleMinigameBanner's identical comment
+        });
+    }
+
+    /** Final standings, ranked the same way renderRoundCompleteBanner already ranks the live
+     * mid-game ones -- Golden Gnome count descending, coins as tiebreak -- snapshotted once on
+     * GAME_ENDED rather than read live, since no further coin/gnome changes are possible once the
+     * server's flipped the game out of ACTIVE. Spectators and never-joined seats are excluded, same
+     * as every other standings view. */
+    private List<RosterReducer.RosterEntry> computeFinalStandings()
+    {
+        List<RosterReducer.RosterEntry> standings = new ArrayList<>();
+        for (RosterReducer.RosterEntry entry : rosterReducer.snapshot())
+        {
+            if (entry.role == RunePartyRole.PLAYER && entry.joined) standings.add(entry);
+        }
+        standings.sort(Comparator
+            .comparingInt((RosterReducer.RosterEntry e) -> e.goldenGnomeCount).reversed()
+            .thenComparing(Comparator.comparingInt((RosterReducer.RosterEntry e) -> e.coins).reversed()));
+        return standings;
+    }
+
+    /** Kicks off the end-game awards ceremony on GAME_ENDED -- a chain of banners, each scheduled
+     * behind the last via scheduleAfterTurnEffects (see the field block's own doc for the full
+     * sequence). This first step is itself gated the same way, since GAME_ENDED can land in the
+     * very same event batch as the final round's own MINIGAME_ENDED (see app.py's
+     * _resolve_minigame_if_complete) -- without waiting behind that banner's own gate reservation,
+     * "GAME OVER!" would flash up mid-rewards-recap instead of politely queuing after it. No-ops if
+     * nobody's actually seated (shouldn't happen for a game that reached GAME_ENDED, but a lone
+     * host force-ending an empty lobby is technically possible). */
+    private void triggerGameOverSequence()
+    {
+        List<RosterReducer.RosterEntry> standings = computeFinalStandings();
+        if (standings.isEmpty()) return;
+        gameOverStandings = standings;
+
+        gameOverTask = scheduleAfterTurnEffects(gameOverTask, GAME_OVER_TITLE_DURATION_MS, () ->
+        {
+            gameOverBannerUntil = System.currentTimeMillis() + GAME_OVER_TITLE_DURATION_MS;
+            extendTurnEffectGate(gameOverBannerUntil);
+            scheduleWinnerIntro();
+        });
+    }
+
+    private void scheduleWinnerIntro()
+    {
+        gameOverTask = scheduleAfterTurnEffects(gameOverTask, WINNER_INTRO_DURATION_MS, () ->
+        {
+            winnerIntroBannerUntil = System.currentTimeMillis() + WINNER_INTRO_DURATION_MS;
+            extendTurnEffectGate(winnerIntroBannerUntil);
+
+            // Worst to best, stopping once only the top two remain -- e.g. a 4-player game reveals
+            // 4th then 3rd, leaving 1st/2nd for the "And the winner is..." showdown. A 2-player (or
+            // fewer) game has nothing to reveal here at all, so this list ends up empty and
+            // schedulePlaceReveal falls straight through to scheduleWinnerSuspense.
+            List<RosterReducer.RosterEntry> revealOrder = new ArrayList<>();
+            for (int i = gameOverStandings.size() - 1; i >= 2; i--) revealOrder.add(gameOverStandings.get(i));
+            schedulePlaceReveal(revealOrder, 0);
+        });
+    }
+
+    private void schedulePlaceReveal(List<RosterReducer.RosterEntry> revealOrder, int index)
+    {
+        if (index >= revealOrder.size())
+        {
+            scheduleWinnerSuspense();
+            return;
+        }
+
+        gameOverTask = scheduleAfterTurnEffects(gameOverTask, PLACE_REVEAL_DURATION_MS, () ->
+        {
+            RosterReducer.RosterEntry entry = revealOrder.get(index);
+            placeRevealRsn = entry.rsn;
+            placeRevealRank = gameOverStandings.indexOf(entry) + 1;
+            placeRevealCoins = entry.coins;
+            placeRevealGoldenGnomes = entry.goldenGnomeCount;
+            placeRevealUntil = System.currentTimeMillis() + PLACE_REVEAL_DURATION_MS;
+            extendTurnEffectGate(placeRevealUntil);
+            schedulePlaceReveal(revealOrder, index + 1);
+        });
+    }
+
+    private void scheduleWinnerSuspense()
+    {
+        gameOverTask = scheduleAfterTurnEffects(gameOverTask, WINNER_SUSPENSE_DURATION_MS, () ->
+        {
+            winnerSuspenseUntil = System.currentTimeMillis() + WINNER_SUSPENSE_DURATION_MS;
+            extendTurnEffectGate(winnerSuspenseUntil);
+            scheduleWinnerReveal();
+        });
+    }
+
+    /** The ceremony's final step -- the winner's own name, held alongside ConfettiOverlay's burst
+     * (confettiUntil, shorter than WINNER_REVEAL_DURATION_MS so the confetti finishes settling
+     * while the name's still up rather than both cutting off together). gameOverStandings is sorted
+     * winner-first, so index 0 is always the winner. */
+    private void scheduleWinnerReveal()
+    {
+        gameOverTask = scheduleAfterTurnEffects(gameOverTask, WINNER_REVEAL_DURATION_MS, () ->
+        {
+            RosterReducer.RosterEntry winner = gameOverStandings.get(0);
+            winnerRsn = winner.rsn;
+            long now = System.currentTimeMillis();
+            winnerRevealUntil = now + WINNER_REVEAL_DURATION_MS;
+            confettiUntil = now + CONFETTI_DURATION_MS;
+            addChatMessage(winner.rsn + " wins Rune Party!");
         });
     }
 
@@ -1518,6 +1761,10 @@ public class RunePartyPlugin extends Plugin
 
             case "GAME_ENDED":
                 phase = GamePhase.ENDED;
+                if (!catchingUp)
+                {
+                    triggerGameOverSequence();
+                }
                 break;
 
             case "PLAYER_READY":
@@ -1578,10 +1825,12 @@ public class RunePartyPlugin extends Plugin
                     addChatMessage(roller + " rolled a " + lastDiceRoll + "!");
                     if (lastDiceRoll != null)
                     {
+                        Integer bonus = safeInt(e.payload, "bonus");
                         diceRollRsn = roller;
                         diceRollValue = lastDiceRoll;
+                        diceRollBonus = bonus != null ? bonus : 0;
                         diceRollStart = System.currentTimeMillis();
-                        diceRollUntil = diceRollStart + DICE_ROLL_DURATION_MS;
+                        diceRollUntil = diceRollStart + (diceRollBonus != 0 ? DICE_ROLL_BONUS_DURATION_MS : DICE_ROLL_DURATION_MS);
                     }
                 }
                 break;
@@ -1677,6 +1926,20 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
+            case "ITEM_CAP_BLOCKED":
+            {
+                // No inventory change -- the server refused to grant anything, see app.py's
+                // ITEM_TILE handling. Purely cosmetic, same as ITEM_GRANTED's own reveal.
+                if (!catchingUp)
+                {
+                    String rsn = safeStr(e.payload, "player");
+                    Integer cap = safeInt(e.payload, "itemCap");
+                    scheduleItemCapBlockedAnnouncement(rsn, cap != null ? cap : 0);
+                    addChatMessage(rsn + " already has too many items!");
+                }
+                break;
+            }
+
             case "ITEM_USED":
             {
                 // Real state, applied catch-up or not: an ITEM_USED can only ever be inserted for
@@ -1684,6 +1947,15 @@ public class RunePartyPlugin extends Plugin
                 // always the same turn TURN_STARTED just reset it for. Inventory itself is already
                 // decremented unconditionally by rosterReducer.apply above.
                 itemUsedThisTurn = true;
+                if (!catchingUp)
+                {
+                    String rsn = safeStr(e.payload, "player");
+                    String itemKey = safeStr(e.payload, "itemKey");
+                    if (Items.get(itemKey).hasUseAnnouncement())
+                    {
+                        scheduleItemUsedAnnouncement(rsn, itemKey);
+                    }
+                }
                 break;
             }
 
@@ -1860,7 +2132,15 @@ public class RunePartyPlugin extends Plugin
                 {
                     addChatMessage("Mini-game complete!");
                     triggerMinigameRewardsBanner(e.payload);
-                    scheduleRoundCompleteBanner();
+                    // Skipped on the game's last round -- GAME_ENDED fires right behind this same
+                    // MINIGAME_ENDED (see app.py's _resolve_minigame_if_complete, which checks
+                    // maxRounds immediately after inserting this event) and triggerGameOverSequence
+                    // reveals the very same standings itself, dramatically, one place at a time.
+                    // Showing the plain "Current Standings" recap first would spoil that reveal.
+                    if (maxRounds <= 0 || completedRounds < maxRounds)
+                    {
+                        scheduleRoundCompleteBanner();
+                    }
                 }
                 break;
 
@@ -1985,7 +2265,10 @@ public class RunePartyPlugin extends Plugin
         if (minigameBannerTask != null) { minigameBannerTask.cancel(false); minigameBannerTask = null; }
         if (minigameSpinnerTask != null) { minigameSpinnerTask.cancel(false); minigameSpinnerTask = null; }
         if (itemSpinnerTask != null) { itemSpinnerTask.cancel(false); itemSpinnerTask = null; }
+        if (itemCapBlockedTask != null) { itemCapBlockedTask.cancel(false); itemCapBlockedTask = null; }
+        if (itemUsedAnnounceTask != null) { itemUsedAnnounceTask.cancel(false); itemUsedAnnounceTask = null; }
         if (roundCompleteBannerTask != null) { roundCompleteBannerTask.cancel(false); roundCompleteBannerTask = null; }
+        if (gameOverTask != null) { gameOverTask.cancel(false); gameOverTask = null; }
         turnEffectGateUntil = 0;
         gameId = null; writeKey = null; playerToken = null; joinCode = null; hostRsn = null;
         phase = GamePhase.DISCONNECTED;
@@ -1999,6 +2282,8 @@ public class RunePartyPlugin extends Plugin
         minigameDisplayName = null;
         minigameSpinnerStart = 0; minigameSpinnerUntil = 0; minigameSpinnerSkippedForClient = false;
         itemSpinnerStart = 0; itemSpinnerUntil = 0; itemGrantRsn = null; itemGrantKey = null;
+        itemCapBlockedUntil = 0; itemCapBlockedRsn = null; itemCapBlockedCap = 0;
+        itemUsedAnnounceUntil = 0; itemUsedAnnounceRsn = null; itemUsedAnnounceItemKey = null;
         minigameReadyRsns.clear();
         minigameCountdownStarted = false; minigameCountdownSkippedForClient = false; minigameCountdownBannerUntil = 0;
         maxRounds = 0; completedRounds = 0;
@@ -2009,12 +2294,15 @@ public class RunePartyPlugin extends Plugin
         gameStartBannerUntil = 0;
         roundCompleteBannerUntil = 0; roundCompleteRoundNumber = 0;
         minigameRewardsBannerUntil = 0; minigameRewards = Collections.emptyList();
+        gameOverStandings = Collections.emptyList(); gameOverBannerUntil = 0; winnerIntroBannerUntil = 0;
+        placeRevealUntil = 0; placeRevealRsn = null; placeRevealRank = 0; placeRevealCoins = 0; placeRevealGoldenGnomes = 0;
+        winnerSuspenseUntil = 0; winnerRevealUntil = 0; winnerRsn = null; confettiUntil = 0;
         goldenGnomeOfferRsn = null; goldenGnomeOutcome = null; goldenGnomeOutcomeRsn = null; goldenGnomeOutcomeBannerUntil = 0;
         goldenGnomePopupRsn = null; goldenGnomePopupNewTotal = 0; goldenGnomePopupStart = 0; goldenGnomePopupUntil = 0;
         goldenGnomeMoveOldPoint = null; goldenGnomeMoveHideOldAt = 0;
         goldenGnomeMoveNewPoint = null; goldenGnomeMoveShowNewAt = 0;
         coinPopupRsn = null; coinPopupDelta = 0; coinPopupNewTotal = 0; coinPopupStart = 0; coinPopupUntil = 0;
-        diceRollRsn = null; diceRollValue = 0; diceRollStart = 0; diceRollUntil = 0;
+        diceRollRsn = null; diceRollValue = 0; diceRollBonus = 0; diceRollStart = 0; diceRollUntil = 0;
         if (rosterReducer != null) rosterReducer.reset();
         if (tileReducer != null) tileReducer.reset();
         refreshPanel();
@@ -2059,6 +2347,12 @@ public class RunePartyPlugin extends Plugin
     public long getItemSpinnerUntil() { return itemSpinnerUntil; }
     public String getItemGrantRsn() { return itemGrantRsn; }
     public String getItemGrantKey() { return itemGrantKey; }
+    public long getItemCapBlockedUntil() { return itemCapBlockedUntil; }
+    public String getItemCapBlockedRsn() { return itemCapBlockedRsn; }
+    public int getItemCapBlockedCap() { return itemCapBlockedCap; }
+    public long getItemUsedAnnounceUntil() { return itemUsedAnnounceUntil; }
+    public String getItemUsedAnnounceRsn() { return itemUsedAnnounceRsn; }
+    public String getItemUsedAnnounceItemKey() { return itemUsedAnnounceItemKey; }
     public Set<String> getMinigameReadyRsns() { return minigameReadyRsns; }
     public boolean isMinigameCountdownStarted() { return minigameCountdownStarted; }
     public boolean isMinigameCountdownSkippedForClient() { return minigameCountdownSkippedForClient; }
@@ -2082,6 +2376,18 @@ public class RunePartyPlugin extends Plugin
     public int getRoundCompleteRoundNumber() { return roundCompleteRoundNumber; }
     public long getMinigameRewardsBannerUntil() { return minigameRewardsBannerUntil; }
     public List<MinigameReward> getMinigameRewards() { return minigameRewards; }
+    public List<RosterReducer.RosterEntry> getGameOverStandings() { return gameOverStandings; }
+    public long getGameOverBannerUntil() { return gameOverBannerUntil; }
+    public long getWinnerIntroBannerUntil() { return winnerIntroBannerUntil; }
+    public long getPlaceRevealUntil() { return placeRevealUntil; }
+    public String getPlaceRevealRsn() { return placeRevealRsn; }
+    public int getPlaceRevealRank() { return placeRevealRank; }
+    public int getPlaceRevealCoins() { return placeRevealCoins; }
+    public int getPlaceRevealGoldenGnomes() { return placeRevealGoldenGnomes; }
+    public long getWinnerSuspenseUntil() { return winnerSuspenseUntil; }
+    public long getWinnerRevealUntil() { return winnerRevealUntil; }
+    public String getWinnerRsn() { return winnerRsn; }
+    public long getConfettiUntil() { return confettiUntil; }
     public String getCoinPopupRsn() { return coinPopupRsn; }
     public int getCoinPopupDelta() { return coinPopupDelta; }
     public int getCoinPopupNewTotal() { return coinPopupNewTotal; }
@@ -2089,6 +2395,7 @@ public class RunePartyPlugin extends Plugin
     public long getCoinPopupUntil() { return coinPopupUntil; }
     public String getDiceRollRsn() { return diceRollRsn; }
     public int getDiceRollValue() { return diceRollValue; }
+    public int getDiceRollBonus() { return diceRollBonus; }
     public long getDiceRollStart() { return diceRollStart; }
     public long getDiceRollUntil() { return diceRollUntil; }
     public String getGoldenGnomeOfferRsn() { return goldenGnomeOfferRsn; }

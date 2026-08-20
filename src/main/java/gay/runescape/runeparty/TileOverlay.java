@@ -230,7 +230,10 @@ public class TileOverlay extends Overlay
      * own arrow. Visible to every client watching, not just the mover, the same way the rest of
      * the board state is shared. Held back until AnnouncementOverlay's dice-roll reveal has
      * actually settled on the real number (RunePartyPlugin.DICE_ROLL_SPIN_PHASE_MS after
-     * diceRollStart) -- pendingTargetIndices is known the instant DICE_ROLLED lands, same moment
+     * diceRollStart, plus RunePartyPlugin.DICE_ROLL_BONUS_REVEAL_MS more on top of that whenever
+     * this roll carried an item bonus -- see getDiceRollBonus -- so the "+N = total" reveal always
+     * finishes before this arrow spoils where that total actually lands) --
+     * pendingTargetIndices is known the instant DICE_ROLLED lands, same moment
      * the die starts cycling random faces, so showing the destination immediately would spoil the
      * roll before the die even reveals what it landed on. All of them disappear together as soon as
      * the mover is actually standing on any one candidate (checked directly against their on-screen
@@ -245,7 +248,9 @@ public class TileOverlay extends Overlay
     private void renderTargetArrow(Graphics2D g)
     {
         if (!plugin.isPendingRoll() || plugin.isMinigameActive()) return;
-        if (System.currentTimeMillis() - plugin.getDiceRollStart() < RunePartyPlugin.DICE_ROLL_SPIN_PHASE_MS) return;
+        long revealDelay = RunePartyPlugin.DICE_ROLL_SPIN_PHASE_MS
+            + (plugin.getDiceRollBonus() != 0 ? RunePartyPlugin.DICE_ROLL_BONUS_REVEAL_MS : 0);
+        if (System.currentTimeMillis() - plugin.getDiceRollStart() < revealDelay) return;
         List<Integer> targetIndices = plugin.getPendingTargetIndices();
         if (targetIndices.isEmpty()) return;
         String moverRsn = plugin.getCurrentTurnRsn();

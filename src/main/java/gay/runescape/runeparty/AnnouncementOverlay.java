@@ -100,6 +100,26 @@ public class AnnouncementOverlay extends Overlay
     private static final float WHEEL_NAME_SIZE = 30f; // the settled entry's name, revealed once the wheel stops
     private static final Color WHEEL_POINTER_COLOR = new Color(255, 215, 0);
 
+    // "You already have N items!" -- see renderItemCapBlocked. Sized like the Golden Gnome
+    // outcome banner it's most similar to (a plain two-line explainer, no wheel).
+    private static final long ITEM_CAP_BLOCKED_FADE_MS = 500;
+    private static final float ITEM_CAP_BLOCKED_TITLE_SIZE = 28f;
+    private static final float ITEM_CAP_BLOCKED_SUBTITLE_SIZE = 20f;
+
+    // "You used/<rsn> used <item>!" -- see renderItemUsedAnnouncement. Same two-line shape/sizing
+    // as the item cap banner above.
+    private static final long ITEM_USED_ANNOUNCE_FADE_MS = 500;
+    private static final float ITEM_USED_ANNOUNCE_TITLE_SIZE = 28f;
+    private static final float ITEM_USED_ANNOUNCE_SUBTITLE_SIZE = 20f;
+
+    // "+N"/"-N" bonus label beside the die once a bonus-carrying roll reaches its badge phase --
+    // see renderDiceRoll's bonus phases (RunePartyPlugin.DICE_ROLL_BONUS_BADGE_MS/FLIP_MS). Same
+    // gain/loss palette as PlayerOverlay's own coin popup (COIN_POPUP_GAIN_COLOR/LOSS_COLOR),
+    // duplicated here rather than shared since that pair is private to PlayerOverlay.
+    private static final float DICE_ROLL_BONUS_LABEL_SIZE = 26f;
+    private static final Color DICE_ROLL_BONUS_POSITIVE_COLOR = new Color(80, 220, 80);
+    private static final Color DICE_ROLL_BONUS_NEGATIVE_COLOR = new Color(230, 70, 70);
+
     // Mini-game ready-check -- see renderMinigameReadyCheck. Duration-less like the Spin hint/
     // Golden Gnome offer (it persists until every seated PLAYER's YES-emoted), so it gets the same
     // breathing-alpha treatment to stay noticeable without a fade to draw the eye.
@@ -128,6 +148,26 @@ public class AnnouncementOverlay extends Overlay
     private static final int MINIGAME_REWARDS_LINE_HEIGHT = 24;
     private static final Color MINIGAME_REWARDS_COLOR = new Color(80, 220, 120); // "+N coins"
     private static final Color MINIGAME_REWARDS_NONE_COLOR = Color.GRAY; // "no reward"
+
+    // End-game awards ceremony -- see RunePartyPlugin#triggerGameOverSequence for the full chain
+    // ("GAME OVER!" -> intro -> one place reveal per eliminated player -> suspense -> winner). Each
+    // phase gets its own fade constant/size below, in the order it actually plays.
+    private static final long GAME_OVER_TITLE_FADE_MS = 600;
+    private static final float GAME_OVER_TITLE_SIZE = 64f; // "GAME OVER!" -- the biggest text of the whole ceremony
+
+    private static final long WINNER_INTRO_FADE_MS = 500;
+    private static final float WINNER_INTRO_SIZE = 26f; // "Now it's time to see the winner..."
+
+    private static final long PLACE_REVEAL_FADE_MS = 500;
+    private static final float PLACE_REVEAL_RANK_SIZE = 40f; // "In 4th place..."
+    private static final float PLACE_REVEAL_LINE_SIZE = 26f; // "<Player> -- N GN, M coins"
+
+    private static final long WINNER_SUSPENSE_FADE_MS = 500;
+    private static final float WINNER_SUSPENSE_SIZE = 34f; // "And the winner is..."
+
+    private static final long WINNER_REVEAL_FADE_MS = 700;
+    private static final float WINNER_REVEAL_NAME_SIZE = 62f; // the winner's own name, rainbow-treated same as "GAME OVER!"
+    private static final float WINNER_REVEAL_SUBTITLE_SIZE = 22f; // "N Golden Gnomes, M coins"
 
     private static final Color SPIN_HINT_COLOR = new Color(255, 255, 255);
     private static final float SPIN_HINT_SIZE = 22f;
@@ -184,7 +224,13 @@ public class AnnouncementOverlay extends Overlay
     {
         if (!config.showOverlay()) return null;
         GamePhase phase = plugin.getPhase();
-        if (phase != GamePhase.ACTIVE && phase != GamePhase.LOBBY) return null;
+        // ENDED is included alongside the usual ACTIVE/LOBBY here specifically for the end-game
+        // awards ceremony below (see renderGameOverBanner and friends) -- GAME_ENDED is what flips
+        // phase to ENDED in the first place, so without this the ceremony would never get a chance
+        // to render past that exact instant. Every other render* call below still gates itself on
+        // its own until-timestamp, so leaving them in the call list for ENDED too is harmless: they
+        // simply have nothing left to show by the time the game's actually over.
+        if (phase != GamePhase.ACTIVE && phase != GamePhase.LOBBY && phase != GamePhase.ENDED) return null;
 
         renderWelcomeBanner(g);
         renderGameStartBanner(g);
@@ -193,6 +239,8 @@ public class AnnouncementOverlay extends Overlay
         renderGoldenGnomeOffer(g);
         renderGoldenGnomeOutcome(g);
         renderItemSpinner(g);
+        renderItemCapBlocked(g);
+        renderItemUsedAnnouncement(g);
         renderMinigameBanner(g);
         renderMinigameSpinner(g);
         renderMinigameReadyCheck(g);
@@ -200,6 +248,11 @@ public class AnnouncementOverlay extends Overlay
         renderMinigameRewardsBanner(g);
         renderRoundCompleteBanner(g);
         renderDiceRoll(g);
+        renderGameOverBanner(g);
+        renderWinnerIntroBanner(g);
+        renderPlaceReveal(g);
+        renderWinnerSuspenseBanner(g);
+        renderWinnerReveal(g);
 
         return null;
     }
@@ -591,6 +644,70 @@ public class AnnouncementOverlay extends Overlay
         drawWheel(g, wheelEntries, targetIndex, rotationDeg, scale, alpha, spinning, revealText);
     }
 
+    /** Fires instead of renderItemSpinner when the server refuses to grant an item because the
+     * mover's already holding RunePartyPlugin's ITEM_CAP (see ITEM_CAP_BLOCKED handling/
+     * scheduleItemCapBlockedAnnouncement) -- no wheel, just a two-line explainer, same per-viewer
+     * "You..."/"&lt;rsn&gt;..." split every other outcome banner on this overlay uses. */
+    private void renderItemCapBlocked(Graphics2D g)
+    {
+        long remaining = plugin.getItemCapBlockedUntil() - System.currentTimeMillis();
+        if (remaining <= 0) return;
+        String rsn = plugin.getItemCapBlockedRsn();
+        if (rsn == null) return;
+
+        float alpha = remaining < ITEM_CAP_BLOCKED_FADE_MS ? remaining / (float) ITEM_CAP_BLOCKED_FADE_MS : 1f;
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 3;
+        int cap = plugin.getItemCapBlockedCap();
+
+        String localRsn = localRsn();
+        boolean isLocal = localRsn != null && localRsn.equalsIgnoreCase(rsn);
+
+        String title = isLocal ? "You already have " + cap + " items!" : rsn + " already has " + cap + " items!";
+        String subtitle = isLocal
+            ? "You must use an item before you can receive any more."
+            : "They must use an item before they can receive any more.";
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(ITEM_CAP_BLOCKED_TITLE_SIZE));
+        drawCenteredText(g, title, centerX, y, Color.WHITE, alpha);
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(ITEM_CAP_BLOCKED_SUBTITLE_SIZE));
+        drawCenteredText(g, subtitle, centerX, y + 28, Color.LIGHT_GRAY, alpha);
+    }
+
+    /** Draws "You used/&lt;rsn&gt; used &lt;item&gt;!" plus that item's own subtitle (see
+     * Item#getUseAnnouncementSubtitle) on ITEM_USED -- only ever armed for items that opt in via
+     * Item#hasUseAnnouncement (see RunePartyPlugin's ITEM_USED handling/scheduleItemUsedAnnouncement);
+     * PlaceholderItem never sets this up, so its coin popup remains its only feedback. Same
+     * per-viewer "You.../&lt;rsn&gt;..." split and two-line layout as renderItemCapBlocked. */
+    private void renderItemUsedAnnouncement(Graphics2D g)
+    {
+        long remaining = plugin.getItemUsedAnnounceUntil() - System.currentTimeMillis();
+        if (remaining <= 0) return;
+        String rsn = plugin.getItemUsedAnnounceRsn();
+        Item item = Items.get(plugin.getItemUsedAnnounceItemKey());
+        if (rsn == null || item == null) return;
+
+        float alpha = remaining < ITEM_USED_ANNOUNCE_FADE_MS ? remaining / (float) ITEM_USED_ANNOUNCE_FADE_MS : 1f;
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 3;
+
+        String localRsn = localRsn();
+        boolean isLocal = localRsn != null && localRsn.equalsIgnoreCase(rsn);
+
+        String title = (isLocal ? "You used " : rsn + " used ") + item.getDisplayName() + "!";
+        String subtitle = item.getUseAnnouncementSubtitle(isLocal);
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_TITLE_SIZE));
+        drawCenteredText(g, title, centerX, y, Color.WHITE, alpha);
+
+        if (subtitle != null)
+        {
+            g.setFont(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_SUBTITLE_SIZE));
+            drawCenteredText(g, subtitle, centerX, y + 28, Color.LIGHT_GRAY, alpha);
+        }
+    }
+
     /** How far the wheel has rotated at {@code elapsed} into its spin -- eased to a stop
      * (ease-out cubic) across {@code spinPhaseMs}, then held fixed on the target once settled.
      * Shared timing math for both renderMinigameSpinner and renderItemSpinner. */
@@ -912,7 +1029,7 @@ public class AnnouncementOverlay extends Overlay
      * that just finished -- see RunePartyPlugin#scheduleRoundCompleteBanner) in the same
      * Mario-Party-logo rainbow treatment as "MINIGAME!"/"HERE WE GO!" (see drawCenteredRainbowText
      * and RAINBOW_LETTER_COLORS), then "Current Standings" underneath, then every seated, joined
-     * PLAYER ranked highest-coins-first (Golden Gnomes as the tiebreak -- Mario Party's own
+     * PLAYER ranked highest-Golden-Gnomes-first (coins as the tiebreak -- Mario Party's own
      * standings order), each name in that player's own RunePartyColor same as
      * StatsOverlay/PlayerOverlay color-code the same player. StatsOverlay's persistent HUD used to
      * rank players this same way before it switched to always showing turn order (see
@@ -941,8 +1058,8 @@ public class AnnouncementOverlay extends Overlay
             if (entry.role == RunePartyRole.PLAYER && entry.joined) players.add(entry);
         }
         players.sort(Comparator
-            .comparingInt((RosterReducer.RosterEntry e) -> e.coins).reversed()
-            .thenComparing(Comparator.comparingInt((RosterReducer.RosterEntry e) -> e.goldenGnomeCount).reversed()));
+            .comparingInt((RosterReducer.RosterEntry e) -> e.goldenGnomeCount).reversed()
+            .thenComparing(Comparator.comparingInt((RosterReducer.RosterEntry e) -> e.coins).reversed()));
 
         Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
         Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
@@ -953,10 +1070,129 @@ public class AnnouncementOverlay extends Overlay
         {
             RunePartyColor seatColor = RunePartyColor.forNumber(entry.number);
             Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
-            String stats = "   " + entry.coins + " coins, " + entry.goldenGnomeCount + " GN";
+            String stats = "   " + entry.goldenGnomeCount + " GN, " + entry.coins + " coins";
             drawStandingsLine(g, nameFont, statsFont, "#" + rank + "  ", entry.rsn, nameColor, stats, Color.LIGHT_GRAY, centerX, lineY, alpha);
             lineY += ROUND_COMPLETE_LINE_HEIGHT;
             rank++;
+        }
+    }
+
+    /** First beat of the end-game awards ceremony -- "GAME OVER!" in the same Mario-Party-logo
+     * rainbow treatment as "RUNE PARTY"/"MINIGAME!"/"HERE WE GO!", gated on
+     * RunePartyPlugin#getGameOverBannerUntil (see triggerGameOverSequence). */
+    private void renderGameOverBanner(Graphics2D g)
+    {
+        long remaining = plugin.getGameOverBannerUntil() - System.currentTimeMillis();
+        if (remaining <= 0) return;
+
+        float alpha = remaining < GAME_OVER_TITLE_FADE_MS ? remaining / (float) GAME_OVER_TITLE_FADE_MS : 1f;
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 2 - 20;
+
+        g.setFont(MARIO_PARTY_FONT.deriveFont(GAME_OVER_TITLE_SIZE));
+        drawCenteredRainbowText(g, "GAME OVER!", RAINBOW_LETTER_COLORS, centerX, y, alpha);
+    }
+
+    /** Second beat -- "Now it's time to see the winner...", a plain subtitle bridging "GAME OVER!"
+     * into the standings countdown (see renderPlaceReveal). Gated on
+     * RunePartyPlugin#getWinnerIntroBannerUntil, scheduled behind the game-over title via
+     * scheduleWinnerIntro. */
+    private void renderWinnerIntroBanner(Graphics2D g)
+    {
+        long remaining = plugin.getWinnerIntroBannerUntil() - System.currentTimeMillis();
+        if (remaining <= 0) return;
+
+        float alpha = remaining < WINNER_INTRO_FADE_MS ? remaining / (float) WINNER_INTRO_FADE_MS : 1f;
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 2;
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE));
+        drawCenteredText(g, "Now it's time to see the winner...", centerX, y, Color.WHITE, alpha);
+    }
+
+    /** The dramatic countdown itself -- one "In &lt;Nth&gt; place... &lt;Player&gt; -- N coins"
+     * reveal per call, worst-place first, stopping once only the top two players remain (see
+     * RunePartyPlugin#schedulePlaceReveal). The player's own RunePartyColor seat color is used for
+     * their name/coins line, same as every other standings view, so it reads consistently with
+     * renderRoundCompleteBanner's mid-game recap. */
+    private void renderPlaceReveal(Graphics2D g)
+    {
+        long remaining = plugin.getPlaceRevealUntil() - System.currentTimeMillis();
+        if (remaining <= 0) return;
+        String rsn = plugin.getPlaceRevealRsn();
+        if (rsn == null) return;
+
+        float alpha = remaining < PLACE_REVEAL_FADE_MS ? remaining / (float) PLACE_REVEAL_FADE_MS : 1f;
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 2 - 20;
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(PLACE_REVEAL_RANK_SIZE));
+        drawCenteredText(g, "In " + ordinal(plugin.getPlaceRevealRank()) + " place...", centerX, y, Color.LIGHT_GRAY, alpha);
+
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getNumber(rsn));
+        Color nameColor = seatColor != null ? seatColor.awt : Color.WHITE;
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(PLACE_REVEAL_LINE_SIZE));
+        String stats = rsn + " -- " + plugin.getPlaceRevealGoldenGnomes() + " GN, " + plugin.getPlaceRevealCoins() + " coins";
+        drawCenteredText(g, stats, centerX, y + 40, nameColor, alpha);
+    }
+
+    /** Penultimate beat -- "And the winner is...", the last breath before renderWinnerReveal. Gated
+     * on RunePartyPlugin#getWinnerSuspenseUntil, scheduled behind the last place reveal (or
+     * directly behind the intro, for a 2-player game with nothing to individually reveal). */
+    private void renderWinnerSuspenseBanner(Graphics2D g)
+    {
+        long remaining = plugin.getWinnerSuspenseUntil() - System.currentTimeMillis();
+        if (remaining <= 0) return;
+
+        float alpha = remaining < WINNER_SUSPENSE_FADE_MS ? remaining / (float) WINNER_SUSPENSE_FADE_MS : 1f;
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 2;
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(WINNER_SUSPENSE_SIZE));
+        drawCenteredText(g, "And the winner is...", centerX, y, Color.WHITE, alpha);
+    }
+
+    /** The payoff -- the winner's own name in the same Mario-Party-logo rainbow treatment as "GAME
+     * OVER!"/"RUNE PARTY", plus their final coins/Golden Gnome tally underneath. Played alongside
+     * ConfettiOverlay's burst (see RunePartyPlugin#getConfettiUntil, kicked off the same instant by
+     * scheduleWinnerReveal) -- this method only draws the text; the confetti itself is a fully
+     * separate overlay so it can render above/around everything else on screen, not just within
+     * this banner's own bounds. */
+    private void renderWinnerReveal(Graphics2D g)
+    {
+        long remaining = plugin.getWinnerRevealUntil() - System.currentTimeMillis();
+        if (remaining <= 0) return;
+        String rsn = plugin.getWinnerRsn();
+        if (rsn == null) return;
+
+        float alpha = remaining < WINNER_REVEAL_FADE_MS ? remaining / (float) WINNER_REVEAL_FADE_MS : 1f;
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 2 - 10;
+
+        g.setFont(MARIO_PARTY_FONT.deriveFont(WINNER_REVEAL_NAME_SIZE));
+        drawCenteredRainbowText(g, rsn, RAINBOW_LETTER_COLORS, centerX, y, alpha);
+
+        List<RosterReducer.RosterEntry> standings = plugin.getGameOverStandings();
+        RosterReducer.RosterEntry winner = standings.isEmpty() ? null : standings.get(0);
+        if (winner != null)
+        {
+            g.setFont(FontManager.getRunescapeBoldFont().deriveFont(WINNER_REVEAL_SUBTITLE_SIZE));
+            String subtitle = winner.goldenGnomeCount + " Golden Gnomes, " + winner.coins + " coins";
+            drawCenteredText(g, subtitle, centerX, y + 36, Color.LIGHT_GRAY, alpha);
+        }
+    }
+
+    /** "1st"/"2nd"/"3rd"/"4th"... -- the 11-13 exception (11th/12th/13th, not 11st/12nd/13rd) is
+     * the only wrinkle in an otherwise last-digit-based rule. */
+    private static String ordinal(int n)
+    {
+        if (n % 100 >= 11 && n % 100 <= 13) return n + "th";
+        switch (n % 10)
+        {
+            case 1: return n + "st";
+            case 2: return n + "nd";
+            case 3: return n + "rd";
+            default: return n + "th";
         }
     }
 
@@ -1083,7 +1319,18 @@ public class AnnouncementOverlay extends Overlay
      * delays until the Spin emote itself has finished, so the die never starts cycling mid-emote.
      * It then snaps to the real value with a brief overshoot pop, holds it, and fades -- same
      * start/until-timestamp pattern as renderTurnAnnouncement, stamped by RunePartyPlugin's
-     * diceRollStart/diceRollUntil. */
+     * diceRollStart/diceRollUntil.
+     * <p>
+     * When the roll carried an item bonus (getDiceRollBonus != 0 -- see Energy Potion), three extra
+     * beats are spliced in right after the initial settle pop, before the normal hold begins: the
+     * die first settles on the bare base roll same as a plain roll would, holds there for
+     * RunePartyPlugin.DICE_ROLL_BONUS_BADGE_MS while a "+N" label pops in underneath, then over
+     * DICE_ROLL_BONUS_FLIP_MS the die itself pops again to the
+     * bonus-inclusive total while the label grows into "+N = total" -- after which the label
+     * disappears and rendering continues exactly as a plain roll's hold/fade would. TileOverlay's
+     * renderTargetArrow waits out this same window before revealing where that total actually
+     * lands. A plain roll (bonus == 0) never enters either extra branch below, so its timeline is
+     * byte-for-byte the original one. */
     private void renderDiceRoll(Graphics2D g)
     {
         String rsn = plugin.getDiceRollRsn();
@@ -1095,15 +1342,56 @@ public class AnnouncementOverlay extends Overlay
 
         long elapsed = now - plugin.getDiceRollStart();
         boolean spinning = elapsed < RunePartyPlugin.DICE_ROLL_SPIN_PHASE_MS;
-        int shown = spinning ? 1 + (int) ((now / DIE_SPIN_FACE_MS) % 10) : plugin.getDiceRollValue();
 
+        int bonus = plugin.getDiceRollBonus();
+        int total = plugin.getDiceRollValue();
+        int base = total - bonus;
+
+        // Sub-phase boundaries within the bonus reveal, relative to the moment the spin itself
+        // ends -- see this method's own doc for what happens in each. All three collapse to the
+        // exact same point (DIE_SETTLE_POP_MS) when bonus == 0, so the "flipping"/"badge" branches
+        // below are simply never reached for a plain roll.
+        long sinceSpinEnd = elapsed - RunePartyPlugin.DICE_ROLL_SPIN_PHASE_MS;
+        long badgeStart = DIE_SETTLE_POP_MS;
+        long flipStart = badgeStart + (bonus != 0 ? RunePartyPlugin.DICE_ROLL_BONUS_BADGE_MS : 0);
+        long flipEnd = flipStart + (bonus != 0 ? RunePartyPlugin.DICE_ROLL_BONUS_FLIP_MS : 0);
+        // The merged "+N = total" label outlives the flip pop itself by RESULT_HOLD_MS, so it's
+        // actually readable rather than vanishing the instant the die finishes popping.
+        long resultHoldEnd = flipEnd + (bonus != 0 ? RunePartyPlugin.DICE_ROLL_BONUS_RESULT_HOLD_MS : 0);
+
+        int shown;
         float scale = 1f;
-        if (!spinning)
+        if (spinning)
         {
-            long sinceSettle = elapsed - RunePartyPlugin.DICE_ROLL_SPIN_PHASE_MS;
-            if (sinceSettle < DIE_SETTLE_POP_MS)
+            shown = 1 + (int) ((now / DIE_SPIN_FACE_MS) % 10);
+        }
+        else if (bonus != 0 && sinceSpinEnd < flipStart)
+        {
+            // Settled on the bare base roll, holding before the bonus flips it to the total.
+            shown = base;
+            if (sinceSpinEnd < DIE_SETTLE_POP_MS)
             {
-                float t = sinceSettle / (float) DIE_SETTLE_POP_MS;
+                float t = sinceSpinEnd / (float) DIE_SETTLE_POP_MS;
+                scale = 1.35f - 0.35f * t;
+            }
+        }
+        else if (bonus != 0 && sinceSpinEnd < flipEnd)
+        {
+            // Flipping from the base roll to the bonus-inclusive total -- same overshoot pop as
+            // the initial settle, just re-triggered on the flip itself.
+            shown = total;
+            float t = (sinceSpinEnd - flipStart) / (float) RunePartyPlugin.DICE_ROLL_BONUS_FLIP_MS;
+            scale = 1.35f - 0.35f * t;
+        }
+        else
+        {
+            shown = total;
+            // Only bonus == 0 ever reaches this with sinceSpinEnd < DIE_SETTLE_POP_MS -- a
+            // bonus-carrying roll's own settle pop already played out above, in the base-roll
+            // branch, so by the time it falls through here the die is done popping.
+            if (sinceSpinEnd < DIE_SETTLE_POP_MS)
+            {
+                float t = sinceSpinEnd / (float) DIE_SETTLE_POP_MS;
                 scale = 1.35f - 0.35f * t;
             }
         }
@@ -1147,6 +1435,20 @@ public class AnnouncementOverlay extends Overlay
         g.drawString(text, tx + 2, ty + 2);
         g.setColor(withAlpha(Color.WHITE, alpha));
         g.drawString(text, tx, ty);
+
+        // "+N"/"-N" (then "+N = total"/"-N = total" once the flip starts) underneath the die --
+        // only during the bonus reveal itself; gone again by the time the normal hold (and
+        // TileOverlay's target arrow) takes over. See this method's own doc for the phase
+        // boundaries. bonus's own sign covers the negative case -- only a positive one needs "+"
+        // stitched on explicitly.
+        if (bonus != 0 && !spinning && sinceSpinEnd >= badgeStart && sinceSpinEnd < resultHoldEnd)
+        {
+            String signedBonus = (bonus > 0 ? "+" : "") + bonus;
+            String label = sinceSpinEnd < flipStart ? signedBonus : (signedBonus + " = " + total);
+            Color labelColor = bonus > 0 ? DICE_ROLL_BONUS_POSITIVE_COLOR : DICE_ROLL_BONUS_NEGATIVE_COLOR;
+            g.setFont(FontManager.getRunescapeBoldFont().deriveFont(DICE_ROLL_BONUS_LABEL_SIZE));
+            drawCenteredText(g, label, cx, cy + half + 30, labelColor, alpha);
+        }
     }
 
     private String localRsn()

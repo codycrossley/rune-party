@@ -22,6 +22,7 @@ public final class Items
 
     static
     {
+        register(new EnergyPotionItem("energy-potion", "Energy Potion"));
         register(new PlaceholderItem("placeholder-item-1", "Placeholder Item #1"));
         register(new PlaceholderItem("placeholder-item-2", "Placeholder Item #2"));
         register(new PlaceholderItem("placeholder-item-3", "Placeholder Item #3"));
