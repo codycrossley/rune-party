@@ -36,6 +36,7 @@ public final class Minigames
         // selected. Registered anyway so the client is ready the moment that server-side work
         // lands.
         register(new CoinRushMinigame());
+        register(new TrueOrFalseMinigame());
     }
 
     private static void register(Minigame minigame)

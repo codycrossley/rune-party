@@ -2,6 +2,7 @@ package gay.runescape.runeparty;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.inject.Provides;
 import gay.runescape.runeparty.items.Items;
@@ -189,6 +190,36 @@ public class RunePartyPlugin extends Plugin
      * phase to hold for (see CoinPopup's own totalless doc), so it only ever needs to be on screen
      * long enough to read "+2" before fading. */
     public static final long COIN_RUSH_BUMP_POPUP_DURATION_MS = 1300;
+
+    /** Client-side key for the True or False mini-game -- must match the server's own registration
+     * (see minigames/true_or_false.py), same role COIN_RUSH_KEY plays for Coin Rush. */
+    public static final String TRUE_OR_FALSE_KEY = "true-or-false";
+
+    /** How long the question sits on screen before the answer countdown starts ticking, measured
+     * from the moment TRUE_OR_FALSE_ROUND_STARTED lands (see trueOrFalseRoundStartedAt/
+     * getTrueOrFalseAnswerWindowStartsAt) -- purely a client-side display value for
+     * AnnouncementOverlay's renderTrueOrFalseQuestion (it hides the countdown number until this
+     * elapses, so the question gets a beat to actually be read instead of the 5-second answer
+     * clock ticking down from the instant it appears); the server is the one that actually decides
+     * when answers stop counting regardless of what this says. Must match the server's own
+     * TRUE_OR_FALSE_READING_SECONDS. */
+    public static final long TRUE_OR_FALSE_READING_DURATION_MS = 3000;
+
+    /** Wall-clock length of the actual answer countdown, once TRUE_OR_FALSE_READING_DURATION_MS
+     * has elapsed (see getTrueOrFalseRoundEndsAt) -- purely a client-side display value for the
+     * countdown in AnnouncementOverlay's renderTrueOrFalseQuestion; the server is the one that
+     * actually ends the round via TRUE_OR_FALSE_ROUND_ENDED regardless of what this says. Must
+     * match the server's own TRUE_OR_FALSE_ROUND_SECONDS. */
+    public static final long TRUE_OR_FALSE_ROUND_DURATION_MS = 5000;
+
+    /** How long AnnouncementOverlay's per-round reveal ("Correct!"/"Incorrect" + the right answer)
+     * stays up after TRUE_OR_FALSE_ROUND_ENDED before the next question (or, on the final round,
+     * the mini-game's own rewards recap) takes over. Purely a client-side timer, but matched
+     * exactly to the server's own TRUE_OR_FALSE_INTERMISSION_SECONDS -- the real gap the server
+     * now holds open before the next TRUE_OR_FALSE_ROUND_STARTED (or MINIGAME_ENDED) lands -- so
+     * the reveal fills that whole gap rather than getting cut off early or sitting idle after the
+     * next round's already live; see renderTrueOrFalseReveal's own gating. */
+    public static final long TRUE_OR_FALSE_REVEAL_DURATION_MS = 2000;
 
     /** How long AnnouncementOverlay's "HERE WE GO!" banner stays up after GAME_STARTED -- fires
      * the instant the host's Start Game click lands, no turnEffectGateUntil delay needed since
@@ -420,11 +451,18 @@ public class RunePartyPlugin extends Plugin
     // clears this, so the roll never fires mid-emote.
     private volatile boolean awaitingSpinFinish = false;
     // Same idea as awaitingSpinFinish, one per response to a pending Golden Gnome offer -- see
-    // onAnimationChanged. At most one of these four "awaiting" flags is ever true at once, since a
-    // roll, an offer, and a mini-game ready-check can never all be pending at the same time.
+    // onAnimationChanged. At most one of these six "awaiting" flags is ever true at once: a roll
+    // and a Golden Gnome offer are both only possible outside a mini-game (isLocalPlayerReadyToRoll
+    // requires !minigameActive), a mini-game ready-check is only possible before its own countdown
+    // starts (isLocalPlayerAwaitingMinigameReady requires !minigameCountdownStarted), and a True or
+    // False answer is only possible once the round's actually playable (isLocalPlayerAwaitingTrueOrFalseAnswer
+    // requires isMinigamePlayable(), which itself requires the countdown to have both started and
+    // finished) -- so no two of these can ever overlap.
     private volatile boolean awaitingGnomeYesFinish = false;
     private volatile boolean awaitingGnomeNoFinish = false;
     private volatile boolean awaitingMinigameReadyFinish = false;
+    private volatile boolean awaitingTrueOrFalseYesFinish = false;
+    private volatile boolean awaitingTrueOrFalseNoFinish = false;
     // Candidate destination tiles for the current roll -- more than one when the roll's path
     // crosses a fork (see TileOverlay#renderTargetArrow, which draws one arrow per candidate).
     // Never null, only ever empty.
@@ -551,6 +589,27 @@ public class RunePartyPlugin extends Plugin
     // COIN_RUSH_COLLECTED handler (which clears an entry once the server's own echo confirms it).
     private final Set<Integer> coinRushCollectSubmitted = ConcurrentHashMap.newKeySet();
     private volatile long coinRushRoundStartAt = 0;
+    // ---- True or False (server-driven rounds -- see TRUE_OR_FALSE_ROUND_STARTED/ANSWERED/
+    // ROUND_ENDED handling). All real state, applied catch-up or not: trueOrFalseQuestion/
+    // RoundNumber are the current round's own question text and 1-indexed round number (null/0
+    // once the round ends, until the next one starts or the mini-game itself ends).
+    // trueOrFalseAnsweredRsns mirrors minigameReadyRsns's own "who's confirmed" role, just scoped
+    // to the current round instead of the whole mini-game -- who's submitted an answer this round,
+    // not what they answered (see renderTrueOrFalseQuestion, the "Ready screen"-style tally this
+    // was asked for). trueOrFalseMyAnswer is the local player's own answer this round (null until
+    // they've answered), read by isLocalPlayerAwaitingTrueOrFalseAnswer to stop a YES/NO emote
+    // from resubmitting once they already have. trueOrFalseLastCorrectAnswer/Results are the most
+    // recent TRUE_OR_FALSE_ROUND_ENDED's own reveal, held onto (not cleared) through the next
+    // round's own trueOrFalseQuestion update, since renderTrueOrFalseReveal gates its own display
+    // on trueOrFalseRevealUntil, not on whether a new question already exists. ----
+    private volatile String trueOrFalseQuestion = null;
+    private volatile int trueOrFalseRoundNumber = 0;
+    private final Set<String> trueOrFalseAnsweredRsns = ConcurrentHashMap.newKeySet(); // lowercase rsn
+    private volatile Boolean trueOrFalseMyAnswer = null;
+    private volatile long trueOrFalseRoundStartedAt = 0; // wall-clock moment this round's own TRUE_OR_FALSE_ROUND_STARTED landed -- see getTrueOrFalseRoundEndsAt
+    private volatile Boolean trueOrFalseLastCorrectAnswer = null;
+    private volatile List<TrueOrFalseResult> trueOrFalseLastResults = Collections.emptyList();
+    private volatile long trueOrFalseRevealUntil = 0;
     // Host-set at start (see GAME_STARTED's maxRounds) and incremented once per completed round
     // (see MINIGAME_ENDED) -- together these are what StatsOverlay's "ROUND x/y" line reads via
     // getCurrentRound/getMaxRounds. 0 until GAME_STARTED actually lands.
@@ -608,6 +667,23 @@ public class RunePartyPlugin extends Plugin
         {
             this.rsn = rsn;
             this.coins = coins;
+        }
+    }
+
+    /** One player's outcome on a single True or False round -- see TRUE_OR_FALSE_ROUND_ENDED's own
+     * "results" list and renderTrueOrFalseReveal, the only consumer. {@code answer} is null if
+     * they never answered in time (always incorrect in that case). */
+    public static class TrueOrFalseResult
+    {
+        public final String rsn;
+        public final Boolean answer;
+        public final boolean correct;
+
+        public TrueOrFalseResult(String rsn, Boolean answer, boolean correct)
+        {
+            this.rsn = rsn;
+            this.answer = answer;
+            this.correct = correct;
         }
     }
 
@@ -1178,6 +1254,31 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
+    /** Answers the current True or False round -- called from onAnimationChanged once the local
+     * player's YES ("True")/NO ("False") emote finishes, same finish-gated pattern as
+     * respondGoldenGnomeOffer. The server never echoes back correctness -- see
+     * TRUE_OR_FALSE_ROUND_ENDED, the only thing that actually reveals it, once every player's had
+     * their full 5 seconds. A 409 here (already answered, or the round already ended before this
+     * landed) is a definitive rejection, not a network hiccup -- see ApiClient#ApiHttpException,
+     * same reasoning confirmArrival's own catch block follows -- so this doesn't retry either way;
+     * the player just missed this one, same as if they'd never emoted at all. */
+    private void answerTrueOrFalse(boolean answer)
+    {
+        String self = localRsn();
+        final String gid = gameId;
+        final String token = playerToken;
+        if (self == null || gid == null || token == null) return;
+
+        executor.submit(() ->
+        {
+            try { apiClient.answerTrueOrFalse(gid, self, token, answer); }
+            catch (Exception e)
+            {
+                log.warn("Answer True or False failed", e);
+            }
+        });
+    }
+
     public void submitMinigameResult(int score)
     {
         String self = localRsn();
@@ -1578,21 +1679,23 @@ public class RunePartyPlugin extends Plugin
 
     /** Rolls the dice once the local player's Spin emote finishes on their own turn -- replaces the
      * old "right-click your tile -> Roll Dice" menu entry with a gesture trigger -- and, the same
-     * way, responds to a pending Golden Gnome offer once a YES/NO emote finishes. Only reacts to
-     * the local player's own animation (every client sees every nearby player's AnimationChanged,
-     * so this would otherwise also fire for spectators watching someone else spin/nod/shake for
-     * fun). Waits for the *next* animation change away from whichever emote ID matched -- i.e. the
-     * emote actually finishing, not just starting -- so the roll (and the screen-centered dice
-     * reveal every client sees, see AnnouncementOverlay#renderDiceRoll) or the offer response never
-     * fires mid-emote; awaitingSpinFinish/awaitingGnomeYesFinish/awaitingGnomeNoFinish are what
-     * carry that wait across the two AnimationChanged firings, exactly one set at a time since a
-     * roll and an offer can never both be pending simultaneously (isLocalPlayerReadyToRoll already
-     * requires no offer is pending). Gates the actual roll on isLocalPlayerReadyToRoll() -- same
-     * check AnnouncementOverlay#renderSpinHint uses to decide whether to show the "Use the SPIN!
-     * emote" reminder -- and the offer response on isLocalPlayerAwaitingGoldenGnomeResponse(), same
-     * check AnnouncementOverlay#renderGoldenGnomeOffer uses, so neither hint is ever showing when
-     * the matching emote wouldn't actually do anything. rollDice()/respondGoldenGnomeOffer() each
-     * re-check their own state on top of this, this is just what decides *when* to call them. */
+     * way, responds to a pending Golden Gnome offer, a mini-game ready-check, or the current True
+     * or False round once the matching YES/NO emote finishes. Only reacts to the local player's own
+     * animation (every client sees every nearby player's AnimationChanged, so this would otherwise
+     * also fire for spectators watching someone else spin/nod/shake for fun). Waits for the *next*
+     * animation change away from whichever emote ID matched -- i.e. the emote actually finishing,
+     * not just starting -- so the roll (and the screen-centered dice reveal every client sees, see
+     * AnnouncementOverlay#renderDiceRoll) or whichever response fires never happens mid-emote;
+     * awaitingSpinFinish/awaitingGnomeYesFinish/awaitingGnomeNoFinish/awaitingMinigameReadyFinish/
+     * awaitingTrueOrFalseYesFinish/awaitingTrueOrFalseNoFinish are what carry that wait across the
+     * two AnimationChanged firings, exactly one set at a time (see those six fields' own doc for
+     * why none of the underlying situations can ever overlap). Gates the actual roll on
+     * isLocalPlayerReadyToRoll() -- same check AnnouncementOverlay#renderSpinHint uses to decide
+     * whether to show the "Use the SPIN! emote" reminder -- and each response on its own matching
+     * isLocalPlayerAwaiting*() check, so no hint is ever showing when the matching emote wouldn't
+     * actually do anything. rollDice()/respondGoldenGnomeOffer()/confirmMinigameReady()/
+     * answerTrueOrFalse() each re-check their own state on top of this, this is just what decides
+     * *when* to call them. */
     @Subscribe
     public void onAnimationChanged(AnimationChanged event)
     {
@@ -1620,13 +1723,23 @@ public class RunePartyPlugin extends Plugin
             {
                 awaitingMinigameReadyFinish = true;
             }
+            else if (isLocalPlayerAwaitingTrueOrFalseAnswer())
+            {
+                awaitingTrueOrFalseYesFinish = true;
+            }
             return;
         }
 
         if (anim == AnimationID.EMOTE_NO)
         {
-            if (!isLocalPlayerAwaitingGoldenGnomeResponse()) return;
-            awaitingGnomeNoFinish = true;
+            if (isLocalPlayerAwaitingGoldenGnomeResponse())
+            {
+                awaitingGnomeNoFinish = true;
+            }
+            else if (isLocalPlayerAwaitingTrueOrFalseAnswer())
+            {
+                awaitingTrueOrFalseNoFinish = true;
+            }
             return;
         }
 
@@ -1649,6 +1762,16 @@ public class RunePartyPlugin extends Plugin
         {
             awaitingMinigameReadyFinish = false;
             confirmMinigameReady();
+        }
+        else if (awaitingTrueOrFalseYesFinish)
+        {
+            awaitingTrueOrFalseYesFinish = false;
+            answerTrueOrFalse(true);
+        }
+        else if (awaitingTrueOrFalseNoFinish)
+        {
+            awaitingTrueOrFalseNoFinish = false;
+            answerTrueOrFalse(false);
         }
     }
 
@@ -1741,6 +1864,20 @@ public class RunePartyPlugin extends Plugin
         if (!minigameActive || !minigameCountdownStarted) return false;
         if (minigameCountdownSkippedForClient) return true;
         return minigameCountdownBannerUntil != 0 && System.currentTimeMillis() >= minigameCountdownBannerUntil;
+    }
+
+    /** Whether the local player still needs to answer the current True or False round -- mirrors
+     * isLocalPlayerAwaitingGoldenGnomeResponse's role for that offer's YES/NO emotes. Requires
+     * isMinigamePlayable() (not just minigameActive), same "the ready-check has to actually
+     * finish first" gate every other in-round action here respects. See onAnimationChanged (gates
+     * the real answerTrueOrFalse call) and AnnouncementOverlay#renderTrueOrFalseQuestion (gates
+     * the "use YES/NO" instruction on the exact same thing, so it stops prompting a player the
+     * instant their own answer lands). */
+    public boolean isLocalPlayerAwaitingTrueOrFalseAnswer()
+    {
+        if (!TRUE_OR_FALSE_KEY.equals(minigameKey) || !isMinigamePlayable() || trueOrFalseQuestion == null) return false;
+        String self = localRsn();
+        return self != null && !trueOrFalseAnsweredRsns.contains(self.toLowerCase(Locale.ROOT));
     }
 
     /** Whether {@code localPlayer} is standing on {@code rsn}'s tracked board position -- see
@@ -2506,20 +2643,24 @@ public class RunePartyPlugin extends Plugin
                 // end-of-round payout already has its own feedback (the roster/stats panels
                 // update, and submitMinigameResult's caller sees the MINIGAME_ENDED chat line), so
                 // this stays scoped to the cases that otherwise had no visible feedback at all.
-                // Coin Rush's own "coin_rush" reason is the one exception worth calling out: unlike
-                // the other three, it's not fired per landing -- the server bundles every coin a
-                // player grabbed during the round into one lump-sum COINS_CHANGED right before
-                // MINIGAME_ENDED (see app.py's _coin_rush_end_round), so this case only ever fires
-                // once per player per Coin Rush round, showing their round's own total ("+6 coins")
-                // then their real new balance -- never per-pickup. Each individual pickup gets its
-                // own separate, purely cosmetic "+2" flash instead (see COIN_RUSH_COLLECTED
-                // handling), which never touches this case at all since it carries no COINS_CHANGED
-                // of its own. The real coin total itself lives in rosterReducer (updated
-                // unconditionally above, catch-up or not) -- everything in this block is purely the
-                // popup's own cosmetics.
+                // Coin Rush's "coin_rush" and True or False's "true_or_false" reasons are the two
+                // exceptions worth calling out: unlike the other three, neither fires per landing --
+                // the server bundles every coin/correct-answer from the whole round/mini-game into
+                // one lump-sum COINS_CHANGED right before MINIGAME_ENDED (see app.py's
+                // _coin_rush_end_round/_true_or_false_end), so each case only ever fires once per
+                // player per mini-game, showing their own round total ("+6 coins" / "+10 coins")
+                // then their real new balance -- never per-pickup or per-round. Coin Rush's own
+                // individual pickups get a separate, purely cosmetic "+2" flash instead (see
+                // COIN_RUSH_COLLECTED handling), which never touches this case at all since it
+                // carries no COINS_CHANGED of its own; True or False has no equivalent mid-round
+                // flash since a round's own correctness isn't revealed until it ends anyway (see
+                // TRUE_OR_FALSE_ROUND_ENDED). The real coin total itself lives in rosterReducer
+                // (updated unconditionally above, catch-up or not) -- everything in this block is
+                // purely the popup's own cosmetics.
                 String coinsChangedReason = safeStr(e.payload, "reason");
                 if (!catchingUp && ("standard_tile".equals(coinsChangedReason) || "item".equals(coinsChangedReason)
-                    || "coin_trap".equals(coinsChangedReason) || "coin_rush".equals(coinsChangedReason)))
+                    || "coin_trap".equals(coinsChangedReason) || "coin_rush".equals(coinsChangedReason)
+                    || "true_or_false".equals(coinsChangedReason)))
                 {
                     String coinsChangedRsn = safeStr(e.payload, "player");
                     Integer delta = safeInt(e.payload, "delta");
@@ -2566,6 +2707,19 @@ public class RunePartyPlugin extends Plugin
                     coinRushScores.clear();
                     coinRushCollectSubmitted.clear();
                     coinRushRoundStartAt = 0;
+                }
+                // Same reasoning as Coin Rush's own reset just above -- a fresh True or False
+                // instance starts with no question/answers/reveal, regardless of catch-up.
+                if (TRUE_OR_FALSE_KEY.equals(minigameKey))
+                {
+                    trueOrFalseQuestion = null;
+                    trueOrFalseRoundNumber = 0;
+                    trueOrFalseAnsweredRsns.clear();
+                    trueOrFalseMyAnswer = null;
+                    trueOrFalseRoundStartedAt = 0;
+                    trueOrFalseLastCorrectAnswer = null;
+                    trueOrFalseLastResults = Collections.emptyList();
+                    trueOrFalseRevealUntil = 0;
                 }
                 if (!catchingUp)
                 {
@@ -2654,6 +2808,12 @@ public class RunePartyPlugin extends Plugin
                 // rendering it, and the next MINIGAME_STARTED resets it fresh regardless.
                 coinRushSpawns.clear();
                 coinRushCollectSubmitted.clear();
+                // Same reasoning as the Coin Rush cleanup just above -- no question/reveal should
+                // keep rendering once the mini-game itself has ended.
+                trueOrFalseQuestion = null;
+                trueOrFalseRoundNumber = 0;
+                trueOrFalseAnsweredRsns.clear();
+                trueOrFalseMyAnswer = null;
                 // Real state, applied catch-up or not -- one MINIGAME_ENDED is exactly one
                 // completed round (see the server's own _resolve_minigame_if_complete, which
                 // counts these events the same way to decide when maxRounds is reached). See
@@ -2713,6 +2873,66 @@ public class RunePartyPlugin extends Plugin
                 {
                     enqueueCoinPopup(collector, COIN_RUSH_REWARD, 0, COIN_RUSH_BUMP_POPUP_DURATION_MS, true);
                     addChatMessage(collector + " grabbed a coin!");
+                }
+                break;
+            }
+
+            case "TRUE_OR_FALSE_ROUND_STARTED":
+            {
+                // Real state, applied catch-up or not: a fresh round genuinely started at this
+                // point regardless of whether this client watched it happen live -- a catching-up
+                // client still needs to know the current question/round number the instant it
+                // starts rendering anything. Never carries the correct answer (see the server's own
+                // TRUE_OR_FALSE_ROUND_STARTED payload -- only questionIndex, resolved into text by
+                // the server itself before broadcast), so there's nothing here for a client to read
+                // early. Per-round-only state (who's answered, my own answer) resets fresh; the
+                // *previous* round's reveal (trueOrFalseLastCorrectAnswer/Results) is deliberately
+                // left alone here, same "let the timer/next reset clear it" idiom coinRushScores
+                // already uses -- renderTrueOrFalseReveal gates its own display on
+                // trueOrFalseRevealUntil, not on whether a new question already exists.
+                trueOrFalseQuestion = safeStr(e.payload, "question");
+                Integer roundNumber = safeInt(e.payload, "roundNumber");
+                if (roundNumber != null) trueOrFalseRoundNumber = roundNumber;
+                trueOrFalseAnsweredRsns.clear();
+                trueOrFalseMyAnswer = null;
+                // "Now" regardless of catch-up -- a live client gets the genuinely-accurate instant
+                // since this event only ever arrives right as the round actually starts either way;
+                // a catching-up client gets the same best-effort approximation coinRushRoundStartAt's
+                // own catch-up branch uses.
+                trueOrFalseRoundStartedAt = System.currentTimeMillis();
+                break;
+            }
+
+            case "TRUE_OR_FALSE_ANSWERED":
+            {
+                // Real state, applied catch-up or not -- see isLocalPlayerAwaitingTrueOrFalseAnswer/
+                // renderTrueOrFalseQuestion, both of which need an accurate answered-set regardless
+                // of whether this client watched each answer land live.
+                String answeredRsn = safeStr(e.payload, "player");
+                if (answeredRsn != null)
+                {
+                    trueOrFalseAnsweredRsns.add(answeredRsn.toLowerCase(Locale.ROOT));
+                    String self = localRsn();
+                    if (self != null && self.equalsIgnoreCase(answeredRsn))
+                    {
+                        JsonElement answerEl = e.payload.get("answer");
+                        if (answerEl != null && !answerEl.isJsonNull()) trueOrFalseMyAnswer = answerEl.getAsBoolean();
+                    }
+                }
+                break;
+            }
+
+            case "TRUE_OR_FALSE_ROUND_ENDED":
+            {
+                // Real state, applied catch-up or not: the correct answer is now public regardless
+                // of whether this client watched the round happen live.
+                JsonElement correctEl = e.payload.get("correctAnswer");
+                trueOrFalseLastCorrectAnswer = correctEl != null && !correctEl.isJsonNull() ? correctEl.getAsBoolean() : null;
+                trueOrFalseLastResults = safeTrueOrFalseResults(e.payload);
+                if (!catchingUp)
+                {
+                    trueOrFalseRevealUntil = System.currentTimeMillis() + TRUE_OR_FALSE_REVEAL_DURATION_MS;
+                    extendTurnEffectGate(trueOrFalseRevealUntil);
                 }
                 break;
             }
@@ -2831,6 +3051,32 @@ public class RunePartyPlugin extends Plugin
         return out;
     }
 
+    /** Parses a TRUE_OR_FALSE_ROUND_ENDED payload's "results" list -- see TrueOrFalseResult's own
+     * doc and renderTrueOrFalseReveal, the only consumer. {@code answer} is nullable (missing/null
+     * JSON means the player never answered that round at all, not that they answered false). */
+    private static List<TrueOrFalseResult> safeTrueOrFalseResults(JsonObject o)
+    {
+        if (o == null || !o.has("results") || o.get("results").isJsonNull() || !o.get("results").isJsonArray()) return Collections.emptyList();
+        JsonArray arr = o.get("results").getAsJsonArray();
+        List<TrueOrFalseResult> out = new ArrayList<>(arr.size());
+        for (int i = 0; i < arr.size(); i++)
+        {
+            try
+            {
+                JsonObject entry = arr.get(i).getAsJsonObject();
+                String rsn = safeStr(entry, "player");
+                if (rsn == null) continue;
+                JsonElement answerEl = entry.get("answer");
+                Boolean answer = answerEl != null && !answerEl.isJsonNull() ? answerEl.getAsBoolean() : null;
+                JsonElement correctEl = entry.get("correct");
+                boolean correct = correctEl != null && !correctEl.isJsonNull() && correctEl.getAsBoolean();
+                out.add(new TrueOrFalseResult(rsn, answer, correct));
+            }
+            catch (Exception ignored) { /* skip malformed entry */ }
+        }
+        return out;
+    }
+
     private void resetState()
     {
         // Leaving/disconnecting while board view is active shouldn't strand the player's camera
@@ -2872,6 +3118,9 @@ public class RunePartyPlugin extends Plugin
         minigameReadyRsns.clear();
         minigameCountdownStarted = false; minigameCountdownSkippedForClient = false; minigameCountdownBannerUntil = 0;
         coinRushSpawns.clear(); coinRushScores.clear(); coinRushCollectSubmitted.clear(); coinRushRoundStartAt = 0;
+        trueOrFalseQuestion = null; trueOrFalseRoundNumber = 0; trueOrFalseAnsweredRsns.clear();
+        trueOrFalseMyAnswer = null; trueOrFalseRoundStartedAt = 0;
+        trueOrFalseLastCorrectAnswer = null; trueOrFalseLastResults = Collections.emptyList(); trueOrFalseRevealUntil = 0;
         maxRounds = 0; completedRounds = 0;
         playerPositions.clear();
         turnAnnounceRsn = null; turnAnnounceUntil = 0; startConfirmSubmitted = false;
@@ -2955,6 +3204,26 @@ public class RunePartyPlugin extends Plugin
      * no round is active yet or the round hasn't actually become playable (see
      * coinRushRoundStartAt's own doc on when that gets stamped). */
     public long getCoinRushEndsAt() { return coinRushRoundStartAt != 0 ? coinRushRoundStartAt + COIN_RUSH_DURATION_MS : 0; }
+
+    public String getTrueOrFalseQuestion() { return trueOrFalseQuestion; }
+    public int getTrueOrFalseRoundNumber() { return trueOrFalseRoundNumber; }
+    /** Who's answered the *current* round so far -- see renderTrueOrFalseQuestion's own
+     * "Ready screen"-style tally, the only consumer. */
+    public Set<String> getTrueOrFalseAnsweredRsns() { return Collections.unmodifiableSet(trueOrFalseAnsweredRsns); }
+    public Boolean getTrueOrFalseMyAnswer() { return trueOrFalseMyAnswer; }
+    /** When the current True or False round's reading period ends and its answer countdown starts
+     * ticking (see TRUE_OR_FALSE_READING_DURATION_MS) -- 0 if no round is currently open, same
+     * gating as getTrueOrFalseRoundEndsAt. renderTrueOrFalseQuestion hides the countdown number
+     * until this passes. */
+    public long getTrueOrFalseAnswerWindowStartsAt() { return trueOrFalseQuestion != null && trueOrFalseRoundStartedAt != 0 ? trueOrFalseRoundStartedAt + TRUE_OR_FALSE_READING_DURATION_MS : 0; }
+    /** When the current True or False round's own clock (see TRUE_OR_FALSE_READING_DURATION_MS +
+     * TRUE_OR_FALSE_ROUND_DURATION_MS) runs out -- 0 if no round is currently open (see
+     * trueOrFalseRoundStartedAt's own doc on when that gets stamped, and trueOrFalseQuestion,
+     * cleared the instant the round ends). */
+    public long getTrueOrFalseRoundEndsAt() { return trueOrFalseQuestion != null && trueOrFalseRoundStartedAt != 0 ? trueOrFalseRoundStartedAt + TRUE_OR_FALSE_READING_DURATION_MS + TRUE_OR_FALSE_ROUND_DURATION_MS : 0; }
+    public Boolean getTrueOrFalseLastCorrectAnswer() { return trueOrFalseLastCorrectAnswer; }
+    public List<TrueOrFalseResult> getTrueOrFalseLastResults() { return trueOrFalseLastResults; }
+    public long getTrueOrFalseRevealUntil() { return trueOrFalseRevealUntil; }
 
     public String getItemPlacementKey() { return itemPlacementKey; }
     public Set<String> getMinigameReadyRsns() { return minigameReadyRsns; }

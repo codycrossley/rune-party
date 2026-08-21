@@ -30,22 +30,8 @@ import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.util.Text;
 
-/** Big, brief, screen-centered instructional banners -- the first of which is "<player>'s Turn" on
- * every TURN_STARTED, in that player's own RunePartyColor (or "Your Turn!" for the local player) --
- * plus the retro dice-roll reveal after a DICE_ROLLED event (see renderDiceRoll), screen-centered
- * for the same reason: everyone at the table should be able to see what got rolled without hunting
- * for the roller's model on screen, and a one-shot "Welcome to Rune Party Showdown" title card (see
- * renderWelcomeBanner) shown only to whoever just created/joined a game. Most of these are
- * fade-on-a-timer, same pattern as Gnomeball's TimerOverlay#renderGoalFlash: the plugin stamps an
- * until-timestamp when the triggering event lands (see RunePartyPlugin's
- * turnAnnounceRsn/turnAnnounceUntil, diceRollRsn/diceRollUntil, and welcomeBannerUntil), this
- * overlay just counts down and fades against it every frame. renderSpinHint is the one exception --
- * duration-less, it's just a live read of plugin state that shows/hides itself instantly rather
- * than fading on a clock -- and it's addressed differently per viewer rather than local-only: the
- * mover sees "Use the SPIN! emote...", everyone else sees "Waiting for &lt;player&gt; to roll the
- * dice..." (see renderSpinHintSelf/renderSpinHintWaiting), the same "same moment, addressed per
- * viewer" split renderTurnAnnouncement and renderGoldenGnomeOffer/renderGoldenGnomeOutcome also
- * use. Meant to grow with more instructional banners as the game does, not just these. */
+/** Big, brief, screen-centered instructional banners -- e.g "<player>'s Turn" **/
+
 @Slf4j
 public class AnnouncementOverlay extends Overlay
 {
@@ -151,6 +137,27 @@ public class AnnouncementOverlay extends Overlay
     private static final Color MINIGAME_REWARDS_COLOR = new Color(80, 220, 120); // "+N coins"
     private static final Color MINIGAME_REWARDS_NONE_COLOR = Color.GRAY; // "no reward"
 
+    // True or False question screen -- see renderTrueOrFalseQuestion. Same "who's answered" tally
+    // layout/sizing as renderMinigameReadyCheck's own "who's ready" list, just without that one's
+    // breathing-alpha pulse (this screen has a real 5-second clock, unlike the ready-check's
+    // duration-less wait, so a plain steady alpha reads better against a visibly ticking countdown).
+    private static final float TRUE_OR_FALSE_ROUND_LABEL_SIZE = 22f; // "Round 2/5"
+    private static final float TRUE_OR_FALSE_QUESTION_SIZE = 26f;
+    private static final int TRUE_OR_FALSE_QUESTION_LINE_HEIGHT = 32;
+    private static final int TRUE_OR_FALSE_QUESTION_MAX_WIDTH = 620; // wraps onto multiple lines past this pixel width
+    private static final float TRUE_OR_FALSE_COUNTDOWN_SIZE = 34f;
+    private static final Color TRUE_OR_FALSE_COUNTDOWN_COLOR = RAINBOW_YELLOW;
+
+    // True or False per-round reveal -- see renderTrueOrFalseReveal. Same green/red as
+    // TrueOrFalseMinigame's own T/F wheel icon, so the answer's own color stays consistent
+    // wherever it shows up.
+    private static final long TRUE_OR_FALSE_REVEAL_FADE_MS = 400;
+    private static final float TRUE_OR_FALSE_REVEAL_TITLE_SIZE = 30f; // "The answer was TRUE/FALSE!"
+    private static final float TRUE_OR_FALSE_REVEAL_LINE_SIZE = 18f; // each player's own answer/correctness line
+    private static final int TRUE_OR_FALSE_REVEAL_LINE_HEIGHT = 24;
+    private static final Color TRUE_OR_FALSE_TRUE_COLOR = new Color(80, 220, 80);
+    private static final Color TRUE_OR_FALSE_FALSE_COLOR = new Color(220, 70, 70);
+
     // End-game awards ceremony -- see RunePartyPlugin#triggerGameOverSequence for the full chain
     // ("GAME OVER!" -> intro -> one place reveal per eliminated player -> suspense -> winner). Each
     // phase gets its own fade constant/size below, in the order it actually plays.
@@ -179,6 +186,11 @@ public class AnnouncementOverlay extends Overlay
     private static final float GOLDEN_GNOME_OFFER_TITLE_SIZE = 30f; // "You found a GOLDEN GNOME!"
     private static final float GOLDEN_GNOME_OFFER_SUBTITLE_SIZE = 20f; // "Would you like to buy one?"
     private static final float GOLDEN_GNOME_OFFER_EMOTE_SIZE = 24f; // "'YES' emote: purchase" / "'NO' emote: decline"
+    // A Minigame's instructions string (see renderMinigameReadyCheck) is arbitrary per-minigame
+    // text, unlike the fixed phrases above, so it's wrapped at GOLDEN_GNOME_OFFER_SUBTITLE_SIZE
+    // rather than drawn as one line.
+    private static final int READY_CHECK_INSTRUCTIONS_LINE_HEIGHT = 24;
+    private static final int READY_CHECK_INSTRUCTIONS_MAX_WIDTH = 620;
     // Same breathing-alpha idea as the Spin hint -- this offer is also duration-less (it persists
     // until the local player's YES/NO emote resolves it), so it needs its own way to stay noticeable.
     private static final long GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS = 1400;
@@ -231,6 +243,8 @@ public class AnnouncementOverlay extends Overlay
         renderMinigameSpinner(g);
         renderMinigameReadyCheck(g);
         renderMinigameCountdown(g);
+        renderTrueOrFalseReveal(g);
+        renderTrueOrFalseQuestion(g);
         renderMinigameRewardsBanner(g);
         renderRoundCompleteBanner(g);
         renderDiceRoll(g);
@@ -908,16 +922,26 @@ public class AnnouncementOverlay extends Overlay
             drawCenteredText(g, displayName, centerX, y, WELCOME_TITLE_COLOR, alpha);
         }
 
+        // Wrapped, not a single drawCenteredText call -- a mini-game's own instructions string is
+        // arbitrary-length content defined per Minigame (see app.py/minigames), not a short fixed
+        // phrase like everything else on this banner, so it's the one piece here that can actually
+        // run wide enough to overflow the screen at a readable size. Everything below it (the
+        // emote instruction, the ready-tally list) is laid out relative to afterInstructionsY --
+        // however many lines the instructions actually took -- rather than a fixed offset from y,
+        // so a longer instructions string pushes the rest of the screen down instead of
+        // overlapping it.
+        int afterInstructionsY = y + 30;
         String instructions = plugin.getMinigameInstructions();
         if (instructions != null)
         {
             g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE));
-            drawCenteredText(g, instructions, centerX, y + 30, Color.WHITE, alpha);
+            afterInstructionsY = drawWrappedCenteredText(g, instructions, centerX, y + 30,
+                READY_CHECK_INSTRUCTIONS_MAX_WIDTH, READY_CHECK_INSTRUCTIONS_LINE_HEIGHT, Color.WHITE, alpha) - READY_CHECK_INSTRUCTIONS_LINE_HEIGHT;
         }
 
         Font emoteFont = FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
         Font emoteWordFont = MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
-        drawEmoteInstruction(g, "YES", " emote when you're ready!", emoteFont, emoteWordFont, centerX, y + 66, alpha);
+        drawEmoteInstruction(g, "YES", " emote when you're ready!", emoteFont, emoteWordFont, centerX, afterInstructionsY + 36, alpha);
 
         Set<String> ready = plugin.getMinigameReadyRsns();
         List<RosterReducer.RosterEntry> players = new ArrayList<>();
@@ -929,7 +953,7 @@ public class AnnouncementOverlay extends Overlay
 
         Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
         Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
-        int lineY = y + 100;
+        int lineY = afterInstructionsY + 70;
         for (RosterReducer.RosterEntry entry : players)
         {
             RunePartyColor seatColor = RunePartyColor.forNumber(entry.number);
@@ -979,6 +1003,154 @@ public class AnnouncementOverlay extends Overlay
         {
             drawCenteredRainbowText(g, "BEGIN!", RAINBOW_LETTER_COLORS, centerX, y, 1f);
         }
+    }
+
+    /** Draws the current True or False round's question, then a live countdown to its own 5-second
+     * deadline, and a "who's answered" tally -- the "Ready screen"-style treatment this mini-game
+     * was asked for, just scoped to answering a question instead of confirming ready (see
+     * renderMinigameReadyCheck's own "who's ready" list, the direct template this mirrors). The
+     * countdown number stays hidden ("Get ready...") for TRUE_OR_FALSE_READING_DURATION_MS after
+     * the question first appears, so there's a beat to actually read it before the real 5-second
+     * answer clock starts ticking down (see getTrueOrFalseAnswerWindowStartsAt) -- the server
+     * grants the same reading grace before it starts counting toward the round's own end. Held
+     * back while renderTrueOrFalseReveal's own window is still showing, so a fresh question never
+     * appears on top of the previous round's still-showing reveal -- see TRUE_OR_FALSE_REVEAL_
+     * DURATION_MS's own doc on the resulting tradeoff (a little of the new round's real 5 seconds
+     * is spent showing the old one's reveal instead of the new question). */
+    private void renderTrueOrFalseQuestion(Graphics2D g)
+    {
+        if (!plugin.isMinigamePlayable()) return;
+        if (System.currentTimeMillis() < plugin.getTrueOrFalseRevealUntil()) return;
+        String question = plugin.getTrueOrFalseQuestion();
+        if (question == null) return;
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 3 - 20;
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_ROUND_LABEL_SIZE));
+        drawCenteredText(g, "Round " + plugin.getTrueOrFalseRoundNumber() + "/5", centerX, y, Color.WHITE, 1f);
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_QUESTION_SIZE));
+        int afterQuestionY = drawWrappedCenteredText(g, question, centerX, y + 34,
+            TRUE_OR_FALSE_QUESTION_MAX_WIDTH, TRUE_OR_FALSE_QUESTION_LINE_HEIGHT, Color.WHITE, 1f);
+
+        long now = System.currentTimeMillis();
+        g.setFont(MARIO_PARTY_FONT.deriveFont(TRUE_OR_FALSE_COUNTDOWN_SIZE));
+        if (now < plugin.getTrueOrFalseAnswerWindowStartsAt())
+        {
+            // Reading period -- the question's on screen but the 5-second answer clock hasn't
+            // started yet, so there's no countdown number to show. Same slot's space as the
+            // eventual number so nothing downstream (the emote instructions/tally) jumps once the
+            // countdown actually appears.
+            g.setFont(FontManager.getRunescapeSmallFont());
+            drawCenteredText(g, "Get ready...", centerX, afterQuestionY + 34, Color.LIGHT_GRAY, 1f);
+        }
+        else
+        {
+            long remainingMs = plugin.getTrueOrFalseRoundEndsAt() - now;
+            int secondsLeft = (int) Math.max(0, Math.ceil(remainingMs / 1000.0));
+            drawCenteredText(g, String.valueOf(secondsLeft), centerX, afterQuestionY + 40, TRUE_OR_FALSE_COUNTDOWN_COLOR, 1f);
+        }
+
+        Font emoteFont = FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
+        Font emoteWordFont = MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
+        int emoteY = afterQuestionY + 72;
+        drawEmoteInstruction(g, "YES", " = True", emoteFont, emoteWordFont, centerX - 100, emoteY, 1f);
+        drawEmoteInstruction(g, "NO", " = False", emoteFont, emoteWordFont, centerX + 100, emoteY, 1f);
+
+        Set<String> answered = plugin.getTrueOrFalseAnsweredRsns();
+        List<RosterReducer.RosterEntry> players = new ArrayList<>();
+        for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().snapshot())
+        {
+            if (entry.role == RunePartyRole.PLAYER && entry.joined) players.add(entry);
+        }
+        players.sort(Comparator.comparing((RosterReducer.RosterEntry e) -> e.number));
+
+        Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
+        Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
+        int lineY = emoteY + 36;
+        for (RosterReducer.RosterEntry entry : players)
+        {
+            RunePartyColor seatColor = RunePartyColor.forNumber(entry.number);
+            Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
+            boolean hasAnswered = answered.contains(entry.rsn.toLowerCase());
+            String status = hasAnswered ? "   Answered!" : "   Waiting...";
+            Color statusColor = hasAnswered ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR;
+            drawStandingsLine(g, nameFont, statsFont, "", entry.rsn, nameColor, status, statusColor, centerX, lineY, 1f);
+            lineY += ROUND_COMPLETE_LINE_HEIGHT;
+        }
+    }
+
+    /** Draws the previous True or False round's reveal -- the correct answer (color-coded green
+     * for True, red for False, matching TrueOrFalseMinigame's own wheel icon) plus every seated
+     * PLAYER's own answer and whether it was correct, a plain fixed-duration banner (see
+     * TRUE_OR_FALSE_REVEAL_DURATION_MS) rather than a pulsing duration-less one, since the correct
+     * answer itself never changes once revealed -- there's nothing to keep drawing attention to
+     * the way a still-open ready-check or question does. */
+    private void renderTrueOrFalseReveal(Graphics2D g)
+    {
+        long remaining = plugin.getTrueOrFalseRevealUntil() - System.currentTimeMillis();
+        if (remaining <= 0) return;
+        Boolean correctAnswer = plugin.getTrueOrFalseLastCorrectAnswer();
+        if (correctAnswer == null) return;
+
+        float alpha = remaining < TRUE_OR_FALSE_REVEAL_FADE_MS ? remaining / (float) TRUE_OR_FALSE_REVEAL_FADE_MS : 1f;
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 3;
+
+        String title = "The answer was " + (correctAnswer ? "TRUE" : "FALSE") + "!";
+        Color titleColor = correctAnswer ? TRUE_OR_FALSE_TRUE_COLOR : TRUE_OR_FALSE_FALSE_COLOR;
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_REVEAL_TITLE_SIZE));
+        drawCenteredText(g, title, centerX, y, titleColor, alpha);
+
+        Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_REVEAL_LINE_SIZE);
+        Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(TRUE_OR_FALSE_REVEAL_LINE_SIZE);
+        int lineY = y + 36;
+        for (RunePartyPlugin.TrueOrFalseResult result : plugin.getTrueOrFalseLastResults())
+        {
+            String answerText = result.answer == null ? "no answer" : (result.answer ? "True" : "False");
+            String status = "   " + answerText + (result.correct ? " -- correct!" : " -- wrong");
+            Color statusColor = result.correct ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR;
+            drawStandingsLine(g, nameFont, statsFont, "", result.rsn, Color.LIGHT_GRAY, status, statusColor, centerX, lineY, alpha);
+            lineY += TRUE_OR_FALSE_REVEAL_LINE_HEIGHT;
+        }
+    }
+
+    /** Word-wraps {@code text} onto as many lines as needed to stay within {@code maxWidth}
+     * pixels, each centered on {@code centerX} and drawn {@code lineHeight} apart starting at
+     * {@code y} -- {@code g}'s font must already be set, same convention drawCenteredText itself
+     * uses. Unlike every other banner on this overlay (short phrases that always fit one line), a
+     * trivia question's own text is long-form prose that can easily run past a single line at a
+     * readable size, so this is the one place here that actually needs to wrap. Returns the y
+     * coordinate immediately after the last line drawn, so a caller can lay out whatever comes
+     * next (the countdown, emote instructions, etc.) without hardcoding how many lines the
+     * question itself took. */
+    private int drawWrappedCenteredText(Graphics2D g, String text, int centerX, int y, int maxWidth, int lineHeight, Color color, float alpha)
+    {
+        FontMetrics fm = g.getFontMetrics();
+        String[] words = text.split(" ");
+        StringBuilder line = new StringBuilder();
+        int lineY = y;
+        for (String word : words)
+        {
+            String candidate = line.length() == 0 ? word : line + " " + word;
+            if (line.length() > 0 && fm.stringWidth(candidate) > maxWidth)
+            {
+                drawCenteredText(g, line.toString(), centerX, lineY, color, alpha);
+                lineY += lineHeight;
+                line = new StringBuilder(word);
+            }
+            else
+            {
+                line = new StringBuilder(candidate);
+            }
+        }
+        if (line.length() > 0)
+        {
+            drawCenteredText(g, line.toString(), centerX, lineY, color, alpha);
+            lineY += lineHeight;
+        }
+        return lineY;
     }
 
     /** Draws the mini-game rewards recap -- "REWARDS" in the same Mario-Party-logo rainbow

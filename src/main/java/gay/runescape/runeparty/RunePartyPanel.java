@@ -443,18 +443,23 @@ public class RunePartyPanel extends PluginPanel
         // Gated on isMinigamePlayable(), not isMinigameActive() -- while the selection
         // spinner/instructions/ready-check sequence is still playing out in AnnouncementOverlay,
         // this section stays hidden entirely (no panel presence at all), same as the Golden Gnome
-        // offer has none of its own either -- see RunePartyPlugin#isMinigamePlayable.
-        minigamePanel.setVisible(plugin.isMinigamePlayable());
-        if (plugin.isMinigamePlayable())
+        // offer has none of its own either -- see RunePartyPlugin#isMinigamePlayable. Also gated on
+        // the active mini-game's own hasSidePanelPresence() -- a fully screen-driven mini-game
+        // (see TrueOrFalseMinigame's own doc) opts all the way out of this section, not just its
+        // own createControlPanel() slot, so its instructions text doesn't show here either.
+        String minigameKey = plugin.getMinigameKey();
+        boolean showMinigamePanel = plugin.isMinigamePlayable()
+            && minigameKey != null && Minigames.get(minigameKey).hasSidePanelPresence();
+        minigamePanel.setVisible(showMinigamePanel);
+        if (showMinigamePanel)
         {
             minigameInstructionsLabel.setText("<html>" + plugin.getMinigameInstructions() + "</html>");
 
-            String key = plugin.getMinigameKey();
-            if (!java.util.Objects.equals(key, activeMinigameKey))
+            if (!java.util.Objects.equals(minigameKey, activeMinigameKey))
             {
-                activeMinigameKey = key;
+                activeMinigameKey = minigameKey;
                 minigameControlSlot.removeAll();
-                minigameControlSlot.add(Minigames.get(key).createControlPanel(plugin));
+                minigameControlSlot.add(Minigames.get(minigameKey).createControlPanel(plugin));
                 minigameControlSlot.revalidate();
                 minigameControlSlot.repaint();
             }

@@ -290,6 +290,24 @@ public class ApiClient
         }
     }
 
+    /** Reports the local player's YES ("True")/NO ("False") emote answering the current True or
+     * False round -- see the server's own true-or-false-answer endpoint, which 409s a second
+     * attempt for the same round (an answer, once landed, is final) or if no question is
+     * currently open. Never echoes back correctness -- that's only ever revealed once the round's
+     * own clock runs out, via TRUE_OR_FALSE_ROUND_ENDED. */
+    public void answerTrueOrFalse(String gameId, String playerRsn, String playerToken, boolean answer) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("answer", answer);
+
+        try (Response resp = post("/v1/games/" + gameId + "/true-or-false-answer", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Answer True or False failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Course/board building -- same tile-marking shape as Gnomeball's field
     // builder, extended with a path index so a course is an ordered sequence
