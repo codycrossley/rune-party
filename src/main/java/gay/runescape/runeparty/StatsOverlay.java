@@ -124,7 +124,7 @@ public class StatsOverlay extends Overlay
             // Name always reads in the player's own seat color (see PlayerOverlay/RunePartyPanel,
             // which color-code the same player identically) -- whose turn it is is shown on the
             // stats side instead, so the two pieces of information never fight for the same color.
-            RunePartyColor seatColor = RunePartyColor.forNumber(entry.number);
+            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
             Color nameColor = seatColor != null ? seatColor.awt : COLOR_NAME_FALLBACK;
             Color statsColor = onTurn ? COLOR_TURN : COLOR_NORMAL;
 
@@ -167,7 +167,7 @@ public class StatsOverlay extends Overlay
 
         for (RosterReducer.RosterEntry entry : players)
         {
-            RunePartyColor seatColor = RunePartyColor.forNumber(entry.number);
+            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
             Color nameColor = seatColor != null ? seatColor.awt : COLOR_NAME_FALLBACK;
             int score = scores.getOrDefault(entry.rsn.toLowerCase(Locale.ROOT), 0);
 

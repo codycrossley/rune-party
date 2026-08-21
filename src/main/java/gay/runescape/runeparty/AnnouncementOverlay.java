@@ -270,7 +270,7 @@ public class AnnouncementOverlay extends Overlay
         String localRsn = localRsn();
         String text = (localRsn != null && localRsn.equalsIgnoreCase(rsn)) ? "Your Turn!" : rsn + "'s Turn";
 
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getNumber(rsn));
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
         Color color = seatColor != null ? seatColor.awt : Color.WHITE;
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(36f));
@@ -379,7 +379,7 @@ public class AnnouncementOverlay extends Overlay
         int y = client.getCanvasHeight() / 4 + 40;
         int x = client.getCanvasWidth() / 2 - (prefixWidth + nameWidth + suffixWidth) / 2;
 
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getNumber(rsn));
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
         Color nameColor = seatColor != null ? seatColor.awt : SPIN_HINT_COLOR;
 
         x = drawLeftAlignedText(g, prefix, x, y, SPIN_HINT_COLOR, alpha);
@@ -956,7 +956,7 @@ public class AnnouncementOverlay extends Overlay
         int lineY = afterInstructionsY + 70;
         for (RosterReducer.RosterEntry entry : players)
         {
-            RunePartyColor seatColor = RunePartyColor.forNumber(entry.number);
+            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
             Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
             boolean isReady = ready.contains(entry.rsn.toLowerCase());
             String status = isReady ? "   Ready!" : "   Waiting...";
@@ -1071,7 +1071,7 @@ public class AnnouncementOverlay extends Overlay
         int lineY = emoteY + 36;
         for (RosterReducer.RosterEntry entry : players)
         {
-            RunePartyColor seatColor = RunePartyColor.forNumber(entry.number);
+            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
             Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
             boolean hasAnswered = answered.contains(entry.rsn.toLowerCase());
             String status = hasAnswered ? "   Answered!" : "   Waiting...";
@@ -1197,7 +1197,7 @@ public class AnnouncementOverlay extends Overlay
         int lineY = y + 40;
         for (RosterReducer.RosterEntry entry : players)
         {
-            RunePartyColor seatColor = RunePartyColor.forNumber(entry.number);
+            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
             Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
             Integer coins = rewardByRsn.get(entry.rsn.toLowerCase());
             String stats = coins != null ? "   +" + coins + " coins" : "   no reward";
@@ -1250,7 +1250,7 @@ public class AnnouncementOverlay extends Overlay
         int rank = 1;
         for (RosterReducer.RosterEntry entry : players)
         {
-            RunePartyColor seatColor = RunePartyColor.forNumber(entry.number);
+            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
             Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
             String stats = "   " + entry.goldenGnomeCount + " GN, " + entry.coins + " coins";
             drawStandingsLine(g, nameFont, statsFont, "#" + rank + "  ", entry.rsn, nameColor, stats, Color.LIGHT_GRAY, centerX, lineY, alpha);
@@ -1311,7 +1311,7 @@ public class AnnouncementOverlay extends Overlay
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(PLACE_REVEAL_RANK_SIZE));
         drawCenteredText(g, "In " + ordinal(plugin.getPlaceRevealRank()) + " place...", centerX, y, Color.LIGHT_GRAY, alpha);
 
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getNumber(rsn));
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
         Color nameColor = seatColor != null ? seatColor.awt : Color.WHITE;
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(PLACE_REVEAL_LINE_SIZE));
         String stats = rsn + " -- " + plugin.getPlaceRevealGoldenGnomes() + " GN, " + plugin.getPlaceRevealCoins() + " coins";
@@ -1588,7 +1588,7 @@ public class AnnouncementOverlay extends Overlay
 
         float alpha = remaining < RunePartyPlugin.DICE_ROLL_FADE_MS ? remaining / (float) RunePartyPlugin.DICE_ROLL_FADE_MS : 1f;
 
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getNumber(rsn));
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
         Color color = seatColor != null ? seatColor.awt : Color.WHITE;
 
         g.setColor(withAlpha(Color.BLACK, alpha * 0.3f));

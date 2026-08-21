@@ -85,7 +85,7 @@ public class PlayerOverlay extends Overlay
             if (rsn == null || rsn.isBlank()) continue;
             if (roster.getRole(rsn) != RunePartyRole.PLAYER) continue;
 
-            RunePartyColor seatColor = RunePartyColor.forNumber(roster.getNumber(rsn));
+            RunePartyColor seatColor = RunePartyColor.forNumber(roster.getColorNumber(rsn));
             if (seatColor == null) continue;
 
             Color c = seatColor.awt;

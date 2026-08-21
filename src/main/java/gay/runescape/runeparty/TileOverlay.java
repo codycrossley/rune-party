@@ -516,7 +516,7 @@ public class TileOverlay extends Overlay
             }
         }
 
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getNumber(moverRsn));
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(moverRsn));
         Color arrowColor = seatColor != null ? seatColor.awt : COLOR_TARGET_ARROW;
 
         for (int targetIndex : targetIndices)
@@ -554,7 +554,7 @@ public class TileOverlay extends Overlay
         WorldPoint localPos = client.getLocalPlayer() != null ? client.getLocalPlayer().getWorldLocation() : null;
         if (localPos != null && localPos.equals(tile.point)) return; // already back -- nothing to show
 
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getNumber(moverRsn));
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(moverRsn));
         Color arrowColor = seatColor != null ? seatColor.awt : COLOR_TARGET_ARROW;
         drawBouncingArrowWithLabel(g, tile.point, "Return Here!", arrowColor);
     }

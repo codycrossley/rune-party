@@ -315,7 +315,7 @@ public class RunePartyMapDialog extends JDialog
                     int cx = cell.getKey().x + offset;
                     int cy = cell.getKey().y;
 
-                    RunePartyColor seatColor = RunePartyColor.forNumber(entry.number);
+                    RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
                     Color dotColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
                     boolean isLocal = entry.rsn.equalsIgnoreCase(localRsn);
 

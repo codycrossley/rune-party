@@ -1434,6 +1434,27 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
+    /** Host-only kick, wired to the roster panel's "Remove Player" right-click entry
+     * (RunePartyPanel#buildRemovePlayerPopup) -- same PLAYER_LEFT outcome as the target leaving
+     * on their own (see ApiClient#removePlayer), so they drop out of turn order but keep their
+     * colorNumber/seat if the host re-adds them later via assignRole. */
+    public void removePlayer(String playerRsn)
+    {
+        if (!isHost() || gameId == null) return;
+
+        final String gid = gameId;
+        final String wk = writeKey;
+        executor.submit(() ->
+        {
+            try { apiClient.removePlayer(gid, wk, playerRsn); }
+            catch (Exception e)
+            {
+                log.warn("Remove player failed", e);
+                addChatMessage("Failed to remove " + playerRsn + ": " + e.getMessage());
+            }
+        });
+    }
+
     // -------------------------------------------------------------------------
     // Course building (host, LOBBY only) -- same placement flow as Gnomeball's
     // field builder: pick a preset, enter Place mode, then right-click a

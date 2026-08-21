@@ -120,6 +120,21 @@ public class ApiClient
         }
     }
 
+    /** Host-only kick -- same PLAYER_LEFT outcome as leaveGame, just authorized via the host's own
+     * write key instead of the target's session token (which the host doesn't have). See
+     * RunePartyPlugin#removePlayer, the only caller. */
+    public void removePlayer(String gameId, String writeKey, String playerRsn) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/remove-player", body, writeKey))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Remove player failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     /** Host-only: promotes/demotes a roster member between PLAYER and SPECTATOR. Joining a game
      * only ever grants SPECTATOR (see /v1/join/{code}) -- this is how the host opts someone into
      * the turn order, same assign-role contract as Gnomeball's ApiClient. */
@@ -603,6 +618,7 @@ public class ApiClient
         public boolean joined;
         public boolean online;
         public String number; // turn-order position ("1", "2", ...), same field shape RosterReducer already expects
+        public String colorNumber; // stable per-player color identity, assigned once and never reassigned even if this player leaves and is later re-added -- see RunePartyColor#forNumber
         public int coins;
         public int goldenGnomeCount;
         public Map<String, Integer> items = new HashMap<>(); // itemKey -> count held, defaulted so an older server response without this field doesn't NPE

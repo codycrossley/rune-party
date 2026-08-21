@@ -2,11 +2,14 @@ package gay.runescape.runeparty;
 
 import java.awt.Color;
 
-/** The fixed 8-color palette assigned to PLAYER roster slots by turn order -- one color per seat,
- * matching MAX_PLAYERS (see RunePartyPlugin) so every player always gets a distinct color and
- * nobody ever has to share one. Purely a client-side rendering concern: the server only ever
- * assigns turn-order numbers (see RosterReducer#getNumber), this enum is what turns "1".."8" into
- * something visible on-screen. */
+/** The fixed 8-color palette assigned to PLAYER roster slots -- one color per seat, matching
+ * MAX_PLAYERS (see RunePartyPlugin) so every player always gets a distinct color and nobody ever
+ * has to share one. Purely a client-side rendering concern: the server assigns each player a
+ * stable "colorNumber" the first time they become a PLAYER (see RosterReducer.RosterEntry#
+ * colorNumber) that never changes again even if they leave and are later re-added -- this enum is
+ * what turns that "1".."8" into something visible on-screen. Deliberately not the same field as
+ * the roster's turn-order "number" (see RosterReducer#getNumber), which does shift as players
+ * come and go. */
 public enum RunePartyColor
 {
     RED(new Color(220, 50, 50)),
@@ -27,8 +30,9 @@ public enum RunePartyColor
         this.awt = awt;
     }
 
-    /** Maps a roster "number" (1-indexed turn order, see RosterReducer#getNumber) onto this
-     * palette. Returns null for a blank/unparseable number -- e.g. a spectator, who has none. */
+    /** Maps a roster "colorNumber" (1-indexed, stable per-player -- see RosterReducer.RosterEntry#
+     * colorNumber) onto this palette. Returns null for a blank/unparseable number -- e.g. a
+     * spectator who's never been a PLAYER, who has none. */
     public static RunePartyColor forNumber(String number)
     {
         if (number == null || number.isBlank()) return null;

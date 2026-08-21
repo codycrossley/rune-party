@@ -622,7 +622,7 @@ public class RunePartyPanel extends PluginPanel
             boolean onTurn = entry.rsn.equalsIgnoreCase(plugin.getCurrentTurnRsn());
             Color nameColor = onTurn ? COLOR_TURN : (entry.joined ? Color.WHITE : ColorScheme.MEDIUM_GRAY_COLOR);
 
-            RunePartyColor seatColor = entry.role == RunePartyRole.PLAYER ? RunePartyColor.forNumber(entry.number) : null;
+            RunePartyColor seatColor = entry.role == RunePartyRole.PLAYER ? RunePartyColor.forNumber(entry.colorNumber) : null;
             Color numberColor = seatColor != null ? seatColor.awt : Color.WHITE;
             row.add(smallLabel(entry.role == RunePartyRole.PLAYER ? entry.number : "", numberColor));
             JLabel nameLabel = smallLabel(entry.rsn, nameColor);
@@ -641,6 +641,16 @@ public class RunePartyPanel extends PluginPanel
                 row.setToolTipText(hint);
                 nameLabel.setToolTipText(hint);
             }
+            else if (plugin.isHost() && entry.role == RunePartyRole.PLAYER
+                && !entry.rsn.equalsIgnoreCase(plugin.getLocalRsn()))
+            {
+                JPopupMenu popup = buildRemovePlayerPopup(entry.rsn);
+                attachPopup(row, popup);
+                attachPopup(nameLabel, popup);
+                String hint = "Right-click to remove " + entry.rsn + " from the game";
+                row.setToolTipText(hint);
+                nameLabel.setToolTipText(hint);
+            }
 
             rosterTablePanel.add(row);
         }
@@ -655,6 +665,15 @@ public class RunePartyPanel extends PluginPanel
         JMenuItem addItem = new JMenuItem("Add to Game");
         addItem.addActionListener(e -> plugin.assignRole(rsn, RunePartyRole.PLAYER));
         popup.add(addItem);
+        return popup;
+    }
+
+    private JPopupMenu buildRemovePlayerPopup(String rsn)
+    {
+        JPopupMenu popup = new JPopupMenu();
+        JMenuItem removeItem = new JMenuItem("Remove Player");
+        removeItem.addActionListener(e -> plugin.removePlayer(rsn));
+        popup.add(removeItem);
         return popup;
     }
 

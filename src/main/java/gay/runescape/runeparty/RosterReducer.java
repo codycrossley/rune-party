@@ -14,6 +14,7 @@ public class RosterReducer
     private final ConcurrentHashMap<String, Boolean> actuallyJoined = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Boolean> onlineByPlayer = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> numberByPlayer = new ConcurrentHashMap<>(); // turn-order position ("1", "2", ...)
+    private final ConcurrentHashMap<String, String> colorNumberByPlayer = new ConcurrentHashMap<>(); // stable per-player color identity, see RosterEntry#colorNumber
     private final ConcurrentHashMap<String, Integer> coinsByPlayer = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Integer> goldenGnomeCountByPlayer = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Map<String, Integer>> itemsByPlayer = new ConcurrentHashMap<>(); // itemKey -> count held
@@ -24,17 +25,24 @@ public class RosterReducer
         public final RunePartyRole role;
         public final boolean online;
         public final String number;
+        /** Stable per-player color identity (see RunePartyColor#forNumber) -- assigned once the
+         * first time this player becomes a PLAYER and never reassigned, unlike {@link #number}
+         * (live turn order), so a player who leaves and is later re-added by the host keeps their
+         * original color rather than inheriting whatever the current turn-order enumeration would
+         * hand them. */
+        public final String colorNumber;
         public final boolean joined;
         public final int coins;
         public final int goldenGnomeCount;
         public final Map<String, Integer> items;
 
-        public RosterEntry(String rsn, RunePartyRole role, boolean online, String number, boolean joined, int coins, int goldenGnomeCount, Map<String, Integer> items)
+        public RosterEntry(String rsn, RunePartyRole role, boolean online, String number, String colorNumber, boolean joined, int coins, int goldenGnomeCount, Map<String, Integer> items)
         {
             this.rsn = rsn;
             this.role = role;
             this.online = online;
             this.number = number;
+            this.colorNumber = colorNumber;
             this.joined = joined;
             this.coins = coins;
             this.goldenGnomeCount = goldenGnomeCount;
@@ -52,6 +60,12 @@ public class RosterReducer
     {
         if (canonicalRsn == null) return "";
         return numberByPlayer.getOrDefault(canonicalRsn.toLowerCase(Locale.ROOT), "");
+    }
+
+    public String getColorNumber(String canonicalRsn)
+    {
+        if (canonicalRsn == null) return "";
+        return colorNumberByPlayer.getOrDefault(canonicalRsn.toLowerCase(Locale.ROOT), "");
     }
 
     public int getCoins(String canonicalRsn)
@@ -87,6 +101,7 @@ public class RosterReducer
             String key = p.rsn.toLowerCase(Locale.ROOT);
             onlineByPlayer.put(key, p.online);
             if (p.number != null) numberByPlayer.put(key, p.number);
+            if (p.colorNumber != null) colorNumberByPlayer.put(key, p.colorNumber);
             actuallyJoined.put(key, p.joined);
             coinsByPlayer.put(key, p.coins);
             goldenGnomeCountByPlayer.put(key, p.goldenGnomeCount);
@@ -118,6 +133,7 @@ public class RosterReducer
         actuallyJoined.clear();
         onlineByPlayer.clear();
         numberByPlayer.clear();
+        colorNumberByPlayer.clear();
         coinsByPlayer.clear();
         goldenGnomeCountByPlayer.clear();
         itemsByPlayer.clear();
@@ -136,6 +152,7 @@ public class RosterReducer
             rosterPlayers.add(key);
             actuallyJoined.put(key, p.joined);
             if (p.number != null) numberByPlayer.put(key, p.number);
+            if (p.colorNumber != null) colorNumberByPlayer.put(key, p.colorNumber);
             coinsByPlayer.put(key, p.coins);
             goldenGnomeCountByPlayer.put(key, p.goldenGnomeCount);
             itemsByPlayer.put(key, p.items != null ? new HashMap<>(p.items) : new HashMap<>());
@@ -199,6 +216,7 @@ public class RosterReducer
                 rosterPlayers.remove(key);
                 actuallyJoined.remove(key);
                 numberByPlayer.remove(key);
+                colorNumberByPlayer.remove(key);
                 coinsByPlayer.remove(key);
                 goldenGnomeCountByPlayer.remove(key);
                 itemsByPlayer.remove(key);
@@ -258,11 +276,12 @@ public class RosterReducer
             String display = displayNameByPlayer.getOrDefault(key, key);
             boolean online = Boolean.TRUE.equals(onlineByPlayer.get(key));
             String number = numberByPlayer.getOrDefault(key, "");
+            String colorNumber = colorNumberByPlayer.getOrDefault(key, "");
             boolean joined = Boolean.TRUE.equals(actuallyJoined.get(key));
             int coins = coinsByPlayer.getOrDefault(key, 0);
             int goldenGnomeCount = goldenGnomeCountByPlayer.getOrDefault(key, 0);
             Map<String, Integer> items = new HashMap<>(itemsByPlayer.getOrDefault(key, Collections.emptyMap()));
-            out.add(new RosterEntry(display, role, online, number, joined, coins, goldenGnomeCount, items));
+            out.add(new RosterEntry(display, role, online, number, colorNumber, joined, coins, goldenGnomeCount, items));
         }
         out.sort((a, b) ->
         {

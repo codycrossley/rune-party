@@ -105,7 +105,7 @@ public class ConfettiOverlay extends Overlay
     private Color[] resolvePalette()
     {
         String winnerRsn = plugin.getWinnerRsn();
-        String number = winnerRsn != null ? plugin.getRosterReducer().getNumber(winnerRsn) : null;
+        String number = winnerRsn != null ? plugin.getRosterReducer().getColorNumber(winnerRsn) : null;
         RunePartyColor seatColor = RunePartyColor.forNumber(number);
         if (seatColor == null) return FALLBACK_PALETTE;
 
