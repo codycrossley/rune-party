@@ -46,6 +46,7 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
+import net.runelite.client.util.ImageUtil;
 import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.ui.overlay.outline.ModelOutlineRenderer;
 import net.runelite.client.util.Text;
@@ -824,7 +825,7 @@ public class RunePartyPlugin extends Plugin
         panel = new RunePartyPanel(this);
         navButton = NavigationButton.builder()
             .tooltip("Rune Party")
-            .icon(buildPlaceholderIcon())
+            .icon(ImageUtil.loadImageResource(getClass(), "panel_icon.png"))
             .priority(6)
             .panel(panel)
             .build();
@@ -955,24 +956,6 @@ public class RunePartyPlugin extends Plugin
     public String getLocalRsn()
     {
         return localRsn();
-    }
-
-    /** Drawn in code rather than loaded from a resource -- there's no real icon asset yet, and a
-     * flat placeholder is enough to give the sidebar a tab until someone draws actual artwork. */
-    private static BufferedImage buildPlaceholderIcon()
-    {
-        BufferedImage icon = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g = icon.createGraphics();
-        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        g.setColor(new Color(255, 210, 0));
-        g.fillRoundRect(1, 1, 14, 14, 4, 4);
-        g.setColor(Color.BLACK);
-        g.fillOval(4, 4, 3, 3);
-        g.fillOval(9, 4, 3, 3);
-        g.fillOval(4, 9, 3, 3);
-        g.fillOval(9, 9, 3, 3);
-        g.dispose();
-        return icon;
     }
 
     @Provides
