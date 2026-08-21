@@ -4,15 +4,12 @@ import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
-import java.awt.FontFormatException;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.Polygon;
 import java.awt.RenderingHints;
 import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
-import java.io.IOException;
-import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -190,25 +187,8 @@ public class AnnouncementOverlay extends Overlay
     private static final long GOLDEN_GNOME_OUTCOME_FADE_MS = 500;
     private static final float GOLDEN_GNOME_OUTCOME_SIZE = 32f;
 
-    // Bundled at src/main/resources/gay/runescape/runeparty/mario-party-hudson.ttf -- loaded once
-    // at class-init, deriveFont(size) per use same as FontManager's own fonts. Falls back to the
-    // client's own bold font if the resource is ever missing, so a packaging mistake degrades
-    // gracefully instead of crashing the overlay.
-    private static final Font MARIO_PARTY_FONT = loadMarioPartyFont();
-
-    private static Font loadMarioPartyFont()
-    {
-        try (InputStream is = AnnouncementOverlay.class.getResourceAsStream("mario-party-hudson.ttf"))
-        {
-            if (is == null) throw new IOException("mario-party-hudson.ttf resource not found");
-            return Font.createFont(Font.TRUETYPE_FONT, is);
-        }
-        catch (FontFormatException | IOException e)
-        {
-            log.warn("Failed to load the Mario Party Hudson font, falling back to the default", e);
-            return FontManager.getRunescapeBoldFont();
-        }
-    }
+    // See RunePartyFonts's own doc -- shared with CoinRushTimerOverlay, the only other consumer.
+    private static final Font MARIO_PARTY_FONT = RunePartyFonts.MARIO_PARTY;
 
     private final Client client;
     private final RunePartyConfig config;

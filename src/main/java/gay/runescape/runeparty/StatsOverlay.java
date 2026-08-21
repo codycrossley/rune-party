@@ -6,6 +6,8 @@ import java.awt.Graphics2D;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
@@ -22,7 +24,10 @@ import net.runelite.client.ui.overlay.components.TitleComponent;
  * with the current turn highlighted on the stats side -- a ranked view lives in
  * AnnouncementOverlay's post-round "Current Standings" recap instead (see
  * renderRoundCompleteBanner), so this persistent HUD stays stable/scannable rather than reshuffling
- * every time someone's coin total changes. Same fixed-corner overlay pattern Gnomeball's TimerOverlay uses
+ * every time someone's coin total changes. One exception: for exactly as long as a Coin Rush round
+ * is playable, this same panel is temporarily taken over by a live per-round scoreboard instead
+ * (see renderCoinRushScoreboard) -- that race genuinely does reshuffle turn-by-turn, so the
+ * stability tradeoff above doesn't apply there. Same fixed-corner overlay pattern Gnomeball's TimerOverlay uses
  * (TOP_LEFT/ABOVE_WIDGETS), but built with PanelComponent/LineComponent since this is a multi-row
  * table rather than a single flashy clock line. Purely a renderer over RosterReducer/
  * RunePartyPlugin -- all the coin/Golden Gnome/round totals it reads are server-mutated (see
@@ -36,7 +41,10 @@ public class StatsOverlay extends Overlay
 
     // PanelComponent's own default (ComponentConstants.STANDARD_WIDTH) is only 129px -- too narrow
     // for "PlayerName" plus "123 coins, 8 GN" on one line, which is what was wrapping to a 2nd line.
-    private static final int PANEL_WIDTH = 220;
+    // Package-private (not private) so CoinRushTimerOverlay can position itself just past this
+    // panel's own right edge -- see that class's own doc on why it can't just ask this overlay for
+    // its actual rendered bounds instead.
+    static final int PANEL_WIDTH = 220;
 
     private final RunePartyConfig config;
     private final RunePartyPlugin plugin;
@@ -71,6 +79,16 @@ public class StatsOverlay extends Overlay
             if (entry.role == RunePartyRole.PLAYER && entry.joined) players.add(entry);
         }
         if (players.isEmpty()) return null;
+
+        // A Coin Rush round temporarily takes over this HUD entirely -- see
+        // renderCoinRushScoreboard's own doc -- for exactly as long as isMinigamePlayable() says
+        // the round is actually underway (same gate RunePartyPanel's control-panel section uses),
+        // rather than the instant isCoinRushActive() alone goes true (which includes the
+        // ready-check/countdown window, when there's no live tally yet worth showing).
+        if (plugin.isCoinRushActive() && plugin.isMinigamePlayable())
+        {
+            return renderCoinRushScoreboard(g, players);
+        }
 
         // Turn order, not ranked -- a ranked view (highest-coins-first, Golden Gnomes as the
         // tiebreak) now lives in AnnouncementOverlay's post-round "Current Standings" recap
@@ -115,6 +133,49 @@ public class StatsOverlay extends Overlay
                 .leftColor(nameColor)
                 .right(entry.coins + " coins, " + entry.goldenGnomeCount + " GN")
                 .rightColor(statsColor)
+                .build());
+        }
+
+        return panelComponent.render(g);
+    }
+
+    /** Temporarily replaces the normal roster view for exactly as long as a Coin Rush round is
+     * playable (see render()'s own gate) -- a live "who's got how many coins this round" tally
+     * instead of the persistent total-coins/Golden Gnome view, since that actually reshuffles
+     * turn-by-turn the way this round's own race does. The round's own countdown lives in its own
+     * dedicated CoinRushTimerOverlay instead of a line here -- see that class's own doc for why it
+     * earned a bigger, separate treatment rather than folding into this panel. Sorted by this
+     * round's own score, highest first (ties broken by turn order, the same stable ordering the
+     * normal view's own left-to-right layout already uses) -- unlike the persistent HUD's
+     * deliberately-stable turn-order sort, a leaderboard is exactly the one place re-sorting by
+     * whoever's currently ahead is the whole point. getCoinRushScores() is read fresh from
+     * RunePartyPlugin on every call, so this needs no timer of its own -- render() already runs
+     * every frame like any other Overlay. */
+    private Dimension renderCoinRushScoreboard(Graphics2D g, List<RosterReducer.RosterEntry> players)
+    {
+        Map<String, Integer> scores = plugin.getCoinRushScores();
+        players.sort(Comparator
+            .comparing((RosterReducer.RosterEntry e) -> scores.getOrDefault(e.rsn.toLowerCase(Locale.ROOT), 0))
+            .reversed()
+            .thenComparing(e -> e.number));
+
+        panelComponent.getChildren().clear();
+        panelComponent.getChildren().add(TitleComponent.builder()
+            .text("COIN RUSH")
+            .color(COLOR_TURN)
+            .build());
+
+        for (RosterReducer.RosterEntry entry : players)
+        {
+            RunePartyColor seatColor = RunePartyColor.forNumber(entry.number);
+            Color nameColor = seatColor != null ? seatColor.awt : COLOR_NAME_FALLBACK;
+            int score = scores.getOrDefault(entry.rsn.toLowerCase(Locale.ROOT), 0);
+
+            panelComponent.getChildren().add(LineComponent.builder()
+                .left(entry.rsn)
+                .leftColor(nameColor)
+                .right(score + (score == 1 ? " coin" : " coins"))
+                .rightColor(COLOR_NORMAL)
                 .build());
         }
 

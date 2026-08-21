@@ -151,11 +151,13 @@ public class PlayerOverlay extends Overlay
     /** Floats "+3" (or "-3" for a penalty tile, or a Coin Trap steal's -20/+20 on the victim/owner
      * respectively) above a player's head, then swaps to their new running total for the rest of
      * the popup's life -- same client-side start/until-timestamp pattern as AnnouncementOverlay's
-     * turn banner (see RunePartyPlugin's COINS_CHANGED handling, which stamps each CoinPopup's own
+     * turn banner (see RunePartyPlugin's enqueueCoinPopup, which stamps each CoinPopup's own
      * start/until). {@code popup.start} can be stamped into the future -- see the "now < start"
      * guard below -- when a Golden Gnome popup, or an earlier coin popup, for the same player is
      * still showing, so this one waits its turn instead of overlapping it; nothing renders at all
-     * until that future start time actually arrives. */
+     * until that future start time actually arrives. A totalless popup (see CoinPopup's own doc --
+     * Coin Rush's mid-round "+2" flash, the only current one) never advances past the delta phase:
+     * there's no real total to show yet, the round only pays out in one lump sum at its end. */
     private void drawCoinPopup(Graphics2D g, Player p, RunePartyPlugin.CoinPopup popup)
     {
         long now = System.currentTimeMillis();
@@ -164,7 +166,7 @@ public class PlayerOverlay extends Overlay
         if (remaining <= 0) return;
 
         long elapsed = now - popup.start;
-        boolean showTotal = elapsed >= RunePartyPlugin.COIN_POPUP_DELTA_PHASE_MS;
+        boolean showTotal = !popup.totalless && elapsed >= RunePartyPlugin.COIN_POPUP_DELTA_PHASE_MS;
         String text = showTotal ? (popup.newTotal + " coins") : ((popup.delta >= 0 ? "+" : "") + popup.delta + " coins");
         Color color = showTotal ? Color.WHITE : (popup.delta >= 0 ? COIN_POPUP_GAIN_COLOR : COIN_POPUP_LOSS_COLOR);
 

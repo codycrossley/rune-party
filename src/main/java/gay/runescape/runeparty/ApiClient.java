@@ -173,7 +173,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/confirm-arrival", body, playerToken))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Confirm arrival failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm arrival failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -261,6 +261,32 @@ public class ApiClient
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Submit minigame result failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** Reports the local player reaching a still-live Coin Rush spawn tile (see the server's own
+     * collect-coin-rush-coin endpoint), keyed by {@code spawnId} rather than just the tile's own
+     * coordinates -- more than one racer can report the exact same spawn within the same tick, and
+     * the server needs to tell "two separate reports for the same still-live spawn, first one
+     * wins" apart from "this spawn already got claimed and a new one just happens to share the
+     * tile." (x, y, plane) are carried alongside purely so the server can sanity-check the report
+     * against where it actually placed that spawn, the same trust-boundary shape confirmArrival's
+     * own (x, y, plane) already has for a rolled destination -- the payout itself (+2 coins,
+     * COIN_RUSH_COLLECTED naming the actual winner) is always server-decided, never this call's own
+     * response. */
+    public void collectCoinRushCoin(String gameId, String playerRsn, String playerToken, int spawnId, int x, int y, int plane) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("spawnId", spawnId);
+        body.addProperty("x", x);
+        body.addProperty("y", y);
+        body.addProperty("plane", plane);
+
+        try (Response resp = post("/v1/games/" + gameId + "/collect-coin-rush-coin", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Collect Coin Rush coin failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -434,6 +460,25 @@ public class ApiClient
     private static String bodyString(Response resp) throws IOException
     {
         return resp.body() != null ? resp.body().string() : "";
+    }
+
+    /** Thrown when the server actually responded, but with a non-2xx status -- carries the real
+     * HTTP status code so a caller can tell a definitive rejection (4xx: the server has already
+     * looked at this exact request and said no -- retrying the identical request will only get
+     * the identical answer again) apart from something worth retrying (a genuine network-level
+     * IOException with no response at all, or a 5xx server error). Not yet thrown by every
+     * endpoint here -- see confirmArrival, the first caller that actually needed the distinction
+     * (RunePartyPlugin's own confirmArrival was retrying a 409 "No roll is pending" forever, once
+     * a tick, since nothing told it the claim itself -- not just the request -- was invalid). */
+    public static final class ApiHttpException extends IOException
+    {
+        public final int code;
+
+        public ApiHttpException(int code, String message)
+        {
+            super(message);
+            this.code = code;
+        }
     }
 
     // -------------------------------------------------------------------------

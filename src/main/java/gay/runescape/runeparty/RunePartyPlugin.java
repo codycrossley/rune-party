@@ -123,6 +123,32 @@ public class RunePartyPlugin extends Plugin
      * COIN_TRAP_SPRING_ANIMATION_ID to actually finish playing before the model just vanishes. */
     public static final long COIN_TRAP_TRIGGER_PERSIST_MS = 1500;
 
+    /** "Looking straight down" in the client's own internal camera angle units, used by
+     * toggleBoardView -- live-tested and confirmed by eye (the initial guess of 500, based on a
+     * wrong assumption that the full pitch range was 0-2048, rendered close to head-on instead;
+     * the real range runs considerably higher than that). Not derived from any formula, just the
+     * value that was actually confirmed to look correctly top-down. */
+    public static final int BOARD_VIEW_PITCH = 4160;
+    /** Game-north "up" on screen once board view snaps to BOARD_VIEW_PITCH -- matches
+     * RunePartyMapDialog's own north-up 2D map, so the two board-viewing tools agree on
+     * orientation. */
+    public static final int BOARD_VIEW_YAW = 0;
+    /** Live-tested, confirmed-by-eye zoom-out level for board view -- see VARC_CAMERA_ZOOM. */
+    public static final int BOARD_VIEW_ZOOM = 128;
+
+    // Varc (varclient) id toggleBoardView's zoom-out writes to -- confirmed against RuneLite's own
+    // bundled Camera plugin's decompiled source, whose makeSliderTooltip reads this exact varc for
+    // the live zoom level.
+    private static final int VARC_CAMERA_ZOOM = 74;
+
+    // Client#setCameraMode/setCameraFocalPointX/Y/Z were tried here once, to pin board view over
+    // the board's own center rather than wherever the local player stands -- live-tested and
+    // confirmed BROKEN: setCameraMode(1) produced a solid black screen, not merely "didn't
+    // detach." No plugin bundled with RuneLite itself ever calls either method (checked directly
+    // against the client jar), and this result confirms why -- reverted, not attempted again with
+    // a different guessed mode value. Board view stays centered on the player, same as it already
+    // correctly does with just pitch/yaw/zoom below.
+
     /** How long AnnouncementOverlay's "3... 2... 1... BEGIN!" countdown plays once every seated
      * PLAYER has YES-emoted ready (see MINIGAME_COUNTDOWN_STARTED) -- one second per tick: 3, 2,
      * 1, then BEGIN!. Only the client watching it happen live schedules this (see the
@@ -136,6 +162,33 @@ public class RunePartyPlugin extends Plugin
      * changing the instant the last person emotes. See the MINIGAME_COUNTDOWN_STARTED handler,
      * which delays arming minigameCountdownBannerUntil by this long. */
     public static final long MINIGAME_COUNTDOWN_START_DELAY_MS = 1500;
+
+    /** Client-side key for the Coin Rush mini-game -- must match the server's own registration
+     * (see minigames/coin_rush.py), the same "key" MINIGAME_STARTED's payload carries for every
+     * mini-game. Compared directly against minigameKey wherever coin-rush-specific behavior
+     * (spawn tracking, the live scoreboard, the auto-collect check in onGameTick) needs to gate on
+     * "is this round actually Coin Rush," rather than going through Minigames#get. */
+    public static final String COIN_RUSH_KEY = "coin-rush";
+
+    /** Wall-clock length of one Coin Rush round, measured from the moment the round actually
+     * becomes playable (see coinRushRoundStartAt/getCoinRushEndsAt) -- purely a client-side display
+     * value for StatsOverlay's live countdown; the server is the one that actually ends the round
+     * via MINIGAME_ENDED regardless of what this says. */
+    public static final long COIN_RUSH_DURATION_MS = 30000;
+
+    /** Coins a single Coin Rush pickup is worth -- must match the server's own COIN_RUSH_REWARD.
+     * The server never actually credits this to the player's real balance until the round ends (a
+     * single lump sum, see the "coin_rush" COINS_CHANGED case) -- this constant only exists so the
+     * mid-round "+2" flash (see COIN_RUSH_COLLECTED handling) has a number to show immediately,
+     * without waiting on that real payout. */
+    public static final int COIN_RUSH_REWARD = 2;
+
+    /** How long Coin Rush's mid-round "+2" flash stays up above a player's head after they collect
+     * a coin -- see COIN_RUSH_COLLECTED's own enqueueCoinPopup call. Deliberately shorter than
+     * COIN_POPUP_DURATION_MS: unlike a real coin popup, this one has no second "show the new total"
+     * phase to hold for (see CoinPopup's own totalless doc), so it only ever needs to be on screen
+     * long enough to read "+2" before fading. */
+    public static final long COIN_RUSH_BUMP_POPUP_DURATION_MS = 1300;
 
     /** How long AnnouncementOverlay's "HERE WE GO!" banner stays up after GAME_STARTED -- fires
      * the instant the host's Start Game click lands, no turnEffectGateUntil delay needed since
@@ -296,6 +349,7 @@ public class RunePartyPlugin extends Plugin
     private TileReducer tileReducer;
     private TileOverlay tileOverlay;
     private StatsOverlay statsOverlay;
+    private CoinRushTimerOverlay coinRushTimerOverlay;
     private PlayerOverlay playerOverlay;
     private AnnouncementOverlay announcementOverlay;
     private ConfettiOverlay confettiOverlay;
@@ -393,6 +447,15 @@ public class RunePartyPlugin extends Plugin
     // thread) -- see refreshItemUse. A tick of staleness costs nothing here: OSRS positions only
     // ever change on tick boundaries anyway, so this is exactly as fresh as a live read would be.
     private volatile boolean standingOnTrackedPositionCached = false;
+    // ---- board view (client-side camera state -- see toggleBoardView/restoreCameraFromBoardView,
+    // the only writers). boardViewSavedPitch/Yaw/Zoom are only ever read/written from inside a
+    // clientThread.invoke callback (same thread every writer already runs on), so no volatile
+    // needed on those three; boardViewActive itself is read from RunePartyPanel (Swing EDT) via
+    // isBoardViewActive(), hence volatile. ----
+    private volatile boolean boardViewActive = false;
+    private int boardViewSavedPitch;
+    private int boardViewSavedYaw;
+    private int boardViewSavedZoom;
     private volatile boolean minigameActive = false;
     private volatile String minigameInstructions = null;
     // Which minigames/ registry entry is active -- see the server's own minigames package, whose
@@ -467,6 +530,27 @@ public class RunePartyPlugin extends Plugin
     private volatile boolean minigameCountdownStarted = false;
     private volatile boolean minigameCountdownSkippedForClient = false;
     private volatile long minigameCountdownBannerUntil = 0;
+    // ---- Coin Rush (server-driven spawns/collections -- see COIN_RUSH_SPAWN/COIN_RUSH_COLLECTED
+    // handling). coinRushSpawns is real state, applied catch-up or not: every currently-live
+    // spawn's WorldPoint keyed by the server's own spawn id, mirrored into a 3D model per spawn by
+    // TileOverlay#updateCoinRushModels the same "diff against the live set" pattern
+    // updateCoinTrapModels already uses. coinRushScores is this round's own live tally (lowercase
+    // rsn -> coins collected so far), reset fresh on every MINIGAME_STARTED for COIN_RUSH_KEY --
+    // read by StatsOverlay's live scoreboard, which replaces the normal roster view for exactly as
+    // long as a Coin Rush round is playable. coinRushRoundStartAt is the wall-clock moment the
+    // round actually became playable (see COIN_RUSH_DURATION_MS/getCoinRushEndsAt), set once per
+    // round -- precisely for a live client (the same "BEGIN!" instant minigameCountdownBannerUntil
+    // gets armed at), best-effort ("now") for a client that only caught up on an already-underway
+    // round. ----
+    private final Map<Integer, WorldPoint> coinRushSpawns = new ConcurrentHashMap<>();
+    private final Map<String, Integer> coinRushScores = new ConcurrentHashMap<>();
+    // Guards one spawn's own collect report against firing every tick while it's in flight -- same
+    // role arrivalSubmitted plays for confirmArrival, just one per spawn id (via a Set) instead of
+    // a single flag, since more than one spawn can be live -- and walked onto in quick succession
+    // -- at the same time. See checkCoinRushCollection, the only writer besides the
+    // COIN_RUSH_COLLECTED handler (which clears an entry once the server's own echo confirms it).
+    private final Set<Integer> coinRushCollectSubmitted = ConcurrentHashMap.newKeySet();
+    private volatile long coinRushRoundStartAt = 0;
     // Host-set at start (see GAME_STARTED's maxRounds) and incremented once per completed round
     // (see MINIGAME_ENDED) -- together these are what StatsOverlay's "ROUND x/y" line reads via
     // getCurrentRound/getMaxRounds. 0 until GAME_STARTED actually lands.
@@ -601,21 +685,27 @@ public class RunePartyPlugin extends Plugin
     private final Map<String, Deque<CoinPopup>> coinPopups = new ConcurrentHashMap<>();
 
     /** One player's coin popup snapshot -- immutable, appended wholesale to coinPopups's per-player
-     * queue rather than mutated in place. See CoinPopup's own doc on RunePartyPlugin's
-     * COINS_CHANGED handling for how start/until get computed. */
+     * queue rather than mutated in place. See enqueueCoinPopup for how start/until get computed.
+     * {@code totalless} is true only for Coin Rush's mid-round "+2" flash (see COIN_RUSH_COLLECTED
+     * handling) -- unlike every other coin popup, that one never actually changed the player's real
+     * balance (Coin Rush pays out in one lump sum at the round's end instead, see COINS_CHANGED's
+     * own "coin_rush" case), so PlayerOverlay#drawCoinPopup never advances a totalless popup past
+     * its delta phase into showing {@code newTotal} -- there is no accurate total to show yet. */
     public static final class CoinPopup
     {
         public final int delta;
         public final int newTotal;
         public final long start;
         public final long until;
+        public final boolean totalless;
 
-        CoinPopup(int delta, int newTotal, long start, long until)
+        CoinPopup(int delta, int newTotal, long start, long until, boolean totalless)
         {
             this.delta = delta;
             this.newTotal = newTotal;
             this.start = start;
             this.until = until;
+            this.totalless = totalless;
         }
     }
 
@@ -642,6 +732,9 @@ public class RunePartyPlugin extends Plugin
 
         statsOverlay = new StatsOverlay(config, this);
         overlayManager.add(statsOverlay);
+
+        coinRushTimerOverlay = new CoinRushTimerOverlay(config, this);
+        overlayManager.add(coinRushTimerOverlay);
 
         playerOverlay = new PlayerOverlay(client, config, this, rosterReducer, modelOutlineRenderer);
         overlayManager.add(playerOverlay);
@@ -675,8 +768,9 @@ public class RunePartyPlugin extends Plugin
         if (eventSocket != null) eventSocket.shutdown();
         executor.shutdownNow();
         uiTimerExec.shutdownNow();
-        if (tileOverlay != null) { tileOverlay.clearGoldenGnomeModels(); overlayManager.remove(tileOverlay); }
+        if (tileOverlay != null) { tileOverlay.clearGoldenGnomeModels(); tileOverlay.clearCoinRushModels(); overlayManager.remove(tileOverlay); }
         if (statsOverlay != null) overlayManager.remove(statsOverlay);
+        if (coinRushTimerOverlay != null) overlayManager.remove(coinRushTimerOverlay);
         if (playerOverlay != null) overlayManager.remove(playerOverlay);
         if (announcementOverlay != null) overlayManager.remove(announcementOverlay);
         if (confettiOverlay != null) overlayManager.remove(confettiOverlay);
@@ -697,6 +791,87 @@ public class RunePartyPlugin extends Plugin
         mapDialog.setVisible(true);
         mapDialog.toFront();
     }
+
+    /** Toggles between the normal player-driven camera and a steep, near-straight-down "board
+     * view" -- see RunePartyPanel's "View Board" button, the only caller. Only ever adjusts
+     * pitch/yaw *target* (Client#setCameraPitchTarget/setCameraYawTarget) plus zoom
+     * (Client#setVarcIntValue) and the pitch relaxer that lifts the vanilla ~383-unit pitch cap
+     * (Client#setCameraPitchRelaxerEnabled -- the exact mechanism RuneLite's own bundled Camera
+     * plugin uses to let a player manually drag past that same cap) -- all three live-tested and
+     * confirmed, see BOARD_VIEW_PITCH/YAW/ZOOM's own docs. Deliberately does NOT touch
+     * Client#setCameraMode or Client#setCameraFocalPointX/Y/Z -- an earlier attempt at using them
+     * to pin the view over the board's own center (rather than wherever the local player stands)
+     * was live-tested and produced a solid black screen, not merely "didn't detach" -- see
+     * VARC_CAMERA_ZOOM's neighboring comment. Reverted, not retried with a different guessed mode
+     * value. That means this pans/tilts to look straight down from wherever the local player
+     * already stands (the camera's normal focal point, left untouched) rather than pinning over
+     * the board's own true center regardless of player position -- close enough for a course
+     * that's normally small and directly underfoot during a turn, but not literally "locked to the
+     * board" if the player wanders off it.
+     * <p>
+     * The pitch/yaw *target* setters are believed (from their own naming/getter pairing, not
+     * independently verified) to write the same internal value the game's native mouse-drag
+     * control already targets and eases toward every frame on its own, so this only ever needs to
+     * set that target once per toggle rather than animate anything itself -- and the player's own
+     * mouse can still freely drag away from it at any time even while "board view" is nominally
+     * on, since nothing here disables normal input. */
+    public void toggleBoardView()
+    {
+        if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE) return;
+
+        // refreshPanel() is deliberately called from *inside* each clientThread.invoke callback,
+        // not right after queuing it -- ClientThread#invoke runs its callback on a future client
+        // tick, not synchronously, so calling refreshPanel() immediately after queuing (as this
+        // used to) would refresh the panel's "View Board"/"Return to Normal View" label against
+        // boardViewActive's *old* value, one tick before restoreCameraFromBoardView() actually
+        // flips it -- the exact bug that left the button stuck reading "Return to Normal View"
+        // after turning board view back off. refreshPanel() itself is safe to call from any thread
+        // (it just posts to the Swing EDT via SwingUtilities.invokeLater), so there's no harm
+        // moving it inside.
+        if (boardViewActive)
+        {
+            clientThread.invoke(() ->
+            {
+                restoreCameraFromBoardView();
+                refreshPanel();
+            });
+        }
+        else
+        {
+            boardViewActive = true;
+            refreshPanel(); // safe here -- this branch sets boardViewActive synchronously, above, before any client-thread hop
+            clientThread.invoke(() ->
+            {
+                boardViewSavedPitch = client.getCameraPitchTarget();
+                boardViewSavedYaw = client.getCameraYawTarget();
+                boardViewSavedZoom = client.getVarcIntValue(VARC_CAMERA_ZOOM);
+                client.setCameraPitchRelaxerEnabled(true);
+                client.setCameraPitchTarget(BOARD_VIEW_PITCH);
+                client.setCameraYawTarget(BOARD_VIEW_YAW);
+                client.setVarcIntValue(VARC_CAMERA_ZOOM, BOARD_VIEW_ZOOM);
+            });
+        }
+    }
+
+    /** Writes the pitch/yaw/zoom captured just before toggleBoardView last turned board view on
+     * back onto the camera -- shared by toggleBoardView's own off-branch and resetState (leaving/
+     * disconnecting from a game while board view is active shouldn't strand the player's camera
+     * pointing straight down and zoomed out once they're back to whatever they were doing before).
+     * Deliberately leaves the pitch relaxer enabled rather than disabling it -- there's no
+     * matching getter to know whether it was already on before this feature touched it (e.g. from
+     * the player's own separately-installed Camera plugin), so turning it back off risks
+     * clobbering a setting this feature was never the sole owner of. No-op if board view isn't
+     * actually active. */
+    private void restoreCameraFromBoardView()
+    {
+        if (!boardViewActive) return;
+        boardViewActive = false;
+        client.setCameraPitchTarget(boardViewSavedPitch);
+        client.setCameraYawTarget(boardViewSavedYaw);
+        client.setVarcIntValue(VARC_CAMERA_ZOOM, boardViewSavedZoom);
+    }
+
+    public boolean isBoardViewActive() { return boardViewActive; }
 
     /** The local player's own RSN, or null if unresolvable -- same lookup localRsn() already does
      * for every action method here, just exposed for RunePartyMapDialog to tell "you" apart from
@@ -871,7 +1046,66 @@ public class RunePartyPlugin extends Plugin
             {
                 log.warn("Confirm arrival failed", e);
                 addChatMessage("Failed to confirm arrival: " + e.getMessage());
-                arrivalSubmitted = false; // let the next tick retry
+                // A definitive 4xx (e.g. 409 "No roll is pending") means the server has already
+                // looked at this exact claim and rejected it -- arrivalSubmitted staying true
+                // deliberately blocks checkPendingArrival from resubmitting the identical claim
+                // every tick forever, which is what used to happen here (this exact call, this
+                // exact 409, once a game tick, spamming the log until something else eventually
+                // changed pendingRoll). The client's own pendingRoll is corrected the normal way
+                // instead -- by the next real TURN_STARTED or DICE_ROLLED event (see handleEvent),
+                // both of which also reset arrivalSubmitted, resyncing to the server's actual
+                // state rather than blindly retrying against it. A genuine transient failure
+                // (a real network-level IOException, or a 5xx server error) is different -- the
+                // claim itself was never actually rejected, so retrying it is still worth doing.
+                if (!(e instanceof ApiClient.ApiHttpException) || ((ApiClient.ApiHttpException) e).code >= 500)
+                {
+                    arrivalSubmitted = false; // let the next tick retry
+                }
+            }
+        });
+    }
+
+    /** Checks the local player's current position against every currently-live Coin Rush spawn
+     * (see coinRushSpawns) and reports a claim the instant it matches one -- called every tick
+     * while a Coin Rush round is playable (see onGameTick). coinRushCollectSubmitted guards each
+     * spawn id against being reported more than once while its first report is still in flight: the
+     * server's own COIN_RUSH_COLLECTED echo is what actually removes the spawn from coinRushSpawns
+     * (and clears the guard), so standing on a still-live spawn tile for several ticks in a row
+     * before the echo lands doesn't fire a fresh request every single tick. */
+    private void checkCoinRushCollection(Player selfPlayer)
+    {
+        WorldPoint pos = selfPlayer != null ? selfPlayer.getWorldLocation() : null;
+        if (pos == null) return;
+
+        for (Map.Entry<Integer, WorldPoint> entry : coinRushSpawns.entrySet())
+        {
+            if (!entry.getValue().equals(pos)) continue;
+            int spawnId = entry.getKey();
+            if (!coinRushCollectSubmitted.add(spawnId)) continue; // already reported, awaiting the echo
+            collectCoinRushCoin(spawnId, pos);
+        }
+    }
+
+    /** Reports the local player reaching a still-live Coin Rush spawn tile. Same
+     * report-then-wait-for-the-echo shape as confirmArrival: the server -- not this call's caller
+     * -- decides who actually wins a spawn racing multiple simultaneous reports (see
+     * COIN_RUSH_COLLECTED, the only source of truth for who got the coins), so this never assumes
+     * success locally. A failed request (network blip, not a "someone else already got it" 409)
+     * clears the guard so checkCoinRushCollection retries it on a later tick. */
+    private void collectCoinRushCoin(int spawnId, WorldPoint pos)
+    {
+        String self = localRsn();
+        final String gid = gameId;
+        final String token = playerToken;
+        if (self == null || gid == null || token == null) { coinRushCollectSubmitted.remove(spawnId); return; }
+
+        executor.submit(() ->
+        {
+            try { apiClient.collectCoinRushCoin(gid, self, token, spawnId, pos.getX(), pos.getY(), pos.getPlane()); }
+            catch (Exception e)
+            {
+                log.warn("Collect Coin Rush coin failed", e);
+                coinRushCollectSubmitted.remove(spawnId);
             }
         });
     }
@@ -1260,6 +1494,14 @@ public class RunePartyPlugin extends Plugin
         Player selfPlayer = client.getLocalPlayer();
         standingOnTrackedPositionCached = self != null && selfPlayer != null && isStandingOnTrackedPosition(selfPlayer, self);
 
+        // Runs independently of the turn engine below -- a Coin Rush round has no "whose turn is
+        // it" at all, every seated player can be racing for a spawn at once, so this can't share
+        // the pendingRoll-gated checks the rest of onGameTick uses.
+        if (isCoinRushActive() && isMinigamePlayable())
+        {
+            checkCoinRushCollection(selfPlayer);
+        }
+
         // GAME_STARTED fired but turn order hasn't begun yet (currentTurnRsn still null) -- this
         // is the gathering window AnnouncementOverlay/TileOverlay's start-tile arrow cover; watch
         // for the local player reaching the START tile instead of a rolled destination.
@@ -1574,6 +1816,36 @@ public class RunePartyPlugin extends Plugin
         turnEffectGateUntil = Math.max(turnEffectGateUntil, untilTimestamp);
     }
 
+    /** Appends a new CoinPopup to {@code rsn}'s own queue (see coinPopups's own doc for why this
+     * is a queue, not a single slot) and extends the turn-effect gate to match. Shared by
+     * COINS_CHANGED's real coin-total popups and COIN_RUSH_COLLECTED's own totalless "+2" flash
+     * (see CoinPopup's own doc), so a Coin Rush round's mid-round flashes and its own end-of-round
+     * lump-sum popup still queue behind each other and behind a Golden Gnome popup correctly,
+     * exactly like every other coin popup already does, rather than needing a second queue of
+     * their own.
+     * <p>
+     * start is computed by queuing behind whichever's already showing for this same player -- their
+     * Golden Gnome popup (tracked separately, not in this queue) if that's still up, else the tail
+     * of their own coin-popup queue, else "now" if nothing's currently showing. A different player
+     * always gets their own popup immediately regardless of what's showing for anyone else (see the
+     * Coin Trap owner's simultaneous +N popup). */
+    private void enqueueCoinPopup(String rsn, int delta, int newTotal, long durationMs, boolean totalless)
+    {
+        String key = rsn.toLowerCase(Locale.ROOT);
+        long now = System.currentTimeMillis();
+
+        Deque<CoinPopup> queue = coinPopups.computeIfAbsent(key, k -> new ConcurrentLinkedDeque<>());
+        CoinPopup tailPopup = queue.peekLast();
+        boolean samePlayerGnomePopupShowing = rsn.equalsIgnoreCase(goldenGnomePopupRsn) && goldenGnomePopupUntil > now;
+        long start = samePlayerGnomePopupShowing ? goldenGnomePopupUntil
+            : (tailPopup != null && tailPopup.until > now) ? tailPopup.until
+            : now;
+        long until = start + durationMs;
+
+        queue.addLast(new CoinPopup(delta, newTotal, start, until, totalless));
+        extendTurnEffectGate(until);
+    }
+
     /** Schedules {@code action} to run once every in-flight turn-effect visual has cleared (see
      * extendTurnEffectGate) plus a short POST_TURN_EFFECT_GRACE_MS beat, so an outgoing effect and
      * an incoming "turn's over" announcement never visually collide -- runs immediately (still off
@@ -1629,16 +1901,27 @@ public class RunePartyPlugin extends Plugin
      * appears while the last roller's own turn -- including their coin popup -- is still settling.
      * minigameActive/minigameInstructions are set immediately in the MINIGAME_STARTED handler,
      * unaffected by this delay: this only postpones the celebratory banner, not the mini-game
-     * itself. scheduleAfterTurnEffects reserves the gate for this banner's own duration
-     * synchronously, so scheduleMinigameSpinner (called right behind this one, same
-     * MINIGAME_STARTED handler) waits for this banner to actually finish instead of appearing on
-     * top of it. */
+     * itself. scheduleAfterTurnEffects reserves the gate for this banner's own
+     * MINIGAME_BANNER_DURATION_MS synchronously, so scheduleMinigameSpinner (called right behind
+     * this one, same MINIGAME_STARTED handler) starts right on schedule once that reservation
+     * ends -- but the banner itself keeps rendering well past that (see the callback below), so
+     * "MINIGAME!" stays up above the wheel for its own whole spin+reveal instead of disappearing
+     * the instant the wheel takes over. */
     private void scheduleMinigameBanner()
     {
         minigameBannerTask = scheduleAfterTurnEffects(minigameBannerTask, MINIGAME_BANNER_DURATION_MS, () ->
         {
-            minigameBannerUntil = System.currentTimeMillis() + MINIGAME_BANNER_DURATION_MS;
-            extendTurnEffectGate(minigameBannerUntil); // belt-and-suspenders against scheduler jitter -- see scheduleAfterTurnEffects' own synchronous reservation, the primary fix
+            long now = System.currentTimeMillis();
+            // Rendered for MINIGAME_BANNER_DURATION_MS + MINIGAME_SPINNER_DURATION_MS -- longer
+            // than what's reserved on the gate below -- so "MINIGAME!" stays visible above the
+            // selection wheel for the wheel's own entire spin+reveal (scheduleMinigameSpinner,
+            // called right behind this one in the same MINIGAME_STARTED handler) instead of
+            // vanishing the instant the wheel appears. The gate reservation deliberately stays at
+            // the shorter MINIGAME_BANNER_DURATION_MS (belt-and-suspenders against scheduler
+            // jitter, same as ever) -- extending it to match would also push back the wheel's own
+            // start, which isn't the goal here.
+            minigameBannerUntil = now + MINIGAME_BANNER_DURATION_MS + MINIGAME_SPINNER_DURATION_MS;
+            extendTurnEffectGate(now + MINIGAME_BANNER_DURATION_MS);
         });
     }
 
@@ -2219,14 +2502,24 @@ public class RunePartyPlugin extends Plugin
             case "COINS_CHANGED":
             {
                 // The standard-tile reward, an item's own coin effect, and a Coin Trap steal all
-                // get the popup treatment -- a Golden Gnome purchase or mini-game payout already
-                // has its own feedback (the roster/stats panels update, and submitMinigameResult's
-                // caller sees the MINIGAME_ENDED chat line), so this stays scoped to the cases that
-                // otherwise had no visible feedback at all. The real coin total itself lives in
-                // rosterReducer (updated unconditionally above, catch-up or not) -- everything in
-                // this block is purely the popup's own cosmetics.
+                // get the popup treatment -- a Golden Gnome purchase or a mini-game's own
+                // end-of-round payout already has its own feedback (the roster/stats panels
+                // update, and submitMinigameResult's caller sees the MINIGAME_ENDED chat line), so
+                // this stays scoped to the cases that otherwise had no visible feedback at all.
+                // Coin Rush's own "coin_rush" reason is the one exception worth calling out: unlike
+                // the other three, it's not fired per landing -- the server bundles every coin a
+                // player grabbed during the round into one lump-sum COINS_CHANGED right before
+                // MINIGAME_ENDED (see app.py's _coin_rush_end_round), so this case only ever fires
+                // once per player per Coin Rush round, showing their round's own total ("+6 coins")
+                // then their real new balance -- never per-pickup. Each individual pickup gets its
+                // own separate, purely cosmetic "+2" flash instead (see COIN_RUSH_COLLECTED
+                // handling), which never touches this case at all since it carries no COINS_CHANGED
+                // of its own. The real coin total itself lives in rosterReducer (updated
+                // unconditionally above, catch-up or not) -- everything in this block is purely the
+                // popup's own cosmetics.
                 String coinsChangedReason = safeStr(e.payload, "reason");
-                if (!catchingUp && ("standard_tile".equals(coinsChangedReason) || "item".equals(coinsChangedReason) || "coin_trap".equals(coinsChangedReason)))
+                if (!catchingUp && ("standard_tile".equals(coinsChangedReason) || "item".equals(coinsChangedReason)
+                    || "coin_trap".equals(coinsChangedReason) || "coin_rush".equals(coinsChangedReason)))
                 {
                     String coinsChangedRsn = safeStr(e.payload, "player");
                     Integer delta = safeInt(e.payload, "delta");
@@ -2234,32 +2527,8 @@ public class RunePartyPlugin extends Plugin
 
                     if (coinsChangedRsn != null)
                     {
-                        String key = coinsChangedRsn.toLowerCase(Locale.ROOT);
-                        long now = System.currentTimeMillis();
-
-                        // A Golden Gnome purchase always resolves before the underlying tile's own
-                        // effect (see the server's confirm_arrival/respond_golden_gnome_offer
-                        // split), and a Coin Trap steal always resolves before it too (see
-                        // _resolve_tile_effect_and_advance), so two or even three popups can land
-                        // back-to-back for the same player within milliseconds of each other.
-                        // Rather than show them at once, each new one queues behind whichever's
-                        // already showing *for this same player* -- the Golden Gnome popup
-                        // specifically (it's tracked separately, not in this queue) or the tail of
-                        // this player's own coin-popup queue (see coinPopups's own doc for why this
-                        // has to be a real queue, appended to, rather than a single slot overwritten
-                        // each time). Doesn't apply to a different player, who gets their own popup
-                        // immediately regardless of what's showing for anyone else (see the Coin
-                        // Trap owner's simultaneous +N popup).
-                        Deque<CoinPopup> queue = coinPopups.computeIfAbsent(key, k -> new ConcurrentLinkedDeque<>());
-                        CoinPopup tailPopup = queue.peekLast();
-                        boolean samePlayerGnomePopupShowing = coinsChangedRsn.equalsIgnoreCase(goldenGnomePopupRsn) && goldenGnomePopupUntil > now;
-                        long start = samePlayerGnomePopupShowing ? goldenGnomePopupUntil
-                            : (tailPopup != null && tailPopup.until > now) ? tailPopup.until
-                            : now;
-                        long until = start + COIN_POPUP_DURATION_MS;
-
-                        queue.addLast(new CoinPopup(delta != null ? delta : 0, total != null ? total : 0, start, until));
-                        extendTurnEffectGate(until);
+                        enqueueCoinPopup(coinsChangedRsn, delta != null ? delta : 0, total != null ? total : 0,
+                            COIN_POPUP_DURATION_MS, false);
                     }
                 }
                 break;
@@ -2282,6 +2551,22 @@ public class RunePartyPlugin extends Plugin
                 minigameSpinnerStart = 0;
                 minigameSpinnerUntil = 0;
                 minigameSpinnerSkippedForClient = catchingUp;
+                // Real state, applied catch-up or not: a fresh Coin Rush instance starts with no
+                // spawns and no tally, regardless of whether this client watched the previous
+                // round's own leftovers get cleaned up by its own MINIGAME_ENDED (see that case
+                // below -- redundant here for a live client, but a catching-up client that missed
+                // the previous round's MINIGAME_ENDED entirely still needs this reset).
+                // coinRushRoundStartAt deliberately isn't set here -- MINIGAME_STARTED lands before
+                // the round is actually playable (the ready-check still has to run first), so
+                // stamping "now" at this point would undercount the round's remaining time; see the
+                // MINIGAME_COUNTDOWN_STARTED case below, the only writer.
+                if (COIN_RUSH_KEY.equals(minigameKey))
+                {
+                    coinRushSpawns.clear();
+                    coinRushScores.clear();
+                    coinRushCollectSubmitted.clear();
+                    coinRushRoundStartAt = 0;
+                }
                 if (!catchingUp)
                 {
                     scheduleMinigameBanner();
@@ -2305,6 +2590,17 @@ public class RunePartyPlugin extends Plugin
                 // is split from the cosmetic-only banner timestamp below.
                 minigameCountdownStarted = true;
                 minigameCountdownSkippedForClient = catchingUp;
+                // Coin Rush's own round clock (see COIN_RUSH_DURATION_MS/getCoinRushEndsAt) starts
+                // ticking from here, not MINIGAME_STARTED -- this is the event that actually marks
+                // the round playable (once the countdown itself finishes, see isMinigamePlayable).
+                // A catching-up client has no live "BEGIN!" moment of its own to hang this off of
+                // (see minigameCountdownBannerUntil's own catch-up doc), so "now" is the closest
+                // available approximation; a live client gets the precise instant instead, stamped
+                // below once the countdown's own delay actually elapses.
+                if (catchingUp && COIN_RUSH_KEY.equals(minigameKey))
+                {
+                    coinRushRoundStartAt = System.currentTimeMillis();
+                }
                 if (!catchingUp)
                 {
                     // Arming minigameCountdownBannerUntil is itself delayed by
@@ -2315,6 +2611,7 @@ public class RunePartyPlugin extends Plugin
                     {
                         minigameCountdownBannerUntil = System.currentTimeMillis() + MINIGAME_COUNTDOWN_DURATION_MS;
                         extendTurnEffectGate(minigameCountdownBannerUntil);
+                        if (COIN_RUSH_KEY.equals(minigameKey)) coinRushRoundStartAt = minigameCountdownBannerUntil;
                         // RunePartyPanel only re-checks isMinigamePlayable() reactively, when
                         // refreshPanel() runs -- unlike AnnouncementOverlay's per-frame render(),
                         // the panel has no ordinary reason to refresh again once the countdown
@@ -2347,6 +2644,16 @@ public class RunePartyPlugin extends Plugin
                 minigameCountdownStarted = false;
                 minigameCountdownSkippedForClient = false;
                 minigameCountdownBannerUntil = 0;
+                // Unconditional (harmless no-op if this round wasn't Coin Rush) rather than gated
+                // on COIN_RUSH_KEY.equals(minigameKey) -- minigameKey is already cleared above by
+                // this point. Any coin still standing when the round ends shouldn't keep rendering
+                // (see TileOverlay#updateCoinRushModels, which just mirrors this map's own keys) --
+                // real state, applied catch-up or not. The scoreboard tally itself (coinRushScores)
+                // is deliberately left as-is rather than cleared here: StatsOverlay's own gate
+                // (isCoinRushActive() && isMinigamePlayable(), both now false) already stops
+                // rendering it, and the next MINIGAME_STARTED resets it fresh regardless.
+                coinRushSpawns.clear();
+                coinRushCollectSubmitted.clear();
                 // Real state, applied catch-up or not -- one MINIGAME_ENDED is exactly one
                 // completed round (see the server's own _resolve_minigame_if_complete, which
                 // counts these events the same way to decide when maxRounds is reached). See
@@ -2367,6 +2674,48 @@ public class RunePartyPlugin extends Plugin
                     }
                 }
                 break;
+
+            case "COIN_RUSH_SPAWN":
+            {
+                // Real state, applied catch-up or not: a coin genuinely exists on the board at
+                // this point the instant the server says so, regardless of whether this client
+                // watched it appear live -- see TileOverlay#updateCoinRushModels, which just
+                // mirrors coinRushSpawns's own current keys every frame.
+                Integer spawnId = safeInt(e.payload, "id");
+                WorldPoint point = safeWorldPoint(e.payload, "point");
+                if (spawnId != null && point != null) coinRushSpawns.put(spawnId, point);
+                break;
+            }
+
+            case "COIN_RUSH_COLLECTED":
+            {
+                // Real state, applied catch-up or not: the spawn is gone (whoever the server
+                // credited already claimed it) and the tally reflects it, regardless of whether
+                // this client watched the race happen live -- a catching-up client still needs an
+                // accurate live scoreboard the instant it starts rendering one. This event never
+                // carries a real coin-total change of its own -- the server doesn't actually credit
+                // a Coin Rush pickup to the player's balance until the round ends, one lump sum per
+                // player (see COINS_CHANGED's own "coin_rush" case) -- so the only thing worth
+                // showing live, right now, is a purely cosmetic "+2" flash (see enqueueCoinPopup's
+                // totalless=true), never a running total.
+                Integer spawnId = safeInt(e.payload, "id");
+                if (spawnId != null)
+                {
+                    coinRushSpawns.remove(spawnId);
+                    coinRushCollectSubmitted.remove(spawnId);
+                }
+                String collector = safeStr(e.payload, "player");
+                if (collector != null)
+                {
+                    coinRushScores.merge(collector.toLowerCase(Locale.ROOT), 1, Integer::sum);
+                }
+                if (!catchingUp && collector != null)
+                {
+                    enqueueCoinPopup(collector, COIN_RUSH_REWARD, 0, COIN_RUSH_BUMP_POPUP_DURATION_MS, true);
+                    addChatMessage(collector + " grabbed a coin!");
+                }
+                break;
+            }
 
             default:
                 break;
@@ -2484,6 +2833,14 @@ public class RunePartyPlugin extends Plugin
 
     private void resetState()
     {
+        // Leaving/disconnecting while board view is active shouldn't strand the player's camera
+        // pointing straight down once they're back to whatever they were doing before -- restore
+        // it the same way toggling the button off would. clientThread.invoke rather than a direct
+        // call since resetState can run from a Swing button handler (leaveGame) as well as a
+        // client-thread event subscriber, and camera setters are believed to require the client
+        // thread the same way RuneLiteObject#setActive does (see CheerleaderRenderer#clear's
+        // identical reasoning in the sibling Gnomeball repo).
+        if (boardViewActive) clientThread.invoke(this::restoreCameraFromBoardView);
         if (eventSocket != null) eventSocket.stop();
         if (turnAnnounceTask != null) { turnAnnounceTask.cancel(false); turnAnnounceTask = null; }
         if (minigameBannerTask != null) { minigameBannerTask.cancel(false); minigameBannerTask = null; }
@@ -2514,6 +2871,7 @@ public class RunePartyPlugin extends Plugin
         coinTrapTriggerPoint = null; coinTrapTriggerUntil = 0;
         minigameReadyRsns.clear();
         minigameCountdownStarted = false; minigameCountdownSkippedForClient = false; minigameCountdownBannerUntil = 0;
+        coinRushSpawns.clear(); coinRushScores.clear(); coinRushCollectSubmitted.clear(); coinRushRoundStartAt = 0;
         maxRounds = 0; completedRounds = 0;
         playerPositions.clear();
         turnAnnounceRsn = null; turnAnnounceUntil = 0; startConfirmSubmitted = false;
@@ -2585,6 +2943,19 @@ public class RunePartyPlugin extends Plugin
     public String getCoinTrapAnnounceRsn() { return coinTrapAnnounceRsn; }
     public WorldPoint getCoinTrapTriggerPoint() { return coinTrapTriggerPoint; }
     public long getCoinTrapTriggerUntil() { return coinTrapTriggerUntil; }
+
+    /** Every currently-live Coin Rush spawn, keyed by the server's own spawn id -- see
+     * TileOverlay#updateCoinRushModels, the only consumer. */
+    public Map<Integer, WorldPoint> getCoinRushSpawns() { return Collections.unmodifiableMap(coinRushSpawns); }
+    /** This round's live Coin Rush tally, lowercase rsn -> coins collected so far -- see
+     * StatsOverlay's live scoreboard, the only consumer. */
+    public Map<String, Integer> getCoinRushScores() { return Collections.unmodifiableMap(coinRushScores); }
+    public boolean isCoinRushActive() { return minigameActive && COIN_RUSH_KEY.equals(minigameKey); }
+    /** When the current Coin Rush round's own clock (see COIN_RUSH_DURATION_MS) runs out -- 0 if
+     * no round is active yet or the round hasn't actually become playable (see
+     * coinRushRoundStartAt's own doc on when that gets stamped). */
+    public long getCoinRushEndsAt() { return coinRushRoundStartAt != 0 ? coinRushRoundStartAt + COIN_RUSH_DURATION_MS : 0; }
+
     public String getItemPlacementKey() { return itemPlacementKey; }
     public Set<String> getMinigameReadyRsns() { return minigameReadyRsns; }
     public boolean isMinigameCountdownStarted() { return minigameCountdownStarted; }

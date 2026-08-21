@@ -16,6 +16,7 @@ import net.runelite.client.util.Text;
 import lombok.extern.slf4j.Slf4j;
 
 import java.awt.*;
+import java.awt.geom.Path2D;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -26,8 +27,10 @@ import java.util.Set;
 /** Renders the course: committed tiles from TileReducer, plus a live placement/removal preview
  * while the host is building. Unlike Gnomeball's TileOverlay -- whose FIELD/ZONE tiles are large
  * connected regions rendered as an outline -- a course is a one-tile-wide walked path, so every
- * tile renders individually filled/bordered (Gnomeball's non-outline-type styling) with a
- * connecting line drawn between consecutive path indices to make the route itself legible. */
+ * tile renders individually as its own rounded-corner outline (see renderOutlinedTile), inset a
+ * little inward from the tile's true boundary so adjacent tiles' outlines read as a clean grid
+ * rather than doubled-up touching edges, with a connecting line drawn between consecutive path
+ * indices to make the route itself legible. */
 @Slf4j
 public class TileOverlay extends Overlay
 {
@@ -38,18 +41,22 @@ public class TileOverlay extends Overlay
     // Only used for the live placement preview now (see renderPresetPreview) -- a committed Golden
     // Gnome tile renders as a 3D model instead (model 31481, see updateGoldenGnomeModels), but the
     // preview is a lightweight dashed-outline pass over the whole course before it's even
-    // committed, same as every other tile type there, so it keeps the simple color-fill look.
+    // committed, same as every other tile type there, so it keeps the plain outline look.
     private static final Color COLOR_GOLDEN_GNOME_TILE = new Color(255, 210, 0);
     private static final Color COLOR_EVENT_TILE    = new Color(170, 80, 220);
     private static final Color COLOR_ITEM_TILE     = new Color(255, 140, 0); // landing spins the item wheel (see AnnouncementOverlay#renderItemSpinner) and grants a random item
     private static final Color COLOR_ROUTE_LINE    = new Color(255, 255, 255, 100);
     private static final Color COLOR_TARGET_ARROW  = new Color(255, 215, 0);
 
-    private static final int FILL_ALPHA   = 128; // 50% opacity fill
-    private static final int BORDER_ALPHA = 255; // solid border
+    // How far a tile's drawn outline sits inward from its true boundary, and how rounded its
+    // corners are -- both in on-screen pixels, so neither scales with the tile's own on-screen
+    // size (a distant, small-on-screen tile gets proportionally less inset/rounding than a close
+    // one, same as SOLID_STROKE's own fixed pixel width already does). See renderOutlinedTile.
+    private static final double TILE_OUTLINE_INSET_PX = 4.0;
+    private static final double TILE_OUTLINE_CORNER_RADIUS_PX = 7.0;
 
-    private static final Stroke SOLID_STROKE   = new BasicStroke(2f);
-    private static final Stroke PREVIEW_STROKE = new BasicStroke(2f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10f, new float[]{6f, 4f}, 0f);
+    private static final Stroke SOLID_STROKE   = new BasicStroke(3.5f);
+    private static final Stroke PREVIEW_STROKE = new BasicStroke(3.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 10f, new float[]{7f, 5f}, 0f);
     private static final Stroke ROUTE_STROKE   = new BasicStroke(2f);
 
     // A committed Golden Gnome tile renders as this model, spawned as a RuneLiteObject in the
@@ -70,6 +77,11 @@ public class TileOverlay extends Overlay
     // it's just sitting armed.
     private static final int COIN_TRAP_SPRING_ANIMATION_ID = 5268;
     private static final Color COLOR_PLACEMENT_ARROW = new Color(255, 140, 0);
+
+    // A live Coin Rush spawn renders as object 29165's own model ("Mounted Coins") -- left in its
+    // own natural gold palette, unlike the Coin Trap's recolor, since this object is already gold
+    // by design. See updateCoinRushModels.
+    private static final int COIN_RUSH_MODEL_ID = 32153;
 
     private final Client client;
     private final RunePartyConfig config;
@@ -103,6 +115,13 @@ public class TileOverlay extends Overlay
     private Model coinTrapGoldModel;
     private boolean coinTrapGoldModelLoadFailed;
 
+    // One RuneLiteObject per currently-live Coin Rush spawn, keyed by the server's own spawn id
+    // (RunePartyPlugin#getCoinRushSpawns) rather than by WorldPoint -- unlike a Golden Gnome/Coin
+    // Trap tile, two Coin Rush spawns are never guaranteed distinct points by construction from this
+    // overlay's own perspective (nothing here enforces it), so the id is the only stable key. See
+    // updateCoinRushModels/clearCoinRushModels.
+    private final Map<Integer, RuneLiteObject> coinRushModels = new HashMap<>();
+
     public TileOverlay(Client client, RunePartyConfig config, RunePartyPlugin plugin, TileReducer tileReducer)
     {
         this.client = client;
@@ -121,6 +140,7 @@ public class TileOverlay extends Overlay
         {
             clearGoldenGnomeModels();
             clearCoinTrapModels();
+            clearCoinRushModels();
             return null;
         }
         GamePhase phase = plugin.getPhase();
@@ -128,12 +148,14 @@ public class TileOverlay extends Overlay
         {
             clearGoldenGnomeModels();
             clearCoinTrapModels();
+            clearCoinRushModels();
             return null;
         }
 
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
         renderCommittedCourse(g);
+        updateCoinRushModels();
 
         if (plugin.isCoursePlacementMode())
         {
@@ -157,7 +179,7 @@ public class TileOverlay extends Overlay
             if ("GOLDEN_GNOME_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see updateGoldenGnomeModels below
             if ("COIN_TRAP_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see updateCoinTrapModels below
             Color base = resolveColor(entry.color, entry.tileType);
-            renderFilledTile(g, entry.point, withAlpha(base, FILL_ALPHA), withAlpha(base, BORDER_ALPHA), SOLID_STROKE);
+            renderOutlinedTile(g, entry.point, base, SOLID_STROKE);
         }
 
         updateGoldenGnomeModels(entries);
@@ -394,6 +416,59 @@ public class TileOverlay extends Overlay
         coinTrapModels.clear();
     }
 
+    /** Same "diff the live set against currently-spawned RuneLiteObjects" shape as
+     * updateGoldenGnomeModels/updateCoinTrapModels, for Coin Rush spawns -- except keyed by the
+     * server's own spawn id (RunePartyPlugin#getCoinRushSpawns) rather than WorldPoint, and with no
+     * force-persist/animation window of its own: a Coin Rush spawn just disappears the instant
+     * COIN_RUSH_COLLECTED removes it from that map, no lingering trigger visual the way a sprung
+     * Coin Trap gets. No course-tile dependency either (unlike the other two, which read from
+     * TileReducer's own snapshot) -- a Coin Rush spawn can land anywhere the server picks, not just
+     * on the walked course -- so this reads straight from the plugin rather than taking an
+     * {@code entries} list. */
+    private void updateCoinRushModels()
+    {
+        Map<Integer, WorldPoint> current = plugin.getCoinRushSpawns();
+
+        coinRushModels.entrySet().removeIf(entry ->
+        {
+            if (current.containsKey(entry.getKey())) return false;
+            entry.getValue().setActive(false);
+            return true;
+        });
+
+        for (Map.Entry<Integer, WorldPoint> spawn : current.entrySet())
+        {
+            RuneLiteObject obj = coinRushModels.computeIfAbsent(spawn.getKey(), id -> client.createRuneLiteObject());
+
+            if (obj.getModel() == null)
+            {
+                Model model = client.loadModel(COIN_RUSH_MODEL_ID);
+                if (model != null) obj.setModel(model);
+            }
+
+            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), spawn.getValue());
+            if (lp == null)
+            {
+                obj.setActive(false);
+                continue;
+            }
+
+            obj.setLocation(lp, spawn.getValue().getPlane());
+            if (obj.getModel() != null && !obj.isActive()) obj.setActive(true);
+        }
+    }
+
+    /** Despawns and forgets every Coin Rush RuneLiteObject -- same reasoning/call sites as
+     * clearGoldenGnomeModels/clearCoinTrapModels. */
+    public void clearCoinRushModels()
+    {
+        for (RuneLiteObject obj : coinRushModels.values())
+        {
+            obj.setActive(false);
+        }
+        coinRushModels.clear();
+    }
+
     /** Draws a bouncing, pulsing arrow -- in the mover's own RunePartyColor (see
      * RunePartyPlugin#getRosterReducer, falls back to gold if their seat color can't be resolved)
      * -- labeled with their name centered above it, over <i>every</i> candidate tile the current
@@ -628,7 +703,7 @@ public class TileOverlay extends Overlay
         for (CoursePreset.PlacedTile pt : placed)
         {
             Color base = resolveColor(pt.color, pt.tileType);
-            renderFilledTile(g, pt.point, withAlpha(base, FILL_ALPHA), withAlpha(base, BORDER_ALPHA), PREVIEW_STROKE);
+            renderOutlinedTile(g, pt.point, base, PREVIEW_STROKE);
         }
 
         // A decorative tile (a Golden Gnome modifier stacked on another tile, see
@@ -669,7 +744,13 @@ public class TileOverlay extends Overlay
         return new int[] { (index + 1) % length };
     }
 
-    private void renderFilledTile(Graphics2D g, WorldPoint wp, Color fill, Color border, Stroke stroke)
+    /** Draws one tile's outline -- no fill -- inset TILE_OUTLINE_INSET_PX inward from the tile's
+     * true on-screen boundary with TILE_OUTLINE_CORNER_RADIUS_PX-rounded corners (see
+     * roundedInsetPolygon), in {@code color} at full opacity. Perspective.getCanvasTilePoly's own
+     * quad is generally NOT axis-aligned -- the camera can be pitched/rotated to any angle -- so
+     * this can't just be a RoundRectangle2D the way a screen-space UI element could; the inset/
+     * rounding has to work on the polygon's own (possibly skewed) edges directly. */
+    private void renderOutlinedTile(Graphics2D g, WorldPoint wp, Color color, Stroke stroke)
     {
         Collection<WorldPoint> localPoints = WorldPoint.toLocalInstance(client.getTopLevelWorldView(), wp);
         for (WorldPoint local : localPoints)
@@ -680,12 +761,110 @@ public class TileOverlay extends Overlay
             Polygon poly = Perspective.getCanvasTilePoly(client, lp);
             if (poly == null) continue;
 
-            g.setColor(fill);
-            g.fillPolygon(poly);
-            g.setColor(border);
+            g.setColor(color);
             g.setStroke(stroke);
-            g.drawPolygon(poly);
+            g.draw(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
         }
+    }
+
+    /** Builds a rounded-corner outline of {@code poly}, offset inward by {@code insetPx} along
+     * each edge's own inward normal -- works for any simple convex polygon in any winding order,
+     * not just an axis-aligned rectangle, since {@code poly} here is a perspective-projected tile
+     * quad whose on-screen shape depends on the camera's own pitch/rotation.
+     * <p>
+     * Two passes: first, each edge is pushed inward by {@code insetPx} (the inward direction
+     * determined per edge by testing which of its two perpendiculars actually points toward the
+     * polygon's centroid, so this works regardless of winding order), and consecutive offset edges
+     * are intersected to get each new inset vertex -- standard polygon-offsetting. Second, each
+     * inset vertex's corner is rounded off by cutting it back {@code cornerRadiusPx} along both
+     * adjoining (inset) edges and joining those two cut points with a quadratic Bezier curve using
+     * the sharp vertex itself as the control point -- the standard Java2D technique for rounding an
+     * arbitrarily-angled polygon's corners (unlike {@code RoundRectangle2D}, which only handles
+     * axis-aligned rectangles). The corner radius is clamped per-vertex to at most half its
+     * shorter adjoining inset edge, so two corners' cuts can never overlap on a small on-screen
+     * tile. */
+    private static Path2D roundedInsetPolygon(Polygon poly, double insetPx, double cornerRadiusPx)
+    {
+        int n = poly.npoints;
+        double[] xs = new double[n];
+        double[] ys = new double[n];
+        double cx = 0, cy = 0;
+        for (int i = 0; i < n; i++)
+        {
+            xs[i] = poly.xpoints[i];
+            ys[i] = poly.ypoints[i];
+            cx += xs[i];
+            cy += ys[i];
+        }
+        cx /= n;
+        cy /= n;
+
+        // Each offset edge, as a point on the line (lx/ly) plus its own unit direction (ldx/ldy).
+        double[] lx = new double[n];
+        double[] ly = new double[n];
+        double[] ldx = new double[n];
+        double[] ldy = new double[n];
+        for (int i = 0; i < n; i++)
+        {
+            int j = (i + 1) % n;
+            double ex = xs[j] - xs[i];
+            double ey = ys[j] - ys[i];
+            double len = Math.hypot(ex, ey);
+            if (len < 1e-6) { ex = 1; ey = 0; len = 1; } // degenerate (coincident) vertices -- shouldn't happen for a real tile quad, guarded anyway
+            double dx = ex / len, dy = ey / len;
+
+            // Perpendicular to the edge; sign chosen so it points toward the polygon's own
+            // centroid, i.e. inward, regardless of the polygon's winding order.
+            double nx = -dy, ny = dx;
+            double midx = (xs[i] + xs[j]) / 2, midy = (ys[i] + ys[j]) / 2;
+            if (nx * (cx - midx) + ny * (cy - midy) < 0) { nx = -nx; ny = -ny; }
+
+            lx[i] = xs[i] + nx * insetPx;
+            ly[i] = ys[i] + ny * insetPx;
+            ldx[i] = dx;
+            ldy[i] = dy;
+        }
+
+        // Each inset vertex is where its two adjoining offset edges (as infinite lines) cross.
+        double[] ix = new double[n];
+        double[] iy = new double[n];
+        for (int i = 0; i < n; i++)
+        {
+            int prev = (i - 1 + n) % n;
+            double denom = ldx[prev] * ldy[i] - ldy[prev] * ldx[i];
+            if (Math.abs(denom) < 1e-9)
+            {
+                // Parallel offset edges (shouldn't happen for a real 4-corner tile quad) -- fall
+                // back to the original, un-inset vertex rather than producing a garbage point.
+                ix[i] = xs[i];
+                iy[i] = ys[i];
+                continue;
+            }
+            double t = ((lx[i] - lx[prev]) * ldy[i] - (ly[i] - ly[prev]) * ldx[i]) / denom;
+            ix[i] = lx[prev] + ldx[prev] * t;
+            iy[i] = ly[prev] + ldy[prev] * t;
+        }
+
+        Path2D.Double path = new Path2D.Double();
+        for (int i = 0; i < n; i++)
+        {
+            int prev = (i - 1 + n) % n;
+            int next = (i + 1) % n;
+
+            double toPrevLen = Math.hypot(ix[prev] - ix[i], iy[prev] - iy[i]);
+            double toNextLen = Math.hypot(ix[next] - ix[i], iy[next] - iy[i]);
+            double r = Math.min(cornerRadiusPx, Math.min(toPrevLen, toNextLen) / 2);
+
+            double p1x = ix[i] + (toPrevLen > 1e-6 ? (ix[prev] - ix[i]) / toPrevLen * r : 0);
+            double p1y = iy[i] + (toPrevLen > 1e-6 ? (iy[prev] - iy[i]) / toPrevLen * r : 0);
+            double p2x = ix[i] + (toNextLen > 1e-6 ? (ix[next] - ix[i]) / toNextLen * r : 0);
+            double p2y = iy[i] + (toNextLen > 1e-6 ? (iy[next] - iy[i]) / toNextLen * r : 0);
+
+            if (i == 0) path.moveTo(p1x, p1y); else path.lineTo(p1x, p1y);
+            path.quadTo(ix[i], iy[i], p2x, p2y);
+        }
+        path.closePath();
+        return path;
     }
 
     private static Color withAlpha(Color c, int alpha)

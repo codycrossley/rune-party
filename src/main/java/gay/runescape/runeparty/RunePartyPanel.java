@@ -40,6 +40,9 @@ public class RunePartyPanel extends PluginPanel
     private final JButton copyJoinCodeBtn = new JButton("Copy");
     private final JLabel statusLabel = new JLabel(" ");
     private final JButton showMapBtn = new JButton("Show Map");
+    // Label toggles between "View Board"/"Return to Normal View" based on
+    // plugin.isBoardViewActive() -- see refresh(), the only place that flips it.
+    private final JButton viewBoardBtn = new JButton("View Board");
 
     // Mini-game -- minigameControlSlot holds whichever Minigame's own control panel is active
     // (see gay.runescape.runeparty.minigames.Minigames#get), rebuilt only when activeMinigameKey
@@ -207,6 +210,10 @@ public class RunePartyPanel extends PluginPanel
         showMapBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
         showMapBtn.addActionListener(e -> plugin.showMap());
 
+        viewBoardBtn.setAlignmentX(LEFT_ALIGNMENT);
+        viewBoardBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        viewBoardBtn.addActionListener(e -> plugin.toggleBoardView());
+
         buildMinigamePanel();
         minigamePanel.setAlignmentX(LEFT_ALIGNMENT);
 
@@ -240,6 +247,8 @@ public class RunePartyPanel extends PluginPanel
         card.add(statusLabel);
         card.add(Box.createVerticalStrut(6));
         card.add(showMapBtn);
+        card.add(Box.createVerticalStrut(6));
+        card.add(viewBoardBtn);
         card.add(Box.createVerticalStrut(8));
         card.add(minigamePanel);
         card.add(Box.createVerticalStrut(8));
@@ -422,6 +431,14 @@ public class RunePartyPanel extends PluginPanel
         statusLabel.setText(statusText(phase));
 
         showMapBtn.setVisible(phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE || phase == GamePhase.ENDED);
+
+        // Only LOBBY/ACTIVE, matching toggleBoardView's own phase guard -- unlike showMapBtn,
+        // not offered in ENDED (toggling would just no-op there). If board view somehow was still
+        // active right as the game ended, RunePartyPlugin#resetState un-sticks it automatically
+        // the moment the player actually leaves, and a manual mouse drag always works regardless
+        // in the meantime (see toggleBoardView's own doc on why this is never truly "stuck").
+        viewBoardBtn.setVisible(phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE);
+        viewBoardBtn.setText(plugin.isBoardViewActive() ? "Return to Normal View" : "View Board");
 
         // Gated on isMinigamePlayable(), not isMinigameActive() -- while the selection
         // spinner/instructions/ready-check sequence is still playing out in AnnouncementOverlay,
