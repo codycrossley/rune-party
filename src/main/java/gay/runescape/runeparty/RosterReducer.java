@@ -92,13 +92,30 @@ public class RosterReducer
         return Boolean.TRUE.equals(onlineByPlayer.get(canonicalRsn.toLowerCase(Locale.ROOT)));
     }
 
+    /** Authoritative resync against the server's own roster (unlike apply(), which only folds
+     * incremental events) -- upserts every field including role and roster membership, so it can
+     * actually repair drift left behind by an incremental apply(), e.g. resurrecting a row
+     * PLAYER_LEFT once deleted outright. Never removes a player who's since dropped out of the
+     * server's response -- the server's own roster is append-only for the life of a game (see
+     * app.py's PLAYER_LEFT handling, which demotes rather than deletes), so there's nothing to
+     * prune here. */
     public void syncFromRoster(List<ApiClient.RosterPlayerOut> players)
     {
         if (players == null) return;
         for (ApiClient.RosterPlayerOut p : players)
         {
             if (p == null || p.rsn == null) continue;
-            String key = p.rsn.toLowerCase(Locale.ROOT);
+            String key = canonicalKey(p.rsn);
+            if (key == null) continue;
+            displayNameByPlayer.putIfAbsent(key, displayName(p.rsn));
+            rosterPlayers.add(key);
+            RunePartyRole role = RunePartyRole.SPECTATOR;
+            if (p.role != null)
+            {
+                try { role = RunePartyRole.valueOf(p.role.trim().toUpperCase(Locale.ROOT)); }
+                catch (IllegalArgumentException ignored) {}
+            }
+            roleByPlayer.put(key, role);
             onlineByPlayer.put(key, p.online);
             if (p.number != null) numberByPlayer.put(key, p.number);
             if (p.colorNumber != null) colorNumberByPlayer.put(key, p.colorNumber);
@@ -207,19 +224,21 @@ public class RosterReducer
             }
             case "PLAYER_LEFT":
             {
+                // Demoted to SPECTATOR, not deleted -- matches the server's own PLAYER_LEFT
+                // handling (see _apply_roster_event in app.py), which deliberately keeps the
+                // player's dict entry so colorNumber/join_order survive a later re-add via
+                // assignRole. Deleting the row here (the old behavior) meant a departed player
+                // could vanish from this client's roster entirely, with nothing to bring them
+                // back except a full syncFromRoster -- see that method's own doc. numberByPlayer
+                // is cleared since their old turn-order slot is now stale; colorNumberByPlayer is
+                // deliberately left alone since that's the whole point of preserving the row.
                 String playerRaw = safeStr(e.payload, "player");
                 if (playerRaw == null) return;
                 String key = canonicalKey(playerRaw);
                 if (key == null) return;
-                roleByPlayer.remove(key);
-                displayNameByPlayer.remove(key);
-                rosterPlayers.remove(key);
-                actuallyJoined.remove(key);
+                roleByPlayer.put(key, RunePartyRole.SPECTATOR);
+                actuallyJoined.put(key, false);
                 numberByPlayer.remove(key);
-                colorNumberByPlayer.remove(key);
-                coinsByPlayer.remove(key);
-                goldenGnomeCountByPlayer.remove(key);
-                itemsByPlayer.remove(key);
                 break;
             }
             case "COINS_CHANGED":

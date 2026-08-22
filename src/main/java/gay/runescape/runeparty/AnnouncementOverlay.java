@@ -169,7 +169,7 @@ public class AnnouncementOverlay extends Overlay
 
     private static final long PLACE_REVEAL_FADE_MS = 500;
     private static final float PLACE_REVEAL_RANK_SIZE = 40f; // "In 4th place..."
-    private static final float PLACE_REVEAL_LINE_SIZE = 26f; // "<Player> -- N GN, M coins"
+    private static final float PLACE_REVEAL_LINE_SIZE = 26f; // "<Player> -- N GG, M coins"
 
     private static final long WINNER_SUSPENSE_FADE_MS = 500;
     private static final float WINNER_SUSPENSE_SIZE = 34f; // "And the winner is..."
@@ -1252,7 +1252,7 @@ public class AnnouncementOverlay extends Overlay
         {
             RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
             Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
-            String stats = "   " + entry.goldenGnomeCount + " GN, " + entry.coins + " coins";
+            String stats = "   " + entry.goldenGnomeCount + " GG, " + entry.coins + " coins";
             drawStandingsLine(g, nameFont, statsFont, "#" + rank + "  ", entry.rsn, nameColor, stats, Color.LIGHT_GRAY, centerX, lineY, alpha);
             lineY += ROUND_COMPLETE_LINE_HEIGHT;
             rank++;
@@ -1314,7 +1314,7 @@ public class AnnouncementOverlay extends Overlay
         RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
         Color nameColor = seatColor != null ? seatColor.awt : Color.WHITE;
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(PLACE_REVEAL_LINE_SIZE));
-        String stats = rsn + " -- " + plugin.getPlaceRevealGoldenGnomes() + " GN, " + plugin.getPlaceRevealCoins() + " coins";
+        String stats = rsn + " -- " + plugin.getPlaceRevealGoldenGnomes() + " GG, " + plugin.getPlaceRevealCoins() + " coins";
         drawCenteredText(g, stats, centerX, y + 40, nameColor, alpha);
     }
 

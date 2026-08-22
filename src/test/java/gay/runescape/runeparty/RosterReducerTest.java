@@ -1,0 +1,93 @@
+package gay.runescape.runeparty;
+
+import com.google.gson.JsonObject;
+import org.junit.Test;
+
+import java.util.List;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+/**
+ * Locks in RosterReducer's PLAYER_LEFT/syncFromRoster behavior against the server's own roster
+ * model (see app.py's _apply_roster_event/PLAYER_LEFT and _finalize_roster) -- a departed PLAYER
+ * is demoted to SPECTATOR with their colorNumber preserved, never deleted outright, and a roster
+ * resync can always repair whatever apply() alone left behind. See ARCHITECTURE_REVIEW.md C7 for
+ * the drift this once had (apply() deleted the row entirely, and syncFromRoster couldn't
+ * resurrect it) that these two behaviors guard against regressing.
+ */
+public class RosterReducerTest
+{
+    private static ApiClient.EventOut event(String type, JsonObject payload)
+    {
+        ApiClient.EventOut e = new ApiClient.EventOut();
+        e.type = type;
+        e.payload = payload;
+        return e;
+    }
+
+    private static JsonObject playerLeftPayload(String rsn)
+    {
+        JsonObject o = new JsonObject();
+        o.addProperty("player", rsn);
+        return o;
+    }
+
+    private static ApiClient.RosterPlayerOut rosterPlayer(String rsn, String role, boolean joined, String number, String colorNumber)
+    {
+        ApiClient.RosterPlayerOut p = new ApiClient.RosterPlayerOut();
+        p.rsn = rsn;
+        p.role = role;
+        p.joined = joined;
+        p.online = false;
+        p.number = number;
+        p.colorNumber = colorNumber;
+        p.coins = 0;
+        p.goldenGnomeCount = 0;
+        return p;
+    }
+
+    private static RosterReducer.RosterEntry find(RosterReducer reducer, String rsn)
+    {
+        for (RosterReducer.RosterEntry entry : reducer.snapshot())
+        {
+            if (entry.rsn.equalsIgnoreCase(rsn)) return entry;
+        }
+        return null;
+    }
+
+    @Test
+    public void playerLeftDemotesRatherThanDeletes()
+    {
+        RosterReducer reducer = new RosterReducer();
+        reducer.loadSnapshot(List.of(rosterPlayer("Zezima", "PLAYER", true, "2", "2")));
+
+        reducer.apply(event("PLAYER_LEFT", playerLeftPayload("Zezima")));
+
+        RosterReducer.RosterEntry entry = find(reducer, "Zezima");
+        assertTrue("departed player must still appear in the roster, not vanish", entry != null);
+        assertEquals(RunePartyRole.SPECTATOR, entry.role);
+        assertFalse(entry.joined);
+        assertEquals("stable colorNumber must survive a leave", "2", entry.colorNumber);
+        assertEquals("stale turn-order number must be cleared", "", entry.number);
+    }
+
+    @Test
+    public void syncFromRosterResurrectsARowApplyDeletedBefore()
+    {
+        // Simulates the exact drift C7 flagged: some other client folded a PLAYER_LEFT under the
+        // *old* delete-based behavior before this fix landed (or any other path left the row
+        // missing) -- a fresh syncFromRoster must still be able to bring it back with the
+        // server's authoritative role/colorNumber, not just update fields on a row that already
+        // exists.
+        RosterReducer reducer = new RosterReducer();
+
+        reducer.syncFromRoster(List.of(rosterPlayer("Zezima", "SPECTATOR", false, "", "2")));
+
+        RosterReducer.RosterEntry entry = find(reducer, "Zezima");
+        assertTrue("syncFromRoster must be able to add a player it's never seen before", entry != null);
+        assertEquals(RunePartyRole.SPECTATOR, entry.role);
+        assertEquals("2", entry.colorNumber);
+    }
+}

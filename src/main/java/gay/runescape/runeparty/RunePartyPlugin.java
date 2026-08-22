@@ -26,6 +26,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import net.runelite.api.ChatMessageType;
@@ -408,10 +409,7 @@ public class RunePartyPlugin extends Plugin
         t.setDaemon(true);
         return t;
     });
-    private volatile ScheduledFuture<?> turnAnnounceTask;
-    private volatile ScheduledFuture<?> minigameBannerTask;
     private volatile ScheduledFuture<?> minigameSpinnerTask;
-    private volatile ScheduledFuture<?> itemSpinnerTask;
 
     /** Rolling "nothing turn-concluding should appear before this" gate. Every turn-effect visual
      * with its own on-screen duration -- currently just the coin popup, but meant to grow as more
@@ -516,38 +514,27 @@ public class RunePartyPlugin extends Plugin
     // AnnouncementOverlay#renderMinigameReadyCheck, the only consumer.
     private volatile boolean minigameSpinnerSkippedForClient = false;
     // ---- item wheel reveal (cosmetic-only timing, chained behind whatever turn-effect is
-    // already showing -- see scheduleItemSpinner). itemGrantRsn/itemGrantKey identify who got
-    // what, needed by the reveal text ("You got..."/"<rsn> got...", mirroring
-    // renderGoldenGnomeOutcome's own per-viewer split). Unlike the mini-game spinner, nothing
-    // else needs to distinguish "hasn't started yet" from "this client only caught up after the
-    // fact" -- no other screen chains behind this one the way the ready-check chains behind the
-    // mini-game spinner, so there's no *SkippedForClient flag needed here. ----
-    private volatile long itemSpinnerStart = 0;
-    private volatile long itemSpinnerUntil = 0;
-    private volatile String itemGrantRsn = null;
-    private volatile String itemGrantKey = null;
+    // already showing -- see scheduleItemSpinner). Payload identifies who got what, needed by the
+    // reveal text ("You got..."/"<rsn> got...", mirroring renderGoldenGnomeOutcome's own
+    // per-viewer split). Unlike the mini-game spinner, nothing else needs to distinguish "hasn't
+    // started yet" from "this client only caught up after the fact" -- no other screen chains
+    // behind this one the way the ready-check chains behind the mini-game spinner, so there's no
+    // *SkippedForClient flag needed here. ----
+    private final TimedBanner<ItemSpinnerPayload> itemSpinner = new TimedBanner<>();
     // ---- item cap announcement (cosmetic-only timing, chained the same way as the item spinner
     // above -- see scheduleItemCapBlockedAnnouncement). Fires instead of the item wheel when
-    // ITEM_CAP_BLOCKED lands, so at most one of {itemSpinnerUntil, itemCapBlockedUntil} is ever
+    // ITEM_CAP_BLOCKED lands, so at most one of {itemSpinner.until, itemCapBlocked.until} is ever
     // "live" for the same landing. ----
-    private volatile ScheduledFuture<?> itemCapBlockedTask;
-    private volatile long itemCapBlockedUntil = 0;
-    private volatile String itemCapBlockedRsn = null;
-    private volatile int itemCapBlockedCap = 0;
+    private final TimedBanner<ItemCapBlockedPayload> itemCapBlocked = new TimedBanner<>();
     // ---- item-used announcement (cosmetic-only timing, chained the same way as the item cap
     // banner above -- see scheduleItemUsedAnnouncement). Only fired for items that opt in via
     // Item#hasUseAnnouncement -- PlaceholderItem's coin change already has its own feedback. ----
-    private volatile ScheduledFuture<?> itemUsedAnnounceTask;
-    private volatile long itemUsedAnnounceUntil = 0;
-    private volatile String itemUsedAnnounceRsn = null;
-    private volatile String itemUsedAnnounceItemKey = null;
+    private final TimedBanner<ItemUsedAnnouncePayload> itemUsedAnnounce = new TimedBanner<>();
     // ---- Coin Trap trigger (cosmetic-only timing, chained the same way as the item-used
-    // announcement above -- see scheduleCoinTrapTriggerAnnouncement). coinTrapAnnounceRsn is
-    // whoever landed on it (the victim) -- the owner's own feedback is purely their coin popup, no
-    // banner of their own. ----
-    private volatile ScheduledFuture<?> coinTrapAnnounceTask;
-    private volatile long coinTrapAnnounceUntil = 0;
-    private volatile String coinTrapAnnounceRsn = null;
+    // announcement above -- see scheduleCoinTrapTriggerAnnouncement). Payload is whoever landed on
+    // it (the victim) -- the owner's own feedback is purely their coin popup, no banner of their
+    // own. ----
+    private final TimedBanner<String> coinTrapAnnounce = new TimedBanner<>(); // payload: victim rsn
     // Real-time (not chained behind scheduleAfterTurnEffects -- see COIN_TRAP_TRIGGERED handling's
     // own doc): where TileOverlay#updateCoinTrapModels should force-persist the model and fire its
     // spring animation for COIN_TRAP_TRIGGER_PERSIST_MS after the server's own TILE_UNMARKED would
@@ -630,33 +617,28 @@ public class RunePartyPlugin extends Plugin
     private volatile boolean startConfirmSubmitted = false; // guards confirm-start firing every tick while the echo is in flight
 
     // ---- instructional overlays (client-side timers, not server state -- see AnnouncementOverlay) ----
-    private volatile String turnAnnounceRsn = null;
-    private volatile long turnAnnounceUntil = 0;
+    private final TimedBanner<String> turnAnnounce = new TimedBanner<>(); // payload: rsn
 
     // ---- welcome title card (client-side, local-player-only -- see triggerWelcomeBanner) ----
-    private volatile long welcomeBannerUntil = 0;
+    private final TimedBanner<Void> welcomeBanner = new TimedBanner<>();
 
     // ---- minigame banner (server-driven, everyone sees it -- see MINIGAME_STARTED handling) ----
-    private volatile long minigameBannerUntil = 0;
+    private final TimedBanner<Void> minigameBanner = new TimedBanner<>();
 
     // ---- game-start banner (server-driven, everyone sees it -- see GAME_STARTED handling) ----
-    private volatile long gameStartBannerUntil = 0;
+    private final TimedBanner<Void> gameStartBanner = new TimedBanner<>();
 
     // ---- round-complete banner (server-driven, everyone sees it -- see MINIGAME_ENDED handling
-    // and scheduleRoundCompleteBanner). roundCompleteRoundNumber is the *upcoming* round -- the
-    // one about to start, same number getCurrentRound() would return live -- snapshotted at
-    // trigger time so it stays stable through the banner's own display window regardless of
-    // whatever completedRounds does afterward. ----
-    private volatile long roundCompleteBannerUntil = 0;
-    private volatile int roundCompleteRoundNumber = 0;
-    private volatile ScheduledFuture<?> roundCompleteBannerTask;
+    // and scheduleRoundCompleteBanner). Its payload is the *upcoming* round -- the one about to
+    // start, same number getCurrentRound() would return live -- snapshotted at trigger time so it
+    // stays stable through the banner's own display window regardless of whatever completedRounds
+    // does afterward. ----
+    private final TimedBanner<Integer> roundCompleteBanner = new TimedBanner<>(); // payload: upcoming round number
 
     // ---- mini-game rewards recap (server-driven, everyone sees it -- see MINIGAME_ENDED handling
     // and triggerMinigameRewardsBanner). Shown *before* the round-complete recap above, via
-    // scheduleRoundCompleteBanner deferring that one behind this banner's own gate extension.
-    // minigameRewards is a snapshot of MINIGAME_ENDED's own payouts, parsed once at trigger time. ----
-    private volatile long minigameRewardsBannerUntil = 0;
-    private volatile List<MinigameReward> minigameRewards = Collections.emptyList();
+    // scheduleRoundCompleteBanner deferring that one behind this banner's own gate extension. ----
+    private final TimedBanner<List<MinigameReward>> minigameRewardsBanner = new TimedBanner<>();
 
     /** One entry in a MINIGAME_ENDED payload's "payouts" list -- see safeMinigameRewards. */
     public static class MinigameReward
@@ -688,6 +670,114 @@ public class RunePartyPlugin extends Plugin
         }
     }
 
+    /** One cosmetic, client-only announcement banner's timing state -- until/payload/optionally a
+     * chained task. Replaces what used to be 2-5 separate parallel fields per banner (an xUntil
+     * timestamp, an xRsn/payload, sometimes an xStart, sometimes an xTask) -- see
+     * ARCHITECTURE_REVIEW.md's C1 finding. Purely a value holder: this class still owns exactly
+     * when/why each one gets armed (via its own scheduleXBanner/triggerX method) and every public
+     * getter still has its own name/signature, just delegating to one of these instead of a raw
+     * field -- AnnouncementOverlay and every other consumer needs no changes. Real,
+     * server-authoritative state (minigameReadyRsns, coinRushSpawns, trueOrFalseQuestion, etc.) is
+     * untouched -- this is purely the cosmetic-timer half. */
+    private static final class TimedBanner<T>
+    {
+        volatile long start;
+        volatile long until;
+        volatile T payload;
+        volatile ScheduledFuture<?> task;
+
+        void reset()
+        {
+            if (task != null) { task.cancel(false); task = null; }
+            start = 0;
+            until = 0;
+            payload = null;
+        }
+    }
+
+    /** Payload for the item wheel reveal -- see scheduleItemSpinner. */
+    private static final class ItemSpinnerPayload
+    {
+        final String rsn;
+        final String itemKey;
+
+        ItemSpinnerPayload(String rsn, String itemKey)
+        {
+            this.rsn = rsn;
+            this.itemKey = itemKey;
+        }
+    }
+
+    /** Payload for the "already have N items" announcement -- see scheduleItemCapBlockedAnnouncement. */
+    private static final class ItemCapBlockedPayload
+    {
+        final String rsn;
+        final int cap;
+
+        ItemCapBlockedPayload(String rsn, int cap)
+        {
+            this.rsn = rsn;
+            this.cap = cap;
+        }
+    }
+
+    /** Payload for the "You/&lt;rsn&gt; used &lt;item&gt;!" banner -- see scheduleItemUsedAnnouncement. */
+    private static final class ItemUsedAnnouncePayload
+    {
+        final String rsn;
+        final String itemKey;
+
+        ItemUsedAnnouncePayload(String rsn, String itemKey)
+        {
+            this.rsn = rsn;
+            this.itemKey = itemKey;
+        }
+    }
+
+    /** Payload for the Golden Gnome purchase outcome banner ("You got a Golden Gnome!"/"You can't
+     * afford this!") -- see the GOLDEN_GNOME_OFFER_RESOLVED handler. */
+    private static final class GoldenGnomeOutcomePayload
+    {
+        final String outcome; // "purchased" | "declined" | "cant_afford"
+        final String rsn;
+
+        GoldenGnomeOutcomePayload(String outcome, String rsn)
+        {
+            this.outcome = outcome;
+            this.rsn = rsn;
+        }
+    }
+
+    /** Payload for the Golden Gnome count "+1" popup -- see the GOLDEN_GNOME_OFFER_RESOLVED handler. */
+    private static final class GoldenGnomePopupPayload
+    {
+        final String rsn;
+        final int newTotal;
+
+        GoldenGnomePopupPayload(String rsn, int newTotal)
+        {
+            this.rsn = rsn;
+            this.newTotal = newTotal;
+        }
+    }
+
+    /** Payload for one place-reveal step in the end-game ceremony -- see schedulePlaceReveal. */
+    private static final class PlaceRevealPayload
+    {
+        final String rsn;
+        final int rank; // 1-based rank within gameOverStandings
+        final int coins;
+        final int goldenGnomes;
+
+        PlaceRevealPayload(String rsn, int rank, int coins, int goldenGnomes)
+        {
+            this.rsn = rsn;
+            this.rank = rank;
+            this.coins = coins;
+            this.goldenGnomes = goldenGnomes;
+        }
+    }
+
     // ---- end-game awards ceremony (server-driven, everyone sees it -- see GAME_ENDED handling and
     // triggerGameOverSequence). A chain of banners, each scheduled behind the last via
     // scheduleAfterTurnEffects: "GAME OVER!" -> "Now it's time to see the winner..." -> one
@@ -696,41 +786,30 @@ public class RunePartyPlugin extends Plugin
     // gameOverStandings is the final ranking (coins desc, Golden Gnomes tiebreak, same order
     // renderRoundCompleteBanner already uses), snapshotted once at trigger time since no further
     // coin/gnome changes are possible once the server's flipped the game out of ACTIVE. ----
-    private volatile ScheduledFuture<?> gameOverTask;
+    private volatile ScheduledFuture<?> gameOverTask; // one handle threaded through every step below, not owned by any single one
     private volatile List<RosterReducer.RosterEntry> gameOverStandings = Collections.emptyList();
-    private volatile long gameOverBannerUntil = 0;
-    private volatile long winnerIntroBannerUntil = 0;
-    private volatile long placeRevealUntil = 0;
-    private volatile String placeRevealRsn = null;
-    private volatile int placeRevealRank = 0; // 1-based rank within gameOverStandings
-    private volatile int placeRevealCoins = 0;
-    private volatile int placeRevealGoldenGnomes = 0;
-    private volatile long winnerSuspenseUntil = 0;
-    private volatile long winnerRevealUntil = 0;
-    private volatile String winnerRsn = null;
-    private volatile long confettiUntil = 0;
+    private final TimedBanner<Void> gameOverBanner = new TimedBanner<>();
+    private final TimedBanner<Void> winnerIntroBanner = new TimedBanner<>();
+    private final TimedBanner<PlaceRevealPayload> placeReveal = new TimedBanner<>();
+    private final TimedBanner<Void> winnerSuspenseBanner = new TimedBanner<>();
+    private final TimedBanner<String> winnerRevealBanner = new TimedBanner<>(); // payload: winner rsn
+    private final TimedBanner<Void> confettiBanner = new TimedBanner<>();
 
     // ---- Golden Gnome offer (server-driven, everyone sees it -- see GOLDEN_GNOME_OFFERED/
     // GOLDEN_GNOME_OFFER_RESOLVED handling). goldenGnomeOfferRsn is real state (non-null exactly
     // while a response is outstanding, same role pendingRoll plays for a roll) -- it gates whether
     // a YES/NO emote does anything (see isLocalPlayerAwaitingGoldenGnomeResponse) as well as the
     // offer banner, and who AnnouncementOverlay#renderGoldenGnomeOffer addresses "You found..." to
-    // vs "<rsn> found...". goldenGnomeOutcome/goldenGnomeOutcomeRsn/goldenGnomeOutcomeBannerUntil
-    // are purely the follow-up announcement ("You got a Golden Gnome!"/"You can't afford this!"),
-    // cosmetic only -- goldenGnomeOutcomeRsn is what lets that banner address the actual buyer
-    // ("You...") differently from everyone else watching ("<rsn>..."), the same split
-    // goldenGnomeOfferRsn already does for the offer itself. ----
+    // vs "<rsn> found...". goldenGnomeOutcome below is purely the follow-up announcement ("You got
+    // a Golden Gnome!"/"You can't afford this!"), cosmetic only -- its own rsn payload is what lets
+    // that banner address the actual buyer ("You...") differently from everyone else watching
+    // ("<rsn>..."), the same split goldenGnomeOfferRsn already does for the offer itself. ----
     private volatile String goldenGnomeOfferRsn = null;
-    private volatile String goldenGnomeOutcome = null; // "purchased" | "declined" | "cant_afford"
-    private volatile String goldenGnomeOutcomeRsn = null;
-    private volatile long goldenGnomeOutcomeBannerUntil = 0;
+    private final TimedBanner<GoldenGnomeOutcomePayload> goldenGnomeOutcome = new TimedBanner<>();
 
     // ---- Golden Gnome count popup (client-side timer -- see PlayerOverlay#drawGoldenGnomePopup,
     // same "+1" -> running-total shape and timing as the coin popup) ----
-    private volatile String goldenGnomePopupRsn = null;
-    private volatile int goldenGnomePopupNewTotal = 0;
-    private volatile long goldenGnomePopupStart = 0;
-    private volatile long goldenGnomePopupUntil = 0;
+    private final TimedBanner<GoldenGnomePopupPayload> goldenGnomePopup = new TimedBanner<>();
 
     // ---- Golden Gnome relocation choreography (client-side timers -- see TileOverlay#
     // updateGoldenGnomeModels, the only reader). TileReducer already has the *real* tile state the
@@ -969,33 +1048,71 @@ public class RunePartyPlugin extends Plugin
     // authoritative result always arrives back through handleEvent().
     // -------------------------------------------------------------------------
 
+    @FunctionalInterface
+    private interface ApiCall
+    {
+        void run() throws Exception;
+    }
+
+    /** Shared shape for a fire-and-forget request method: submit {@code call} to the executor; on
+     * any exception, log {@code logLabel + " failed"} and, if {@code onFailure} is non-null, run
+     * it with the exception -- a chat message, resetting a "let the next tick retry" flag, or
+     * both (see confirmArrival/rollDice below for callers that need the latter). Every action
+     * method in this section used to hand-write this exact executor.submit/try/catch/log wrapper
+     * around its own apiClient call. */
+    private void submitAction(String logLabel, ApiCall call, Consumer<Exception> onFailure)
+    {
+        executor.submit(() ->
+        {
+            try { call.run(); }
+            catch (Exception e)
+            {
+                log.warn(logLabel + " failed", e);
+                if (onFailure != null) onFailure.accept(e);
+            }
+        });
+    }
+
+    private void submitAction(String logLabel, ApiCall call)
+    {
+        submitAction(logLabel, call, null);
+    }
+
+    /** Same as {@link #submitAction(String, ApiCall, Consumer)}, plus {@code finallyAction}, run
+     * once {@code call} has resolved either way (success or failure) -- createGame/joinGame's own
+     * "refresh the panel regardless of outcome" epilogue, the only two callers that need one. */
+    private void submitAction(String logLabel, ApiCall call, Consumer<Exception> onFailure, Runnable finallyAction)
+    {
+        executor.submit(() ->
+        {
+            try { call.run(); }
+            catch (Exception e)
+            {
+                log.warn(logLabel + " failed", e);
+                if (onFailure != null) onFailure.accept(e);
+            }
+            if (finallyAction != null) finallyAction.run();
+        });
+    }
+
     public void createGame()
     {
         String host = localRsn();
         if (host == null) return;
 
-        executor.submit(() ->
+        submitAction("Create game", () ->
         {
-            try
-            {
-                ApiClient.CreateGameResult result = apiClient.createGame(host);
-                gameId = result.gameId;
-                joinCode = result.joinCode;
-                writeKey = result.writeKey;
-                playerToken = result.playerToken;
-                hostRsn = host;
-                phase = GamePhase.LOBBY;
-                connectEventStream(gameId, host);
-                addChatMessage("Created Rune Party game. Join code: " + result.joinCode);
-                triggerWelcomeBanner();
-            }
-            catch (Exception e)
-            {
-                log.warn("Create game failed", e);
-                addChatMessage("Failed to create game: " + e.getMessage());
-            }
-            refreshPanel();
-        });
+            ApiClient.CreateGameResult result = apiClient.createGame(host);
+            gameId = result.gameId;
+            joinCode = result.joinCode;
+            writeKey = result.writeKey;
+            playerToken = result.playerToken;
+            hostRsn = host;
+            phase = GamePhase.LOBBY;
+            connectEventStream(gameId, host);
+            addChatMessage("Created Rune Party game. Join code: " + result.joinCode);
+            triggerWelcomeBanner();
+        }, e -> addChatMessage("Failed to create game: " + e.getMessage()), this::refreshPanel);
     }
 
     public void joinGame(String code)
@@ -1003,28 +1120,19 @@ public class RunePartyPlugin extends Plugin
         String self = localRsn();
         if (self == null) return;
 
-        executor.submit(() ->
+        submitAction("Join game", () ->
         {
-            try
-            {
-                ApiClient.JoinResult result = apiClient.joinGame(code, self);
-                gameId = result.gameId;
-                hostRsn = result.hostRsn;
-                playerToken = result.playerToken;
-                writeKey = null;
-                joinCode = code;
-                phase = GamePhase.LOBBY;
-                connectEventStream(gameId, self);
-                addChatMessage("Joined Rune Party game hosted by " + result.hostRsn);
-                triggerWelcomeBanner();
-            }
-            catch (Exception e)
-            {
-                log.warn("Join game failed", e);
-                addChatMessage("Failed to join game: " + e.getMessage());
-            }
-            refreshPanel();
-        });
+            ApiClient.JoinResult result = apiClient.joinGame(code, self);
+            gameId = result.gameId;
+            hostRsn = result.hostRsn;
+            playerToken = result.playerToken;
+            writeKey = null;
+            joinCode = code;
+            phase = GamePhase.LOBBY;
+            connectEventStream(gameId, self);
+            addChatMessage("Joined Rune Party game hosted by " + result.hostRsn);
+            triggerWelcomeBanner();
+        }, e -> addChatMessage("Failed to join game: " + e.getMessage()), this::refreshPanel);
     }
 
     /** {@code maxRounds} is turns-per-player -- the host sets it in the panel right before
@@ -1037,15 +1145,8 @@ public class RunePartyPlugin extends Plugin
         final String wk = writeKey;
         if (gid == null || wk == null || maxRounds <= 1) return;
 
-        executor.submit(() ->
-        {
-            try { apiClient.startGame(gid, wk, maxRounds); }
-            catch (Exception e)
-            {
-                log.warn("Start game failed", e);
-                addChatMessage("Failed to start game: " + e.getMessage());
-            }
-        });
+        submitAction("Start game", () -> apiClient.startGame(gid, wk, maxRounds),
+            e -> addChatMessage("Failed to start game: " + e.getMessage()));
     }
 
     /** Host-only: ends the game for everyone, distinct from leaveGame() which only removes the
@@ -1057,15 +1158,8 @@ public class RunePartyPlugin extends Plugin
         final String wk = writeKey;
         if (gid == null || wk == null) return;
 
-        executor.submit(() ->
-        {
-            try { apiClient.endGame(gid, wk); }
-            catch (Exception e)
-            {
-                log.warn("End game failed", e);
-                addChatMessage("Failed to end game: " + e.getMessage());
-            }
-        });
+        submitAction("End game", () -> apiClient.endGame(gid, wk),
+            e -> addChatMessage("Failed to end game: " + e.getMessage()));
     }
 
     public void rollDice()
@@ -1077,15 +1171,10 @@ public class RunePartyPlugin extends Plugin
         if (!self.equalsIgnoreCase(currentTurnRsn) || pendingRoll || rollRequestSubmitted) return;
 
         rollRequestSubmitted = true;
-        executor.submit(() ->
+        submitAction("Roll dice", () -> apiClient.rollDice(gid, self, token), e ->
         {
-            try { apiClient.rollDice(gid, self, token); }
-            catch (Exception e)
-            {
-                rollRequestSubmitted = false; // let a retry (another Spin) through
-                log.warn("Roll dice failed", e);
-                addChatMessage("Failed to roll dice: " + e.getMessage());
-            }
+            rollRequestSubmitted = false; // let a retry (another Spin) through
+            addChatMessage("Failed to roll dice: " + e.getMessage());
         });
     }
 
@@ -1098,28 +1187,23 @@ public class RunePartyPlugin extends Plugin
         final String token = playerToken;
         if (self == null || gid == null || token == null) return;
 
-        executor.submit(() ->
+        submitAction("Confirm arrival", () -> apiClient.confirmArrival(gid, self, token, pos.getX(), pos.getY(), pos.getPlane()), e ->
         {
-            try { apiClient.confirmArrival(gid, self, token, pos.getX(), pos.getY(), pos.getPlane()); }
-            catch (Exception e)
+            addChatMessage("Failed to confirm arrival: " + e.getMessage());
+            // A definitive 4xx (e.g. 409 "No roll is pending") means the server has already
+            // looked at this exact claim and rejected it -- arrivalSubmitted staying true
+            // deliberately blocks checkPendingArrival from resubmitting the identical claim
+            // every tick forever, which is what used to happen here (this exact call, this
+            // exact 409, once a game tick, spamming the log until something else eventually
+            // changed pendingRoll). The client's own pendingRoll is corrected the normal way
+            // instead -- by the next real TURN_STARTED or DICE_ROLLED event (see handleEvent),
+            // both of which also reset arrivalSubmitted, resyncing to the server's actual
+            // state rather than blindly retrying against it. A genuine transient failure
+            // (a real network-level IOException, or a 5xx server error) is different -- the
+            // claim itself was never actually rejected, so retrying it is still worth doing.
+            if (!(e instanceof ApiClient.ApiHttpException) || ((ApiClient.ApiHttpException) e).code >= 500)
             {
-                log.warn("Confirm arrival failed", e);
-                addChatMessage("Failed to confirm arrival: " + e.getMessage());
-                // A definitive 4xx (e.g. 409 "No roll is pending") means the server has already
-                // looked at this exact claim and rejected it -- arrivalSubmitted staying true
-                // deliberately blocks checkPendingArrival from resubmitting the identical claim
-                // every tick forever, which is what used to happen here (this exact call, this
-                // exact 409, once a game tick, spamming the log until something else eventually
-                // changed pendingRoll). The client's own pendingRoll is corrected the normal way
-                // instead -- by the next real TURN_STARTED or DICE_ROLLED event (see handleEvent),
-                // both of which also reset arrivalSubmitted, resyncing to the server's actual
-                // state rather than blindly retrying against it. A genuine transient failure
-                // (a real network-level IOException, or a 5xx server error) is different -- the
-                // claim itself was never actually rejected, so retrying it is still worth doing.
-                if (!(e instanceof ApiClient.ApiHttpException) || ((ApiClient.ApiHttpException) e).code >= 500)
-                {
-                    arrivalSubmitted = false; // let the next tick retry
-                }
+                arrivalSubmitted = false; // let the next tick retry
             }
         });
     }
@@ -1158,15 +1242,8 @@ public class RunePartyPlugin extends Plugin
         final String token = playerToken;
         if (self == null || gid == null || token == null) { coinRushCollectSubmitted.remove(spawnId); return; }
 
-        executor.submit(() ->
-        {
-            try { apiClient.collectCoinRushCoin(gid, self, token, spawnId, pos.getX(), pos.getY(), pos.getPlane()); }
-            catch (Exception e)
-            {
-                log.warn("Collect Coin Rush coin failed", e);
-                coinRushCollectSubmitted.remove(spawnId);
-            }
-        });
+        submitAction("Collect Coin Rush coin", () -> apiClient.collectCoinRushCoin(gid, self, token, spawnId, pos.getX(), pos.getY(), pos.getPlane()),
+            e -> coinRushCollectSubmitted.remove(spawnId));
     }
 
     /** Reports the local player standing on the START tile during the pre-game gathering window
@@ -1180,15 +1257,10 @@ public class RunePartyPlugin extends Plugin
         final String token = playerToken;
         if (self == null || gid == null || token == null) return;
 
-        executor.submit(() ->
+        submitAction("Confirm start", () -> apiClient.confirmStart(gid, self, token, pos.getX(), pos.getY(), pos.getPlane()), e ->
         {
-            try { apiClient.confirmStart(gid, self, token, pos.getX(), pos.getY(), pos.getPlane()); }
-            catch (Exception e)
-            {
-                log.warn("Confirm start failed", e);
-                addChatMessage("Failed to confirm ready: " + e.getMessage());
-                startConfirmSubmitted = false; // let the next tick retry
-            }
+            addChatMessage("Failed to confirm ready: " + e.getMessage());
+            startConfirmSubmitted = false; // let the next tick retry
         });
     }
 
@@ -1204,15 +1276,8 @@ public class RunePartyPlugin extends Plugin
         final String token = playerToken;
         if (self == null || gid == null || token == null) return;
 
-        executor.submit(() ->
-        {
-            try { apiClient.respondGoldenGnomeOffer(gid, self, token, accept); }
-            catch (Exception e)
-            {
-                log.warn("Respond to Golden Gnome offer failed", e);
-                addChatMessage("Failed to respond to the Golden Gnome offer: " + e.getMessage());
-            }
-        });
+        submitAction("Respond to Golden Gnome offer", () -> apiClient.respondGoldenGnomeOffer(gid, self, token, accept),
+            e -> addChatMessage("Failed to respond to the Golden Gnome offer: " + e.getMessage()));
     }
 
     /** Reports the local player's YES emote during the mini-game ready-check -- see
@@ -1226,15 +1291,8 @@ public class RunePartyPlugin extends Plugin
         final String token = playerToken;
         if (self == null || gid == null || token == null) return;
 
-        executor.submit(() ->
-        {
-            try { apiClient.confirmMinigameReady(gid, self, token); }
-            catch (Exception e)
-            {
-                log.warn("Confirm mini-game ready failed", e);
-                addChatMessage("Failed to confirm mini-game ready: " + e.getMessage());
-            }
-        });
+        submitAction("Confirm mini-game ready", () -> apiClient.confirmMinigameReady(gid, self, token),
+            e -> addChatMessage("Failed to confirm mini-game ready: " + e.getMessage()));
     }
 
     /** Answers the current True or False round -- called from onAnimationChanged once the local
@@ -1252,14 +1310,7 @@ public class RunePartyPlugin extends Plugin
         final String token = playerToken;
         if (self == null || gid == null || token == null) return;
 
-        executor.submit(() ->
-        {
-            try { apiClient.answerTrueOrFalse(gid, self, token, answer); }
-            catch (Exception e)
-            {
-                log.warn("Answer True or False failed", e);
-            }
-        });
+        submitAction("Answer True or False", () -> apiClient.answerTrueOrFalse(gid, self, token, answer));
     }
 
     public void submitMinigameResult(int score)
@@ -1269,15 +1320,8 @@ public class RunePartyPlugin extends Plugin
         final String token = playerToken;
         if (self == null || gid == null || token == null) return;
 
-        executor.submit(() ->
-        {
-            try { apiClient.submitMinigameResult(gid, self, token, score); }
-            catch (Exception e)
-            {
-                log.warn("Submit minigame result failed", e);
-                addChatMessage("Failed to submit mini-game result: " + e.getMessage());
-            }
-        });
+        submitAction("Submit minigame result", () -> apiClient.submitMinigameResult(gid, self, token, score),
+            e -> addChatMessage("Failed to submit mini-game result: " + e.getMessage()));
     }
 
     /** Spends one of the local player's held items -- called from RunePartyPanel's item-use
@@ -1290,15 +1334,8 @@ public class RunePartyPlugin extends Plugin
         final String token = playerToken;
         if (self == null || gid == null || token == null || itemKey == null) return;
 
-        executor.submit(() ->
-        {
-            try { apiClient.useItem(gid, self, token, itemKey); }
-            catch (Exception e)
-            {
-                log.warn("Use item failed", e);
-                addChatMessage("Failed to use item: " + e.getMessage());
-            }
-        });
+        submitAction("Use item", () -> apiClient.useItem(gid, self, token, itemKey),
+            e -> addChatMessage("Failed to use item: " + e.getMessage()));
     }
 
     /** Arms a requires_placement item (see Item#requiresPlacement) -- called from RunePartyPanel's
@@ -1362,15 +1399,8 @@ public class RunePartyPlugin extends Plugin
         refreshPanel();
         if (self == null || gid == null || token == null) return;
 
-        executor.submit(() ->
-        {
-            try { apiClient.placeCoinTrap(gid, self, token, point.getX(), point.getY(), point.getPlane()); }
-            catch (Exception e)
-            {
-                log.warn("Place Coin Trap failed", e);
-                addChatMessage("Failed to place Coin Trap: " + e.getMessage());
-            }
-        });
+        submitAction("Place Coin Trap", () -> apiClient.placeCoinTrap(gid, self, token, point.getX(), point.getY(), point.getPlane()),
+            e -> addChatMessage("Failed to place Coin Trap: " + e.getMessage()));
     }
 
     public void leaveGame()
@@ -1380,11 +1410,7 @@ public class RunePartyPlugin extends Plugin
         final String token = playerToken;
         if (self == null || gid == null || token == null) { resetState(); return; }
 
-        executor.submit(() ->
-        {
-            try { apiClient.leaveGame(gid, self, token); }
-            catch (Exception e) { log.warn("Leave game failed", e); }
-        });
+        submitAction("Leave game", () -> apiClient.leaveGame(gid, self, token));
         resetState();
     }
 
@@ -1406,15 +1432,8 @@ public class RunePartyPlugin extends Plugin
 
         final String gid = gameId;
         final String wk = writeKey;
-        executor.submit(() ->
-        {
-            try { apiClient.assignRole(gid, wk, playerRsn, role); }
-            catch (Exception e)
-            {
-                log.warn("Assign role failed", e);
-                addChatMessage("Failed to update " + playerRsn + "'s role: " + e.getMessage());
-            }
-        });
+        submitAction("Assign role", () -> apiClient.assignRole(gid, wk, playerRsn, role),
+            e -> addChatMessage("Failed to update " + playerRsn + "'s role: " + e.getMessage()));
     }
 
     /** Host-only kick, wired to the roster panel's "Remove Player" right-click entry
@@ -1427,15 +1446,8 @@ public class RunePartyPlugin extends Plugin
 
         final String gid = gameId;
         final String wk = writeKey;
-        executor.submit(() ->
-        {
-            try { apiClient.removePlayer(gid, wk, playerRsn); }
-            catch (Exception e)
-            {
-                log.warn("Remove player failed", e);
-                addChatMessage("Failed to remove " + playerRsn + ": " + e.getMessage());
-            }
-        });
+        submitAction("Remove player", () -> apiClient.removePlayer(gid, wk, playerRsn),
+            e -> addChatMessage("Failed to remove " + playerRsn + ": " + e.getMessage()));
     }
 
     // -------------------------------------------------------------------------
@@ -1485,11 +1497,7 @@ public class RunePartyPlugin extends Plugin
             pointSpecs.add(new ApiClient.PointSpec(wp.getX(), wp.getY(), wp.getPlane(), null));
         }
 
-        executor.submit(() ->
-        {
-            try { apiClient.unmarkTiles(gid, wk, pointSpecs); }
-            catch (Exception e) { log.warn("Clear course failed", e); }
-        });
+        submitAction("Clear course", () -> apiClient.unmarkTiles(gid, wk, pointSpecs));
     }
 
     private void addPresetMenuEntries()
@@ -1573,11 +1581,7 @@ public class RunePartyPlugin extends Plugin
 
         final String gid = gameId;
         final String wk = writeKey;
-        executor.submit(() ->
-        {
-            try { apiClient.markTiles(gid, wk, tileSpecs); }
-            catch (Exception e) { log.warn("Commit course failed", e); }
-        });
+        submitAction("Commit course", () -> apiClient.markTiles(gid, wk, tileSpecs));
     }
 
     // -------------------------------------------------------------------------
@@ -1977,8 +1981,9 @@ public class RunePartyPlugin extends Plugin
 
         Deque<CoinPopup> queue = coinPopups.computeIfAbsent(key, k -> new ConcurrentLinkedDeque<>());
         CoinPopup tailPopup = queue.peekLast();
-        boolean samePlayerGnomePopupShowing = rsn.equalsIgnoreCase(goldenGnomePopupRsn) && goldenGnomePopupUntil > now;
-        long start = samePlayerGnomePopupShowing ? goldenGnomePopupUntil
+        String samePlayerGnomePopupRsn = goldenGnomePopup.payload != null ? goldenGnomePopup.payload.rsn : null;
+        boolean samePlayerGnomePopupShowing = rsn.equalsIgnoreCase(samePlayerGnomePopupRsn) && goldenGnomePopup.until > now;
+        long start = samePlayerGnomePopupShowing ? goldenGnomePopup.until
             : (tailPopup != null && tailPopup.until > now) ? tailPopup.until
             : now;
         long until = start + durationMs;
@@ -2031,10 +2036,10 @@ public class RunePartyPlugin extends Plugin
      * never appears while e.g. the previous mover's coin popup is still settling. */
     private void scheduleTurnAnnouncement(String rsn)
     {
-        turnAnnounceTask = scheduleAfterTurnEffects(turnAnnounceTask, TURN_ANNOUNCE_DURATION_MS, () ->
+        turnAnnounce.task = scheduleAfterTurnEffects(turnAnnounce.task, TURN_ANNOUNCE_DURATION_MS, () ->
         {
-            turnAnnounceRsn = rsn;
-            turnAnnounceUntil = System.currentTimeMillis() + TURN_ANNOUNCE_DURATION_MS;
+            turnAnnounce.payload = rsn;
+            turnAnnounce.until = System.currentTimeMillis() + TURN_ANNOUNCE_DURATION_MS;
         });
     }
 
@@ -2050,7 +2055,7 @@ public class RunePartyPlugin extends Plugin
      * the instant the wheel takes over. */
     private void scheduleMinigameBanner()
     {
-        minigameBannerTask = scheduleAfterTurnEffects(minigameBannerTask, MINIGAME_BANNER_DURATION_MS, () ->
+        minigameBanner.task = scheduleAfterTurnEffects(minigameBanner.task, MINIGAME_BANNER_DURATION_MS, () ->
         {
             long now = System.currentTimeMillis();
             // Rendered for MINIGAME_BANNER_DURATION_MS + MINIGAME_SPINNER_DURATION_MS -- longer
@@ -2061,7 +2066,7 @@ public class RunePartyPlugin extends Plugin
             // the shorter MINIGAME_BANNER_DURATION_MS (belt-and-suspenders against scheduler
             // jitter, same as ever) -- extending it to match would also push back the wheel's own
             // start, which isn't the goal here.
-            minigameBannerUntil = now + MINIGAME_BANNER_DURATION_MS + MINIGAME_SPINNER_DURATION_MS;
+            minigameBanner.until = now + MINIGAME_BANNER_DURATION_MS + MINIGAME_SPINNER_DURATION_MS;
             extendTurnEffectGate(now + MINIGAME_BANNER_DURATION_MS);
         });
     }
@@ -2091,13 +2096,12 @@ public class RunePartyPlugin extends Plugin
      * an item grant is a one-off event with nothing else keeping track of it in between. */
     private void scheduleItemSpinner(String rsn, String itemKey)
     {
-        itemSpinnerTask = scheduleAfterTurnEffects(itemSpinnerTask, ITEM_SPINNER_DURATION_MS, () ->
+        itemSpinner.task = scheduleAfterTurnEffects(itemSpinner.task, ITEM_SPINNER_DURATION_MS, () ->
         {
-            itemGrantRsn = rsn;
-            itemGrantKey = itemKey;
-            itemSpinnerStart = System.currentTimeMillis();
-            itemSpinnerUntil = itemSpinnerStart + ITEM_SPINNER_DURATION_MS;
-            extendTurnEffectGate(itemSpinnerUntil);
+            itemSpinner.payload = new ItemSpinnerPayload(rsn, itemKey);
+            itemSpinner.start = System.currentTimeMillis();
+            itemSpinner.until = itemSpinner.start + ITEM_SPINNER_DURATION_MS;
+            extendTurnEffectGate(itemSpinner.until);
         });
     }
 
@@ -2107,12 +2111,11 @@ public class RunePartyPlugin extends Plugin
      * turn-effect visual is already showing the same way the item wheel itself would have. */
     private void scheduleItemCapBlockedAnnouncement(String rsn, int cap)
     {
-        itemCapBlockedTask = scheduleAfterTurnEffects(itemCapBlockedTask, ITEM_CAP_BLOCKED_DURATION_MS, () ->
+        itemCapBlocked.task = scheduleAfterTurnEffects(itemCapBlocked.task, ITEM_CAP_BLOCKED_DURATION_MS, () ->
         {
-            itemCapBlockedRsn = rsn;
-            itemCapBlockedCap = cap;
-            itemCapBlockedUntil = System.currentTimeMillis() + ITEM_CAP_BLOCKED_DURATION_MS;
-            extendTurnEffectGate(itemCapBlockedUntil);
+            itemCapBlocked.payload = new ItemCapBlockedPayload(rsn, cap);
+            itemCapBlocked.until = System.currentTimeMillis() + ITEM_CAP_BLOCKED_DURATION_MS;
+            extendTurnEffectGate(itemCapBlocked.until);
         });
     }
 
@@ -2122,12 +2125,11 @@ public class RunePartyPlugin extends Plugin
      * already showing, same as scheduleItemCapBlockedAnnouncement. */
     private void scheduleItemUsedAnnouncement(String rsn, String itemKey)
     {
-        itemUsedAnnounceTask = scheduleAfterTurnEffects(itemUsedAnnounceTask, ITEM_USED_ANNOUNCE_DURATION_MS, () ->
+        itemUsedAnnounce.task = scheduleAfterTurnEffects(itemUsedAnnounce.task, ITEM_USED_ANNOUNCE_DURATION_MS, () ->
         {
-            itemUsedAnnounceRsn = rsn;
-            itemUsedAnnounceItemKey = itemKey;
-            itemUsedAnnounceUntil = System.currentTimeMillis() + ITEM_USED_ANNOUNCE_DURATION_MS;
-            extendTurnEffectGate(itemUsedAnnounceUntil);
+            itemUsedAnnounce.payload = new ItemUsedAnnouncePayload(rsn, itemKey);
+            itemUsedAnnounce.until = System.currentTimeMillis() + ITEM_USED_ANNOUNCE_DURATION_MS;
+            extendTurnEffectGate(itemUsedAnnounce.until);
         });
     }
 
@@ -2138,11 +2140,11 @@ public class RunePartyPlugin extends Plugin
      * handler), no banner of their own. */
     private void scheduleCoinTrapTriggerAnnouncement(String victimRsn)
     {
-        coinTrapAnnounceTask = scheduleAfterTurnEffects(coinTrapAnnounceTask, COIN_TRAP_ANNOUNCE_DURATION_MS, () ->
+        coinTrapAnnounce.task = scheduleAfterTurnEffects(coinTrapAnnounce.task, COIN_TRAP_ANNOUNCE_DURATION_MS, () ->
         {
-            coinTrapAnnounceRsn = victimRsn;
-            coinTrapAnnounceUntil = System.currentTimeMillis() + COIN_TRAP_ANNOUNCE_DURATION_MS;
-            extendTurnEffectGate(coinTrapAnnounceUntil);
+            coinTrapAnnounce.payload = victimRsn;
+            coinTrapAnnounce.until = System.currentTimeMillis() + COIN_TRAP_ANNOUNCE_DURATION_MS;
+            extendTurnEffectGate(coinTrapAnnounce.until);
         });
     }
 
@@ -2153,9 +2155,9 @@ public class RunePartyPlugin extends Plugin
      * TURN_STARTED banner wait behind this one instead of overlapping it. */
     private void triggerMinigameRewardsBanner(JsonObject payload)
     {
-        minigameRewards = safeMinigameRewards(payload, "payouts");
-        minigameRewardsBannerUntil = System.currentTimeMillis() + MINIGAME_REWARDS_BANNER_DURATION_MS;
-        extendTurnEffectGate(minigameRewardsBannerUntil);
+        minigameRewardsBanner.payload = safeMinigameRewards(payload, "payouts");
+        minigameRewardsBanner.until = System.currentTimeMillis() + MINIGAME_REWARDS_BANNER_DURATION_MS;
+        extendTurnEffectGate(minigameRewardsBanner.until);
     }
 
     /** Schedules AnnouncementOverlay's post-round "ROUND x" / "Current Standings" recap via
@@ -2169,11 +2171,11 @@ public class RunePartyPlugin extends Plugin
      * those same standings itself right after, and this plain recap would spoil that. */
     private void scheduleRoundCompleteBanner()
     {
-        roundCompleteBannerTask = scheduleAfterTurnEffects(roundCompleteBannerTask, ROUND_COMPLETE_BANNER_DURATION_MS, () ->
+        roundCompleteBanner.task = scheduleAfterTurnEffects(roundCompleteBanner.task, ROUND_COMPLETE_BANNER_DURATION_MS, () ->
         {
-            roundCompleteRoundNumber = getCurrentRound();
-            roundCompleteBannerUntil = System.currentTimeMillis() + ROUND_COMPLETE_BANNER_DURATION_MS;
-            extendTurnEffectGate(roundCompleteBannerUntil); // belt-and-suspenders, see scheduleMinigameBanner's identical comment
+            roundCompleteBanner.payload = getCurrentRound();
+            roundCompleteBanner.until = System.currentTimeMillis() + ROUND_COMPLETE_BANNER_DURATION_MS;
+            extendTurnEffectGate(roundCompleteBanner.until); // belt-and-suspenders, see scheduleMinigameBanner's identical comment
         });
     }
 
@@ -2211,8 +2213,8 @@ public class RunePartyPlugin extends Plugin
 
         gameOverTask = scheduleAfterTurnEffects(gameOverTask, GAME_OVER_TITLE_DURATION_MS, () ->
         {
-            gameOverBannerUntil = System.currentTimeMillis() + GAME_OVER_TITLE_DURATION_MS;
-            extendTurnEffectGate(gameOverBannerUntil);
+            gameOverBanner.until = System.currentTimeMillis() + GAME_OVER_TITLE_DURATION_MS;
+            extendTurnEffectGate(gameOverBanner.until);
             scheduleWinnerIntro();
         });
     }
@@ -2221,8 +2223,8 @@ public class RunePartyPlugin extends Plugin
     {
         gameOverTask = scheduleAfterTurnEffects(gameOverTask, WINNER_INTRO_DURATION_MS, () ->
         {
-            winnerIntroBannerUntil = System.currentTimeMillis() + WINNER_INTRO_DURATION_MS;
-            extendTurnEffectGate(winnerIntroBannerUntil);
+            winnerIntroBanner.until = System.currentTimeMillis() + WINNER_INTRO_DURATION_MS;
+            extendTurnEffectGate(winnerIntroBanner.until);
 
             // Worst to best, stopping once only the top two remain -- e.g. a 4-player game reveals
             // 4th then 3rd, leaving 1st/2nd for the "And the winner is..." showdown. A 2-player (or
@@ -2245,12 +2247,9 @@ public class RunePartyPlugin extends Plugin
         gameOverTask = scheduleAfterTurnEffects(gameOverTask, PLACE_REVEAL_DURATION_MS, () ->
         {
             RosterReducer.RosterEntry entry = revealOrder.get(index);
-            placeRevealRsn = entry.rsn;
-            placeRevealRank = gameOverStandings.indexOf(entry) + 1;
-            placeRevealCoins = entry.coins;
-            placeRevealGoldenGnomes = entry.goldenGnomeCount;
-            placeRevealUntil = System.currentTimeMillis() + PLACE_REVEAL_DURATION_MS;
-            extendTurnEffectGate(placeRevealUntil);
+            placeReveal.payload = new PlaceRevealPayload(entry.rsn, gameOverStandings.indexOf(entry) + 1, entry.coins, entry.goldenGnomeCount);
+            placeReveal.until = System.currentTimeMillis() + PLACE_REVEAL_DURATION_MS;
+            extendTurnEffectGate(placeReveal.until);
             schedulePlaceReveal(revealOrder, index + 1);
         });
     }
@@ -2259,14 +2258,14 @@ public class RunePartyPlugin extends Plugin
     {
         gameOverTask = scheduleAfterTurnEffects(gameOverTask, WINNER_SUSPENSE_DURATION_MS, () ->
         {
-            winnerSuspenseUntil = System.currentTimeMillis() + WINNER_SUSPENSE_DURATION_MS;
-            extendTurnEffectGate(winnerSuspenseUntil);
+            winnerSuspenseBanner.until = System.currentTimeMillis() + WINNER_SUSPENSE_DURATION_MS;
+            extendTurnEffectGate(winnerSuspenseBanner.until);
             scheduleWinnerReveal();
         });
     }
 
     /** The ceremony's final step -- the winner's own name, held alongside ConfettiOverlay's burst
-     * (confettiUntil, shorter than WINNER_REVEAL_DURATION_MS so the confetti finishes settling
+     * (confettiBanner, shorter than WINNER_REVEAL_DURATION_MS so the confetti finishes settling
      * while the name's still up rather than both cutting off together). gameOverStandings is sorted
      * winner-first, so index 0 is always the winner. */
     private void scheduleWinnerReveal()
@@ -2274,10 +2273,10 @@ public class RunePartyPlugin extends Plugin
         gameOverTask = scheduleAfterTurnEffects(gameOverTask, WINNER_REVEAL_DURATION_MS, () ->
         {
             RosterReducer.RosterEntry winner = gameOverStandings.get(0);
-            winnerRsn = winner.rsn;
+            winnerRevealBanner.payload = winner.rsn;
             long now = System.currentTimeMillis();
-            winnerRevealUntil = now + WINNER_REVEAL_DURATION_MS;
-            confettiUntil = now + CONFETTI_DURATION_MS;
+            winnerRevealBanner.until = now + WINNER_REVEAL_DURATION_MS;
+            confettiBanner.until = now + CONFETTI_DURATION_MS;
             addChatMessage(winner.rsn + " wins Rune Party!");
         });
     }
@@ -2288,7 +2287,7 @@ public class RunePartyPlugin extends Plugin
      * the lobby when someone else joins). */
     private void triggerWelcomeBanner()
     {
-        welcomeBannerUntil = System.currentTimeMillis() + WELCOME_BANNER_DURATION_MS;
+        welcomeBanner.until = System.currentTimeMillis() + WELCOME_BANNER_DURATION_MS;
     }
 
     /** Silently replays a game's full event history via a one-time REST fetch before opening the
@@ -2357,7 +2356,7 @@ public class RunePartyPlugin extends Plugin
                 if (mr != null) maxRounds = mr;
                 if (!catchingUp)
                 {
-                    gameStartBannerUntil = System.currentTimeMillis() + GAME_START_BANNER_DURATION_MS;
+                    gameStartBanner.until = System.currentTimeMillis() + GAME_START_BANNER_DURATION_MS;
                 }
                 break;
             }
@@ -2478,10 +2477,9 @@ public class RunePartyPlugin extends Plugin
                 // needs to arm anything here.
                 if (!catchingUp && "cant_afford".equals(safeStr(e.payload, "outcome")))
                 {
-                    goldenGnomeOutcome = "cant_afford";
-                    goldenGnomeOutcomeRsn = safeStr(e.payload, "player");
-                    goldenGnomeOutcomeBannerUntil = System.currentTimeMillis() + GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
-                    extendTurnEffectGate(goldenGnomeOutcomeBannerUntil);
+                    goldenGnomeOutcome.payload = new GoldenGnomeOutcomePayload("cant_afford", safeStr(e.payload, "player"));
+                    goldenGnomeOutcome.until = System.currentTimeMillis() + GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
+                    extendTurnEffectGate(goldenGnomeOutcome.until);
                     addChatMessage("Can't afford the Golden Gnome!");
                 }
                 break;
@@ -2497,19 +2495,18 @@ public class RunePartyPlugin extends Plugin
                 // total the popup needs.
                 if (!catchingUp)
                 {
-                    goldenGnomePopupRsn = safeStr(e.payload, "player");
+                    String rsn = safeStr(e.payload, "player");
                     Integer total = safeInt(e.payload, "goldenGnomeCount");
-                    goldenGnomePopupNewTotal = total != null ? total : 0;
-                    goldenGnomePopupStart = System.currentTimeMillis();
-                    goldenGnomePopupUntil = goldenGnomePopupStart + COIN_POPUP_DURATION_MS;
-                    extendTurnEffectGate(goldenGnomePopupUntil);
+                    goldenGnomePopup.payload = new GoldenGnomePopupPayload(rsn, total != null ? total : 0);
+                    goldenGnomePopup.start = System.currentTimeMillis();
+                    goldenGnomePopup.until = goldenGnomePopup.start + COIN_POPUP_DURATION_MS;
+                    extendTurnEffectGate(goldenGnomePopup.until);
 
-                    goldenGnomeOutcome = "purchased";
-                    goldenGnomeOutcomeRsn = goldenGnomePopupRsn; // same event, same player
-                    goldenGnomeOutcomeBannerUntil = System.currentTimeMillis() + GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
-                    extendTurnEffectGate(goldenGnomeOutcomeBannerUntil);
+                    goldenGnomeOutcome.payload = new GoldenGnomeOutcomePayload("purchased", rsn); // same event, same player
+                    goldenGnomeOutcome.until = System.currentTimeMillis() + GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
+                    extendTurnEffectGate(goldenGnomeOutcome.until);
 
-                    addChatMessage(goldenGnomePopupRsn + " got a Golden Gnome!");
+                    addChatMessage(rsn + " got a Golden Gnome!");
                 }
                 break;
             }
@@ -3092,14 +3089,14 @@ public class RunePartyPlugin extends Plugin
         // identical reasoning in the sibling Gnomeball repo).
         if (boardViewActive) clientThread.invoke(this::restoreCameraFromBoardView);
         if (eventSocket != null) eventSocket.stop();
-        if (turnAnnounceTask != null) { turnAnnounceTask.cancel(false); turnAnnounceTask = null; }
-        if (minigameBannerTask != null) { minigameBannerTask.cancel(false); minigameBannerTask = null; }
+        turnAnnounce.reset();
+        minigameBanner.reset();
         if (minigameSpinnerTask != null) { minigameSpinnerTask.cancel(false); minigameSpinnerTask = null; }
-        if (itemSpinnerTask != null) { itemSpinnerTask.cancel(false); itemSpinnerTask = null; }
-        if (itemCapBlockedTask != null) { itemCapBlockedTask.cancel(false); itemCapBlockedTask = null; }
-        if (itemUsedAnnounceTask != null) { itemUsedAnnounceTask.cancel(false); itemUsedAnnounceTask = null; }
-        if (coinTrapAnnounceTask != null) { coinTrapAnnounceTask.cancel(false); coinTrapAnnounceTask = null; }
-        if (roundCompleteBannerTask != null) { roundCompleteBannerTask.cancel(false); roundCompleteBannerTask = null; }
+        itemSpinner.reset();
+        itemCapBlocked.reset();
+        itemUsedAnnounce.reset();
+        coinTrapAnnounce.reset();
+        roundCompleteBanner.reset();
         if (gameOverTask != null) { gameOverTask.cancel(false); gameOverTask = null; }
         turnEffectGateUntil = 0;
         gameId = null; writeKey = null; playerToken = null; joinCode = null; hostRsn = null;
@@ -3108,16 +3105,13 @@ public class RunePartyPlugin extends Plugin
         currentTurnRsn = null; lastDiceRoll = null; pendingRoll = false; rollRequestSubmitted = false;
         awaitingSpinFinish = false;
         awaitingGnomeYesFinish = false; awaitingGnomeNoFinish = false; awaitingMinigameReadyFinish = false;
+        awaitingTrueOrFalseYesFinish = false; awaitingTrueOrFalseNoFinish = false;
         pendingTargetIndices = Collections.emptyList();
         arrivalSubmitted = false; itemUsedThisTurn = false; standingOnTrackedPositionCached = false;
         itemPlacementKey = null;
         minigameActive = false; minigameInstructions = null; minigameKey = null;
         minigameDisplayName = null;
         minigameSpinnerStart = 0; minigameSpinnerUntil = 0; minigameSpinnerSkippedForClient = false;
-        itemSpinnerStart = 0; itemSpinnerUntil = 0; itemGrantRsn = null; itemGrantKey = null;
-        itemCapBlockedUntil = 0; itemCapBlockedRsn = null; itemCapBlockedCap = 0;
-        itemUsedAnnounceUntil = 0; itemUsedAnnounceRsn = null; itemUsedAnnounceItemKey = null;
-        coinTrapAnnounceUntil = 0; coinTrapAnnounceRsn = null;
         coinTrapTriggerPoint = null; coinTrapTriggerUntil = 0;
         minigameReadyRsns.clear();
         minigameCountdownStarted = false; minigameCountdownSkippedForClient = false; minigameCountdownBannerUntil = 0;
@@ -3127,17 +3121,15 @@ public class RunePartyPlugin extends Plugin
         trueOrFalseLastCorrectAnswer = null; trueOrFalseLastResults = Collections.emptyList(); trueOrFalseRevealUntil = 0;
         maxRounds = 0; completedRounds = 0;
         playerPositions.clear();
-        turnAnnounceRsn = null; turnAnnounceUntil = 0; startConfirmSubmitted = false;
-        welcomeBannerUntil = 0;
-        minigameBannerUntil = 0;
-        gameStartBannerUntil = 0;
-        roundCompleteBannerUntil = 0; roundCompleteRoundNumber = 0;
-        minigameRewardsBannerUntil = 0; minigameRewards = Collections.emptyList();
-        gameOverStandings = Collections.emptyList(); gameOverBannerUntil = 0; winnerIntroBannerUntil = 0;
-        placeRevealUntil = 0; placeRevealRsn = null; placeRevealRank = 0; placeRevealCoins = 0; placeRevealGoldenGnomes = 0;
-        winnerSuspenseUntil = 0; winnerRevealUntil = 0; winnerRsn = null; confettiUntil = 0;
-        goldenGnomeOfferRsn = null; goldenGnomeOutcome = null; goldenGnomeOutcomeRsn = null; goldenGnomeOutcomeBannerUntil = 0;
-        goldenGnomePopupRsn = null; goldenGnomePopupNewTotal = 0; goldenGnomePopupStart = 0; goldenGnomePopupUntil = 0;
+        startConfirmSubmitted = false;
+        welcomeBanner.reset();
+        gameStartBanner.reset();
+        minigameRewardsBanner.reset();
+        gameOverStandings = Collections.emptyList(); gameOverBanner.reset(); winnerIntroBanner.reset();
+        placeReveal.reset();
+        winnerSuspenseBanner.reset(); winnerRevealBanner.reset(); confettiBanner.reset();
+        goldenGnomeOfferRsn = null; goldenGnomeOutcome.reset();
+        goldenGnomePopup.reset();
         goldenGnomeMoveOldPoint = null; goldenGnomeMoveHideOldAt = 0;
         goldenGnomeMoveNewPoint = null; goldenGnomeMoveShowNewAt = 0;
         coinPopups.clear();
@@ -3182,18 +3174,18 @@ public class RunePartyPlugin extends Plugin
     public long getMinigameSpinnerStart() { return minigameSpinnerStart; }
     public long getMinigameSpinnerUntil() { return minigameSpinnerUntil; }
     public boolean isMinigameSpinnerSkippedForClient() { return minigameSpinnerSkippedForClient; }
-    public long getItemSpinnerStart() { return itemSpinnerStart; }
-    public long getItemSpinnerUntil() { return itemSpinnerUntil; }
-    public String getItemGrantRsn() { return itemGrantRsn; }
-    public String getItemGrantKey() { return itemGrantKey; }
-    public long getItemCapBlockedUntil() { return itemCapBlockedUntil; }
-    public String getItemCapBlockedRsn() { return itemCapBlockedRsn; }
-    public int getItemCapBlockedCap() { return itemCapBlockedCap; }
-    public long getItemUsedAnnounceUntil() { return itemUsedAnnounceUntil; }
-    public String getItemUsedAnnounceRsn() { return itemUsedAnnounceRsn; }
-    public String getItemUsedAnnounceItemKey() { return itemUsedAnnounceItemKey; }
-    public long getCoinTrapAnnounceUntil() { return coinTrapAnnounceUntil; }
-    public String getCoinTrapAnnounceRsn() { return coinTrapAnnounceRsn; }
+    public long getItemSpinnerStart() { return itemSpinner.start; }
+    public long getItemSpinnerUntil() { return itemSpinner.until; }
+    public String getItemGrantRsn() { return itemSpinner.payload != null ? itemSpinner.payload.rsn : null; }
+    public String getItemGrantKey() { return itemSpinner.payload != null ? itemSpinner.payload.itemKey : null; }
+    public long getItemCapBlockedUntil() { return itemCapBlocked.until; }
+    public String getItemCapBlockedRsn() { return itemCapBlocked.payload != null ? itemCapBlocked.payload.rsn : null; }
+    public int getItemCapBlockedCap() { return itemCapBlocked.payload != null ? itemCapBlocked.payload.cap : 0; }
+    public long getItemUsedAnnounceUntil() { return itemUsedAnnounce.until; }
+    public String getItemUsedAnnounceRsn() { return itemUsedAnnounce.payload != null ? itemUsedAnnounce.payload.rsn : null; }
+    public String getItemUsedAnnounceItemKey() { return itemUsedAnnounce.payload != null ? itemUsedAnnounce.payload.itemKey : null; }
+    public long getCoinTrapAnnounceUntil() { return coinTrapAnnounce.until; }
+    public String getCoinTrapAnnounceRsn() { return coinTrapAnnounce.payload; }
     public WorldPoint getCoinTrapTriggerPoint() { return coinTrapTriggerPoint; }
     public long getCoinTrapTriggerUntil() { return coinTrapTriggerUntil; }
 
@@ -3244,27 +3236,27 @@ public class RunePartyPlugin extends Plugin
         if (maxRounds <= 0) return 0;
         return Math.min(completedRounds + 1, maxRounds);
     }
-    public String getTurnAnnounceRsn() { return turnAnnounceRsn; }
-    public long getTurnAnnounceUntil() { return turnAnnounceUntil; }
-    public long getWelcomeBannerUntil() { return welcomeBannerUntil; }
-    public long getMinigameBannerUntil() { return minigameBannerUntil; }
-    public long getGameStartBannerUntil() { return gameStartBannerUntil; }
-    public long getRoundCompleteBannerUntil() { return roundCompleteBannerUntil; }
-    public int getRoundCompleteRoundNumber() { return roundCompleteRoundNumber; }
-    public long getMinigameRewardsBannerUntil() { return minigameRewardsBannerUntil; }
-    public List<MinigameReward> getMinigameRewards() { return minigameRewards; }
+    public String getTurnAnnounceRsn() { return turnAnnounce.payload; }
+    public long getTurnAnnounceUntil() { return turnAnnounce.until; }
+    public long getWelcomeBannerUntil() { return welcomeBanner.until; }
+    public long getMinigameBannerUntil() { return minigameBanner.until; }
+    public long getGameStartBannerUntil() { return gameStartBanner.until; }
+    public long getRoundCompleteBannerUntil() { return roundCompleteBanner.until; }
+    public int getRoundCompleteRoundNumber() { return roundCompleteBanner.payload != null ? roundCompleteBanner.payload : 0; }
+    public long getMinigameRewardsBannerUntil() { return minigameRewardsBanner.until; }
+    public List<MinigameReward> getMinigameRewards() { return minigameRewardsBanner.payload != null ? minigameRewardsBanner.payload : Collections.emptyList(); }
     public List<RosterReducer.RosterEntry> getGameOverStandings() { return gameOverStandings; }
-    public long getGameOverBannerUntil() { return gameOverBannerUntil; }
-    public long getWinnerIntroBannerUntil() { return winnerIntroBannerUntil; }
-    public long getPlaceRevealUntil() { return placeRevealUntil; }
-    public String getPlaceRevealRsn() { return placeRevealRsn; }
-    public int getPlaceRevealRank() { return placeRevealRank; }
-    public int getPlaceRevealCoins() { return placeRevealCoins; }
-    public int getPlaceRevealGoldenGnomes() { return placeRevealGoldenGnomes; }
-    public long getWinnerSuspenseUntil() { return winnerSuspenseUntil; }
-    public long getWinnerRevealUntil() { return winnerRevealUntil; }
-    public String getWinnerRsn() { return winnerRsn; }
-    public long getConfettiUntil() { return confettiUntil; }
+    public long getGameOverBannerUntil() { return gameOverBanner.until; }
+    public long getWinnerIntroBannerUntil() { return winnerIntroBanner.until; }
+    public long getPlaceRevealUntil() { return placeReveal.until; }
+    public String getPlaceRevealRsn() { return placeReveal.payload != null ? placeReveal.payload.rsn : null; }
+    public int getPlaceRevealRank() { return placeReveal.payload != null ? placeReveal.payload.rank : 0; }
+    public int getPlaceRevealCoins() { return placeReveal.payload != null ? placeReveal.payload.coins : 0; }
+    public int getPlaceRevealGoldenGnomes() { return placeReveal.payload != null ? placeReveal.payload.goldenGnomes : 0; }
+    public long getWinnerSuspenseUntil() { return winnerSuspenseBanner.until; }
+    public long getWinnerRevealUntil() { return winnerRevealBanner.until; }
+    public String getWinnerRsn() { return winnerRevealBanner.payload; }
+    public long getConfettiUntil() { return confettiBanner.until; }
     /** {@code rsn}'s currently-showing coin popup, or null if none -- see PlayerOverlay#
      * drawCoinPopup, the only consumer. Drops expired entries off the front of this player's queue
      * first (see coinPopups's own doc for why it's a queue, not a single slot) so an old, already-
@@ -3290,13 +3282,13 @@ public class RunePartyPlugin extends Plugin
     public long getDiceRollStart() { return diceRollStart; }
     public long getDiceRollUntil() { return diceRollUntil; }
     public String getGoldenGnomeOfferRsn() { return goldenGnomeOfferRsn; }
-    public String getGoldenGnomeOutcome() { return goldenGnomeOutcome; }
-    public String getGoldenGnomeOutcomeRsn() { return goldenGnomeOutcomeRsn; }
-    public long getGoldenGnomeOutcomeBannerUntil() { return goldenGnomeOutcomeBannerUntil; }
-    public String getGoldenGnomePopupRsn() { return goldenGnomePopupRsn; }
-    public int getGoldenGnomePopupNewTotal() { return goldenGnomePopupNewTotal; }
-    public long getGoldenGnomePopupStart() { return goldenGnomePopupStart; }
-    public long getGoldenGnomePopupUntil() { return goldenGnomePopupUntil; }
+    public String getGoldenGnomeOutcome() { return goldenGnomeOutcome.payload != null ? goldenGnomeOutcome.payload.outcome : null; }
+    public String getGoldenGnomeOutcomeRsn() { return goldenGnomeOutcome.payload != null ? goldenGnomeOutcome.payload.rsn : null; }
+    public long getGoldenGnomeOutcomeBannerUntil() { return goldenGnomeOutcome.until; }
+    public String getGoldenGnomePopupRsn() { return goldenGnomePopup.payload != null ? goldenGnomePopup.payload.rsn : null; }
+    public int getGoldenGnomePopupNewTotal() { return goldenGnomePopup.payload != null ? goldenGnomePopup.payload.newTotal : 0; }
+    public long getGoldenGnomePopupStart() { return goldenGnomePopup.start; }
+    public long getGoldenGnomePopupUntil() { return goldenGnomePopup.until; }
     public WorldPoint getGoldenGnomeMoveOldPoint() { return goldenGnomeMoveOldPoint; }
     public long getGoldenGnomeMoveHideOldAt() { return goldenGnomeMoveHideOldAt; }
     public WorldPoint getGoldenGnomeMoveNewPoint() { return goldenGnomeMoveNewPoint; }

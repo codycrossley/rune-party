@@ -40,7 +40,7 @@ public class StatsOverlay extends Overlay
     private static final Color COLOR_NAME_FALLBACK = Color.LIGHT_GRAY; // used only if a seat color can't be resolved
 
     // PanelComponent's own default (ComponentConstants.STANDARD_WIDTH) is only 129px -- too narrow
-    // for "PlayerName" plus "123 coins, 8 GN" on one line, which is what was wrapping to a 2nd line.
+    // for "PlayerName" plus "123 coins, 8 GG" on one line, which is what was wrapping to a 2nd line.
     // Package-private (not private) so CoinRushTimerOverlay can position itself just past this
     // panel's own right edge -- see that class's own doc on why it can't just ask this overlay for
     // its actual rendered bounds instead.
@@ -131,7 +131,7 @@ public class StatsOverlay extends Overlay
             panelComponent.getChildren().add(LineComponent.builder()
                 .left(entry.rsn)
                 .leftColor(nameColor)
-                .right(entry.coins + " coins, " + entry.goldenGnomeCount + " GN")
+                .right(entry.coins + " coins, " + entry.goldenGnomeCount + " GG")
                 .rightColor(statsColor)
                 .build());
         }
