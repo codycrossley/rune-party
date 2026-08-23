@@ -127,9 +127,7 @@ public class PlayerOverlay extends Overlay
 
         if (onTurn)
         {
-            long phaseMs = System.currentTimeMillis() % GLOW_PULSE_PERIOD_MS;
-            float pulse = (float) (0.5 + 0.5 * Math.sin(2 * Math.PI * phaseMs / GLOW_PULSE_PERIOD_MS));
-            int glowAlpha = (int) (100 + 155 * pulse);
+            int glowAlpha = (int) (100 + 155 * BannerAnim.pulse(System.currentTimeMillis(), GLOW_PULSE_PERIOD_MS));
             int glowRadius = TOKEN_RADIUS + GLOW_RADIUS_PAD;
 
             g.setStroke(TOKEN_GLOW_STROKE);
@@ -162,15 +160,14 @@ public class PlayerOverlay extends Overlay
     {
         long now = System.currentTimeMillis();
         if (now < popup.start) return; // RunePartyPlugin can push this into the future to wait out a still-showing popup for the same player
-        long remaining = popup.until - now;
-        if (remaining <= 0) return;
+        Float alpha = BannerAnim.fadeAlpha(popup.until, RunePartyPlugin.COIN_POPUP_FADE_MS);
+        if (alpha == null) return;
 
         long elapsed = now - popup.start;
         boolean showTotal = !popup.totalless && elapsed >= RunePartyPlugin.COIN_POPUP_DELTA_PHASE_MS;
         String text = showTotal ? (popup.newTotal + " coins") : ((popup.delta >= 0 ? "+" : "") + popup.delta + " coins");
         Color color = showTotal ? Color.WHITE : (popup.delta >= 0 ? COIN_POPUP_GAIN_COLOR : COIN_POPUP_LOSS_COLOR);
 
-        float alpha = remaining < RunePartyPlugin.COIN_POPUP_FADE_MS ? remaining / (float) RunePartyPlugin.COIN_POPUP_FADE_MS : 1f;
         int rise = (int) Math.min(COIN_POPUP_MAX_RISE, elapsed / 50);
 
         g.setFont(FontManager.getRunescapeBoldFont());
@@ -196,16 +193,14 @@ public class PlayerOverlay extends Overlay
     private void drawGoldenGnomePopup(Graphics2D g, Player p)
     {
         long now = System.currentTimeMillis();
-        long until = plugin.getGoldenGnomePopupUntil();
-        long remaining = until - now;
-        if (remaining <= 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getGoldenGnomePopupUntil(), RunePartyPlugin.COIN_POPUP_FADE_MS);
+        if (alpha == null) return;
 
         long elapsed = now - plugin.getGoldenGnomePopupStart();
         boolean showTotal = elapsed >= RunePartyPlugin.COIN_POPUP_DELTA_PHASE_MS;
         int total = plugin.getGoldenGnomePopupNewTotal();
         String text = showTotal ? (total + " Golden " + (total == 1 ? "Gnome" : "Gnomes")) : "+1 Golden Gnome";
 
-        float alpha = remaining < RunePartyPlugin.COIN_POPUP_FADE_MS ? remaining / (float) RunePartyPlugin.COIN_POPUP_FADE_MS : 1f;
         int rise = (int) Math.min(GOLDEN_GNOME_POPUP_MAX_RISE, elapsed / 50);
 
         g.setFont(FontManager.getRunescapeBoldFont());

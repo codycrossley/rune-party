@@ -1,12 +1,18 @@
 package gay.runescape.runeparty;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import org.junit.Test;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -89,5 +95,51 @@ public class RosterReducerTest
         assertTrue("syncFromRoster must be able to add a player it's never seen before", entry != null);
         assertEquals(RunePartyRole.SPECTATOR, entry.role);
         assertEquals("2", entry.colorNumber);
+    }
+
+    /** Mirrors RunePartyPlugin's actual live flow (see handleEvent) rather than apply() in
+     * isolation: apply() alone never reconstructs "number" or "colorNumber" from the event stream
+     * -- neither PLAYER_JOINED nor ROLE_ASSIGNED's payload carries them, since the server only
+     * ever computes them fresh from the whole roster (see _finalize_roster's own doc). The client
+     * knows this and always follows a PLAYER_JOINED/ROLE_ASSIGNED/PLAYER_LEFT with a
+     * syncRosterSnapshot() call when live, which is what the syncFromRoster call below stands in
+     * for -- using this same fixture's expectedRoster as the "server's /roster response", since
+     * that's exactly what a real server replaying the same events would return. */
+    @Test
+    public void fixtureRoundTripMatchesServer() throws IOException
+    {
+        Fixture fixture = loadFixture();
+
+        RosterReducer reducer = new RosterReducer();
+        for (ApiClient.EventOut e : fixture.events)
+        {
+            reducer.apply(e);
+        }
+        reducer.syncFromRoster(fixture.expectedRoster);
+
+        for (ApiClient.RosterPlayerOut expected : fixture.expectedRoster)
+        {
+            RosterReducer.RosterEntry entry = find(reducer, expected.rsn);
+            assertNotNull(expected.rsn + " must appear in the roster", entry);
+            assertEquals(expected.rsn + ": role", RunePartyRole.valueOf(expected.role), entry.role);
+            assertEquals(expected.rsn + ": joined", expected.joined, entry.joined);
+            assertEquals(expected.rsn + ": number", expected.number, entry.number);
+            assertEquals(expected.rsn + ": colorNumber", expected.colorNumber, entry.colorNumber);
+        }
+    }
+
+    private static Fixture loadFixture() throws IOException
+    {
+        try (InputStream in = RosterReducerTest.class.getResourceAsStream("/roster_fixture.json"))
+        {
+            assertNotNull("roster_fixture.json must be on the test classpath", in);
+            return new Gson().fromJson(new InputStreamReader(in, StandardCharsets.UTF_8), Fixture.class);
+        }
+    }
+
+    private static final class Fixture
+    {
+        List<ApiClient.EventOut> events;
+        List<ApiClient.RosterPlayerOut> expectedRoster;
     }
 }

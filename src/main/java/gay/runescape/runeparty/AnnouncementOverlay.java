@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 import gay.runescape.runeparty.items.Item;
 import gay.runescape.runeparty.items.Items;
 import gay.runescape.runeparty.minigames.Minigame;
@@ -35,7 +37,16 @@ import net.runelite.client.util.Text;
 @Slf4j
 public class AnnouncementOverlay extends Overlay
 {
-    private static final long FADE_DURATION_MS = 500; // tail end of the banner's life spent fading out
+    // Most banners fade/pulse on these exact same two values -- not independently tuned, just
+    // copy-pasted (see ARCHITECTURE_REVIEW.md's C2 finding, part (d)). Each banner still keeps its
+    // own semantically-named constant below (still useful at its own render call), just defined as
+    // one of these instead of restating the literal; the genuinely different values (WELCOME_FADE_MS,
+    // WINNER_REVEAL_FADE_MS, GAME_OVER_TITLE_FADE_MS, GAME_START_FADE_MS, WHEEL_FADE_MS,
+    // TRUE_OR_FALSE_REVEAL_FADE_MS, and the three differing min-alphas) stay as explicit overrides.
+    private static final long DEFAULT_FADE_MS = 500;
+    private static final long DEFAULT_PULSE_PERIOD_MS = 1400;
+
+    private static final long FADE_DURATION_MS = DEFAULT_FADE_MS; // tail end of the banner's life spent fading out
 
     private static final Color DIE_BORDER = Color.BLACK;
     private static final Color DIE_PIP = new Color(255, 255, 255, 230);
@@ -67,7 +78,7 @@ public class AnnouncementOverlay extends Overlay
         RAINBOW_RED, RAINBOW_BLUE, RAINBOW_GREEN, RAINBOW_YELLOW,
     };
 
-    private static final long MINIGAME_FADE_MS = 500;
+    private static final long MINIGAME_FADE_MS = DEFAULT_FADE_MS;
     private static final float MINIGAME_TITLE_SIZE = 58f;
 
     // Shared spinner wheel -- see drawWheel, reused by both renderMinigameSpinner and
@@ -85,19 +96,19 @@ public class AnnouncementOverlay extends Overlay
 
     // "You already have N items!" -- see renderItemCapBlocked. Sized like the Golden Gnome
     // outcome banner it's most similar to (a plain two-line explainer, no wheel).
-    private static final long ITEM_CAP_BLOCKED_FADE_MS = 500;
+    private static final long ITEM_CAP_BLOCKED_FADE_MS = DEFAULT_FADE_MS;
     private static final float ITEM_CAP_BLOCKED_TITLE_SIZE = 28f;
     private static final float ITEM_CAP_BLOCKED_SUBTITLE_SIZE = 20f;
 
     // "You used/<rsn> used <item>!" -- see renderItemUsedAnnouncement. Same two-line shape/sizing
     // as the item cap banner above.
-    private static final long ITEM_USED_ANNOUNCE_FADE_MS = 500;
+    private static final long ITEM_USED_ANNOUNCE_FADE_MS = DEFAULT_FADE_MS;
     private static final float ITEM_USED_ANNOUNCE_TITLE_SIZE = 28f;
     private static final float ITEM_USED_ANNOUNCE_SUBTITLE_SIZE = 20f;
 
     // "You/<rsn> landed on a Coin Trap!" -- see renderCoinTrapAnnouncement. Plain single-line
     // title card, sized like the Golden Gnome outcome banner it's most similar to.
-    private static final long COIN_TRAP_ANNOUNCE_FADE_MS = 500;
+    private static final long COIN_TRAP_ANNOUNCE_FADE_MS = DEFAULT_FADE_MS;
     private static final float COIN_TRAP_ANNOUNCE_TITLE_SIZE = 32f;
 
     // "+N"/"-N" bonus label beside the die once a bonus-carrying roll reaches its badge phase --
@@ -111,7 +122,7 @@ public class AnnouncementOverlay extends Overlay
     // Mini-game ready-check -- see renderMinigameReadyCheck. Duration-less like the Spin hint/
     // Golden Gnome offer (it persists until every seated PLAYER's YES-emoted), so it gets the same
     // breathing-alpha treatment to stay noticeable without a fade to draw the eye.
-    private static final long MINIGAME_READY_CHECK_PULSE_PERIOD_MS = 1400;
+    private static final long MINIGAME_READY_CHECK_PULSE_PERIOD_MS = DEFAULT_PULSE_PERIOD_MS;
     private static final float MINIGAME_READY_CHECK_MIN_ALPHA = 0.6f;
 
     // Mini-game countdown ("3... 2... 1... BEGIN!") -- see renderMinigameCountdown. The numbers
@@ -124,13 +135,13 @@ public class AnnouncementOverlay extends Overlay
     private static final long GAME_START_FADE_MS = 600;
     private static final float GAME_START_TITLE_SIZE = 58f;
 
-    private static final long ROUND_COMPLETE_FADE_MS = 500;
+    private static final long ROUND_COMPLETE_FADE_MS = DEFAULT_FADE_MS;
     private static final float ROUND_COMPLETE_TITLE_SIZE = 46f; // "ROUND x"
     private static final float ROUND_COMPLETE_SUBTITLE_SIZE = 20f; // "Current Standings"
     private static final float ROUND_COMPLETE_LINE_SIZE = 18f; // each player's standings line
     private static final int ROUND_COMPLETE_LINE_HEIGHT = 24;
 
-    private static final long MINIGAME_REWARDS_FADE_MS = 500;
+    private static final long MINIGAME_REWARDS_FADE_MS = DEFAULT_FADE_MS;
     private static final float MINIGAME_REWARDS_TITLE_SIZE = 46f; // "REWARDS"
     private static final float MINIGAME_REWARDS_LINE_SIZE = 18f; // each player's reward line
     private static final int MINIGAME_REWARDS_LINE_HEIGHT = 24;
@@ -180,7 +191,7 @@ public class AnnouncementOverlay extends Overlay
 
     private static final Color SPIN_HINT_COLOR = new Color(255, 255, 255);
     private static final float SPIN_HINT_SIZE = 22f;
-    private static final long SPIN_HINT_PULSE_PERIOD_MS = 1400; // gentle breathing alpha so a hint that has to persist (no fixed duration) doesn't just sit there static and easy to ignore
+    private static final long SPIN_HINT_PULSE_PERIOD_MS = DEFAULT_PULSE_PERIOD_MS; // gentle breathing alpha so a hint that has to persist (no fixed duration) doesn't just sit there static and easy to ignore
     private static final float SPIN_HINT_MIN_ALPHA = 0.55f;
 
     private static final float GOLDEN_GNOME_OFFER_TITLE_SIZE = 30f; // "You found a GOLDEN GNOME!"
@@ -193,10 +204,10 @@ public class AnnouncementOverlay extends Overlay
     private static final int READY_CHECK_INSTRUCTIONS_MAX_WIDTH = 620;
     // Same breathing-alpha idea as the Spin hint -- this offer is also duration-less (it persists
     // until the local player's YES/NO emote resolves it), so it needs its own way to stay noticeable.
-    private static final long GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS = 1400;
+    private static final long GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS = DEFAULT_PULSE_PERIOD_MS;
     private static final float GOLDEN_GNOME_OFFER_MIN_ALPHA = 0.6f;
 
-    private static final long GOLDEN_GNOME_OUTCOME_FADE_MS = 500;
+    private static final long GOLDEN_GNOME_OUTCOME_FADE_MS = DEFAULT_FADE_MS;
     private static final float GOLDEN_GNOME_OUTCOME_SIZE = 32f;
 
     // See RunePartyFonts's own doc -- shared with CoinRushTimerOverlay, the only other consumer.
@@ -262,13 +273,10 @@ public class AnnouncementOverlay extends Overlay
         String rsn = plugin.getTurnAnnounceRsn();
         if (rsn == null) return;
 
-        long remaining = plugin.getTurnAnnounceUntil() - System.currentTimeMillis();
-        if (remaining <= 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getTurnAnnounceUntil(), FADE_DURATION_MS);
+        if (alpha == null) return;
 
-        float alpha = remaining < FADE_DURATION_MS ? remaining / (float) FADE_DURATION_MS : 1f;
-
-        String localRsn = localRsn();
-        String text = (localRsn != null && localRsn.equalsIgnoreCase(rsn)) ? "Your Turn!" : rsn + "'s Turn";
+        String text = isLocal(rsn) ? "Your Turn!" : rsn + "'s Turn";
 
         RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
         Color color = seatColor != null ? seatColor.awt : Color.WHITE;
@@ -297,8 +305,7 @@ public class AnnouncementOverlay extends Overlay
 
         String moverRsn = plugin.getCurrentTurnRsn();
         if (moverRsn == null) return;
-        String localRsn = localRsn();
-        if (localRsn != null && localRsn.equalsIgnoreCase(moverRsn)) return;
+        if (isLocal(moverRsn)) return;
         if (!plugin.isAwaitingSomeonesRoll()) return;
 
         renderSpinHintWaiting(g, moverRsn);
@@ -323,9 +330,7 @@ public class AnnouncementOverlay extends Overlay
      * chain into one still-centered line despite switching font and color partway through. */
     private void renderSpinHintSelf(Graphics2D g)
     {
-        long phaseMs = System.currentTimeMillis() % SPIN_HINT_PULSE_PERIOD_MS;
-        float pulse = (float) (0.5 + 0.5 * Math.sin(2 * Math.PI * phaseMs / SPIN_HINT_PULSE_PERIOD_MS));
-        float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * pulse;
+        float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), SPIN_HINT_PULSE_PERIOD_MS);
 
         String self = localRsn();
         boolean hasItems = self != null && !plugin.isItemUsedThisTurn()
@@ -363,9 +368,7 @@ public class AnnouncementOverlay extends Overlay
      * renderTurnAnnouncement's "Your Turn!"/"&lt;rsn&gt;'s Turn" already do. */
     private void renderSpinHintWaiting(Graphics2D g, String rsn)
     {
-        long phaseMs = System.currentTimeMillis() % SPIN_HINT_PULSE_PERIOD_MS;
-        float pulse = (float) (0.5 + 0.5 * Math.sin(2 * Math.PI * phaseMs / SPIN_HINT_PULSE_PERIOD_MS));
-        float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * pulse;
+        float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), SPIN_HINT_PULSE_PERIOD_MS);
 
         String prefix = "Waiting for ";
         String suffix = " to roll the dice...";
@@ -407,15 +410,12 @@ public class AnnouncementOverlay extends Overlay
         String finderRsn = plugin.getGoldenGnomeOfferRsn();
         if (finderRsn == null) return;
 
-        long phaseMs = System.currentTimeMillis() % GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS;
-        float pulse = (float) (0.5 + 0.5 * Math.sin(2 * Math.PI * phaseMs / GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS));
-        float alpha = GOLDEN_GNOME_OFFER_MIN_ALPHA + (1f - GOLDEN_GNOME_OFFER_MIN_ALPHA) * pulse;
+        float alpha = GOLDEN_GNOME_OFFER_MIN_ALPHA + (1f - GOLDEN_GNOME_OFFER_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS);
 
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 3;
 
-        String localRsn = localRsn();
-        boolean isLocal = localRsn != null && localRsn.equalsIgnoreCase(finderRsn);
+        boolean isLocal = isLocal(finderRsn);
 
         String prefix = isLocal ? "You found a " : finderRsn + " found a ";
         String goldenGnome = "GOLDEN GNOME";
@@ -504,6 +504,34 @@ public class AnnouncementOverlay extends Overlay
         drawLeftAlignedText(g, stats, x, y, statsColor, alpha);
     }
 
+    /** One `drawStandingsLine` per player, in list order, each in the player's own seat color --
+     * shared by renderMinigameReadyCheck, renderTrueOrFalseQuestion, renderMinigameRewardsBanner,
+     * and renderRoundCompleteBanner (see ARCHITECTURE_REVIEW.md's C2 finding, part (e)), which
+     * otherwise differ only in sort order (each still does its own `.sort(...)` before calling
+     * this), rank prefix, and status text/color. `rankFn` receives the 1-based row index so
+     * renderRoundCompleteBanner can prepend "#N  " while the other three pass "" for every row.
+     * renderTrueOrFalseReveal's own tally is deliberately NOT folded in here -- it iterates a
+     * different data source entirely (match results, not a roster snapshot) and never looks up
+     * seat color. */
+    private void drawPlayerRows(Graphics2D g, List<RosterReducer.RosterEntry> players,
+        Font nameFont, Font statsFont, BiFunction<RosterReducer.RosterEntry, Integer, String> rankFn,
+        Function<RosterReducer.RosterEntry, String> statsFn,
+        Function<RosterReducer.RosterEntry, Color> statsColorFn,
+        int centerX, int startY, int lineHeight, float alpha)
+    {
+        int y = startY;
+        int i = 1;
+        for (RosterReducer.RosterEntry entry : players)
+        {
+            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
+            Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
+            drawStandingsLine(g, nameFont, statsFont, rankFn.apply(entry, i), entry.rsn, nameColor,
+                statsFn.apply(entry), statsColorFn.apply(entry), centerX, y, alpha);
+            y += lineHeight;
+            i++;
+        }
+    }
+
     /** Draws the Golden Gnome offer's follow-up -- "You got a Golden Gnome!" on a purchase, or
      * "You can't afford this!" if they accepted without enough coins (a decline gets no banner at
      * all, see RunePartyPlugin's GOLDEN_GNOME_OFFER_RESOLVED handling) -- fires immediately rather
@@ -515,13 +543,12 @@ public class AnnouncementOverlay extends Overlay
      * outcome that may well belong to someone else. */
     private void renderGoldenGnomeOutcome(Graphics2D g)
     {
-        long remaining = plugin.getGoldenGnomeOutcomeBannerUntil() - System.currentTimeMillis();
-        if (remaining <= 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getGoldenGnomeOutcomeBannerUntil(), GOLDEN_GNOME_OUTCOME_FADE_MS);
+        if (alpha == null) return;
 
         String outcome = plugin.getGoldenGnomeOutcome();
         String rsn = plugin.getGoldenGnomeOutcomeRsn();
-        String localRsn = localRsn();
-        boolean isLocal = rsn != null && localRsn != null && localRsn.equalsIgnoreCase(rsn);
+        boolean isLocal = isLocal(rsn);
 
         String text;
         if ("purchased".equals(outcome))
@@ -538,7 +565,6 @@ public class AnnouncementOverlay extends Overlay
         }
         if (text == null) return;
 
-        float alpha = remaining < GOLDEN_GNOME_OUTCOME_FADE_MS ? remaining / (float) GOLDEN_GNOME_OUTCOME_FADE_MS : 1f;
         Color color = "purchased".equals(outcome) ? WELCOME_TITLE_COLOR : Color.WHITE;
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OUTCOME_SIZE));
@@ -557,10 +583,9 @@ public class AnnouncementOverlay extends Overlay
      * isMinigameActive() is true instead of only reacting to this banner's presence. */
     private void renderMinigameBanner(Graphics2D g)
     {
-        long remaining = plugin.getMinigameBannerUntil() - System.currentTimeMillis();
-        if (remaining <= 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getMinigameBannerUntil(), MINIGAME_FADE_MS);
+        if (alpha == null) return;
 
-        float alpha = remaining < MINIGAME_FADE_MS ? remaining / (float) MINIGAME_FADE_MS : 1f;
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 3;
 
@@ -583,11 +608,9 @@ public class AnnouncementOverlay extends Overlay
      * segment, which differs per wheel "menu" (different underlying timestamps and entry lists). */
     private void renderMinigameSpinner(Graphics2D g)
     {
-        long until = plugin.getMinigameSpinnerUntil();
-        if (until == 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getMinigameSpinnerUntil(), WHEEL_FADE_MS);
+        if (alpha == null) return;
         long now = System.currentTimeMillis();
-        long remaining = until - now;
-        if (remaining <= 0) return;
 
         List<Minigame> all = Minigames.all();
         if (all.isEmpty()) return;
@@ -600,7 +623,6 @@ public class AnnouncementOverlay extends Overlay
         boolean spinning = elapsed < RunePartyPlugin.MINIGAME_SPINNER_SPIN_PHASE_MS;
         float rotationDeg = wheelRotationDeg(wheelEntries.size(), targetIndex, elapsed, RunePartyPlugin.MINIGAME_SPINNER_SPIN_PHASE_MS, spinning);
         float scale = wheelSettleScale(elapsed, RunePartyPlugin.MINIGAME_SPINNER_SPIN_PHASE_MS, spinning);
-        float alpha = remaining < WHEEL_FADE_MS ? remaining / (float) WHEEL_FADE_MS : 1f;
 
         drawWheel(g, wheelEntries, targetIndex, rotationDeg, scale, alpha, spinning, selected.getDisplayName());
     }
@@ -615,11 +637,9 @@ public class AnnouncementOverlay extends Overlay
      * chained behind whatever turn-effect visual (a coin popup, etc.) was already showing. */
     private void renderItemSpinner(Graphics2D g)
     {
-        long until = plugin.getItemSpinnerUntil();
-        if (until == 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getItemSpinnerUntil(), WHEEL_FADE_MS);
+        if (alpha == null) return;
         long now = System.currentTimeMillis();
-        long remaining = until - now;
-        if (remaining <= 0) return;
 
         List<Item> all = Items.all();
         if (all.isEmpty()) return;
@@ -632,11 +652,9 @@ public class AnnouncementOverlay extends Overlay
         boolean spinning = elapsed < RunePartyPlugin.ITEM_SPINNER_SPIN_PHASE_MS;
         float rotationDeg = wheelRotationDeg(wheelEntries.size(), targetIndex, elapsed, RunePartyPlugin.ITEM_SPINNER_SPIN_PHASE_MS, spinning);
         float scale = wheelSettleScale(elapsed, RunePartyPlugin.ITEM_SPINNER_SPIN_PHASE_MS, spinning);
-        float alpha = remaining < WHEEL_FADE_MS ? remaining / (float) WHEEL_FADE_MS : 1f;
 
         String grantRsn = plugin.getItemGrantRsn();
-        String localRsn = localRsn();
-        boolean isLocal = grantRsn != null && localRsn != null && localRsn.equalsIgnoreCase(grantRsn);
+        boolean isLocal = isLocal(grantRsn);
         String revealText = grantRsn == null ? null
             : isLocal ? "You got " + selected.getDisplayName() + "!"
             : grantRsn + " got " + selected.getDisplayName() + "!";
@@ -650,18 +668,16 @@ public class AnnouncementOverlay extends Overlay
      * "You..."/"&lt;rsn&gt;..." split every other outcome banner on this overlay uses. */
     private void renderItemCapBlocked(Graphics2D g)
     {
-        long remaining = plugin.getItemCapBlockedUntil() - System.currentTimeMillis();
-        if (remaining <= 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getItemCapBlockedUntil(), ITEM_CAP_BLOCKED_FADE_MS);
+        if (alpha == null) return;
         String rsn = plugin.getItemCapBlockedRsn();
         if (rsn == null) return;
 
-        float alpha = remaining < ITEM_CAP_BLOCKED_FADE_MS ? remaining / (float) ITEM_CAP_BLOCKED_FADE_MS : 1f;
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 3;
         int cap = plugin.getItemCapBlockedCap();
 
-        String localRsn = localRsn();
-        boolean isLocal = localRsn != null && localRsn.equalsIgnoreCase(rsn);
+        boolean isLocal = isLocal(rsn);
 
         String title = isLocal ? "You already have " + cap + " items!" : rsn + " already has " + cap + " items!";
         String subtitle = isLocal
@@ -682,18 +698,16 @@ public class AnnouncementOverlay extends Overlay
      * per-viewer "You.../&lt;rsn&gt;..." split and two-line layout as renderItemCapBlocked. */
     private void renderItemUsedAnnouncement(Graphics2D g)
     {
-        long remaining = plugin.getItemUsedAnnounceUntil() - System.currentTimeMillis();
-        if (remaining <= 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getItemUsedAnnounceUntil(), ITEM_USED_ANNOUNCE_FADE_MS);
+        if (alpha == null) return;
         String rsn = plugin.getItemUsedAnnounceRsn();
         Item item = Items.get(plugin.getItemUsedAnnounceItemKey());
         if (rsn == null || item == null) return;
 
-        float alpha = remaining < ITEM_USED_ANNOUNCE_FADE_MS ? remaining / (float) ITEM_USED_ANNOUNCE_FADE_MS : 1f;
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 3;
 
-        String localRsn = localRsn();
-        boolean isLocal = localRsn != null && localRsn.equalsIgnoreCase(rsn);
+        boolean isLocal = isLocal(rsn);
 
         String verb = item.getUseAnnounceVerb();
         String title = (isLocal ? "You " + verb + " " : rsn + " " + verb + " ") + item.getDisplayName() + "!";
@@ -715,18 +729,15 @@ public class AnnouncementOverlay extends Overlay
      * banner's (see PlayerOverlay#drawCoinPopup). */
     private void renderCoinTrapAnnouncement(Graphics2D g)
     {
-        long remaining = plugin.getCoinTrapAnnounceUntil() - System.currentTimeMillis();
-        if (remaining <= 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getCoinTrapAnnounceUntil(), COIN_TRAP_ANNOUNCE_FADE_MS);
+        if (alpha == null) return;
         String rsn = plugin.getCoinTrapAnnounceRsn();
         if (rsn == null) return;
 
-        float alpha = remaining < COIN_TRAP_ANNOUNCE_FADE_MS ? remaining / (float) COIN_TRAP_ANNOUNCE_FADE_MS : 1f;
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 3;
 
-        String localRsn = localRsn();
-        boolean isLocal = localRsn != null && localRsn.equalsIgnoreCase(rsn);
-        String title = (isLocal ? "You" : rsn) + " landed on a Coin Trap!";
+        String title = (isLocal(rsn) ? "You" : rsn) + " landed on a Coin Trap!";
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(COIN_TRAP_ANNOUNCE_TITLE_SIZE));
         drawCenteredText(g, title, centerX, y, Color.WHITE, alpha);
@@ -908,9 +919,7 @@ public class AnnouncementOverlay extends Overlay
         boolean spinnerDone = plugin.isMinigameSpinnerSkippedForClient() || (spinnerUntil != 0 && now >= spinnerUntil);
         if (!spinnerDone) return;
 
-        long phaseMs = now % MINIGAME_READY_CHECK_PULSE_PERIOD_MS;
-        float pulse = (float) (0.5 + 0.5 * Math.sin(2 * Math.PI * phaseMs / MINIGAME_READY_CHECK_PULSE_PERIOD_MS));
-        float alpha = MINIGAME_READY_CHECK_MIN_ALPHA + (1f - MINIGAME_READY_CHECK_MIN_ALPHA) * pulse;
+        float alpha = MINIGAME_READY_CHECK_MIN_ALPHA + (1f - MINIGAME_READY_CHECK_MIN_ALPHA) * BannerAnim.pulse(now, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
 
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 3;
@@ -944,26 +953,15 @@ public class AnnouncementOverlay extends Overlay
         drawEmoteInstruction(g, "YES", " emote when you're ready!", emoteFont, emoteWordFont, centerX, afterInstructionsY + 36, alpha);
 
         Set<String> ready = plugin.getMinigameReadyRsns();
-        List<RosterReducer.RosterEntry> players = new ArrayList<>();
-        for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().snapshot())
-        {
-            if (entry.role == RunePartyRole.PLAYER && entry.joined) players.add(entry);
-        }
+        List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
         players.sort(Comparator.comparing((RosterReducer.RosterEntry e) -> e.number));
 
         Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
         Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
-        int lineY = afterInstructionsY + 70;
-        for (RosterReducer.RosterEntry entry : players)
-        {
-            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
-            Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
-            boolean isReady = ready.contains(entry.rsn.toLowerCase());
-            String status = isReady ? "   Ready!" : "   Waiting...";
-            Color statusColor = isReady ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR;
-            drawStandingsLine(g, nameFont, statsFont, "", entry.rsn, nameColor, status, statusColor, centerX, lineY, alpha);
-            lineY += ROUND_COMPLETE_LINE_HEIGHT;
-        }
+        drawPlayerRows(g, players, nameFont, statsFont, (entry, i) -> "",
+            entry -> ready.contains(entry.rsn.toLowerCase()) ? "   Ready!" : "   Waiting...",
+            entry -> ready.contains(entry.rsn.toLowerCase()) ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR,
+            centerX, afterInstructionsY + 70, ROUND_COMPLETE_LINE_HEIGHT, alpha);
     }
 
     /** Draws the "3... 2... 1... BEGIN!" countdown once every seated PLAYER's YES-emoted ready and
@@ -1059,26 +1057,15 @@ public class AnnouncementOverlay extends Overlay
         drawEmoteInstruction(g, "NO", " = False", emoteFont, emoteWordFont, centerX + 100, emoteY, 1f);
 
         Set<String> answered = plugin.getTrueOrFalseAnsweredRsns();
-        List<RosterReducer.RosterEntry> players = new ArrayList<>();
-        for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().snapshot())
-        {
-            if (entry.role == RunePartyRole.PLAYER && entry.joined) players.add(entry);
-        }
+        List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
         players.sort(Comparator.comparing((RosterReducer.RosterEntry e) -> e.number));
 
         Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
         Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
-        int lineY = emoteY + 36;
-        for (RosterReducer.RosterEntry entry : players)
-        {
-            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
-            Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
-            boolean hasAnswered = answered.contains(entry.rsn.toLowerCase());
-            String status = hasAnswered ? "   Answered!" : "   Waiting...";
-            Color statusColor = hasAnswered ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR;
-            drawStandingsLine(g, nameFont, statsFont, "", entry.rsn, nameColor, status, statusColor, centerX, lineY, 1f);
-            lineY += ROUND_COMPLETE_LINE_HEIGHT;
-        }
+        drawPlayerRows(g, players, nameFont, statsFont, (entry, i) -> "",
+            entry -> answered.contains(entry.rsn.toLowerCase()) ? "   Answered!" : "   Waiting...",
+            entry -> answered.contains(entry.rsn.toLowerCase()) ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR,
+            centerX, emoteY + 36, ROUND_COMPLETE_LINE_HEIGHT, 1f);
     }
 
     /** Draws the previous True or False round's reveal -- the correct answer (color-coded green
@@ -1089,12 +1076,11 @@ public class AnnouncementOverlay extends Overlay
      * the way a still-open ready-check or question does. */
     private void renderTrueOrFalseReveal(Graphics2D g)
     {
-        long remaining = plugin.getTrueOrFalseRevealUntil() - System.currentTimeMillis();
-        if (remaining <= 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getTrueOrFalseRevealUntil(), TRUE_OR_FALSE_REVEAL_FADE_MS);
+        if (alpha == null) return;
         Boolean correctAnswer = plugin.getTrueOrFalseLastCorrectAnswer();
         if (correctAnswer == null) return;
 
-        float alpha = remaining < TRUE_OR_FALSE_REVEAL_FADE_MS ? remaining / (float) TRUE_OR_FALSE_REVEAL_FADE_MS : 1f;
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 3;
 
@@ -1165,10 +1151,9 @@ public class AnnouncementOverlay extends Overlay
      * once. */
     private void renderMinigameRewardsBanner(Graphics2D g)
     {
-        long remaining = plugin.getMinigameRewardsBannerUntil() - System.currentTimeMillis();
-        if (remaining <= 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getMinigameRewardsBannerUntil(), MINIGAME_REWARDS_FADE_MS);
+        if (alpha == null) return;
 
-        float alpha = remaining < MINIGAME_REWARDS_FADE_MS ? remaining / (float) MINIGAME_REWARDS_FADE_MS : 1f;
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 3;
 
@@ -1181,11 +1166,7 @@ public class AnnouncementOverlay extends Overlay
             rewardByRsn.put(reward.rsn.toLowerCase(), reward.coins);
         }
 
-        List<RosterReducer.RosterEntry> players = new ArrayList<>();
-        for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().snapshot())
-        {
-            if (entry.role == RunePartyRole.PLAYER && entry.joined) players.add(entry);
-        }
+        List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
         players.sort(Comparator
             .comparingInt((RosterReducer.RosterEntry e) -> rewardByRsn.getOrDefault(e.rsn.toLowerCase(), 0))
             .reversed()
@@ -1193,18 +1174,10 @@ public class AnnouncementOverlay extends Overlay
 
         Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(MINIGAME_REWARDS_LINE_SIZE);
         Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(MINIGAME_REWARDS_LINE_SIZE);
-
-        int lineY = y + 40;
-        for (RosterReducer.RosterEntry entry : players)
-        {
-            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
-            Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
-            Integer coins = rewardByRsn.get(entry.rsn.toLowerCase());
-            String stats = coins != null ? "   +" + coins + " coins" : "   no reward";
-            Color statsColor = coins != null ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR;
-            drawStandingsLine(g, nameFont, statsFont, "", entry.rsn, nameColor, stats, statsColor, centerX, lineY, alpha);
-            lineY += MINIGAME_REWARDS_LINE_HEIGHT;
-        }
+        drawPlayerRows(g, players, nameFont, statsFont, (entry, i) -> "",
+            entry -> rewardByRsn.get(entry.rsn.toLowerCase()) != null ? "   +" + rewardByRsn.get(entry.rsn.toLowerCase()) + " coins" : "   no reward",
+            entry -> rewardByRsn.get(entry.rsn.toLowerCase()) != null ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR,
+            centerX, y + 40, MINIGAME_REWARDS_LINE_HEIGHT, alpha);
     }
 
     /** Draws the post-round recap -- "ROUND x" (the *upcoming* round about to start, not the one
@@ -1221,10 +1194,9 @@ public class AnnouncementOverlay extends Overlay
      * instead of overlapping it. */
     private void renderRoundCompleteBanner(Graphics2D g)
     {
-        long remaining = plugin.getRoundCompleteBannerUntil() - System.currentTimeMillis();
-        if (remaining <= 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getRoundCompleteBannerUntil(), ROUND_COMPLETE_FADE_MS);
+        if (alpha == null) return;
 
-        float alpha = remaining < ROUND_COMPLETE_FADE_MS ? remaining / (float) ROUND_COMPLETE_FADE_MS : 1f;
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 3;
 
@@ -1234,29 +1206,17 @@ public class AnnouncementOverlay extends Overlay
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(ROUND_COMPLETE_SUBTITLE_SIZE));
         drawCenteredText(g, "Current Standings", centerX, y + 34, Color.WHITE, alpha);
 
-        List<RosterReducer.RosterEntry> players = new ArrayList<>();
-        for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().snapshot())
-        {
-            if (entry.role == RunePartyRole.PLAYER && entry.joined) players.add(entry);
-        }
+        List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
         players.sort(Comparator
             .comparingInt((RosterReducer.RosterEntry e) -> e.goldenGnomeCount).reversed()
             .thenComparing(Comparator.comparingInt((RosterReducer.RosterEntry e) -> e.coins).reversed()));
 
         Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
         Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
-
-        int lineY = y + 66;
-        int rank = 1;
-        for (RosterReducer.RosterEntry entry : players)
-        {
-            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
-            Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
-            String stats = "   " + entry.goldenGnomeCount + " GG, " + entry.coins + " coins";
-            drawStandingsLine(g, nameFont, statsFont, "#" + rank + "  ", entry.rsn, nameColor, stats, Color.LIGHT_GRAY, centerX, lineY, alpha);
-            lineY += ROUND_COMPLETE_LINE_HEIGHT;
-            rank++;
-        }
+        drawPlayerRows(g, players, nameFont, statsFont, (entry, i) -> "#" + i + "  ",
+            entry -> "   " + entry.goldenGnomeCount + " GG, " + entry.coins + " coins",
+            entry -> Color.LIGHT_GRAY,
+            centerX, y + 66, ROUND_COMPLETE_LINE_HEIGHT, alpha);
     }
 
     /** First beat of the end-game awards ceremony -- "GAME OVER!" in the same Mario-Party-logo
@@ -1264,10 +1224,9 @@ public class AnnouncementOverlay extends Overlay
      * RunePartyPlugin#getGameOverBannerUntil (see triggerGameOverSequence). */
     private void renderGameOverBanner(Graphics2D g)
     {
-        long remaining = plugin.getGameOverBannerUntil() - System.currentTimeMillis();
-        if (remaining <= 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getGameOverBannerUntil(), GAME_OVER_TITLE_FADE_MS);
+        if (alpha == null) return;
 
-        float alpha = remaining < GAME_OVER_TITLE_FADE_MS ? remaining / (float) GAME_OVER_TITLE_FADE_MS : 1f;
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 2 - 20;
 
@@ -1281,10 +1240,9 @@ public class AnnouncementOverlay extends Overlay
      * scheduleWinnerIntro. */
     private void renderWinnerIntroBanner(Graphics2D g)
     {
-        long remaining = plugin.getWinnerIntroBannerUntil() - System.currentTimeMillis();
-        if (remaining <= 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getWinnerIntroBannerUntil(), WINNER_INTRO_FADE_MS);
+        if (alpha == null) return;
 
-        float alpha = remaining < WINNER_INTRO_FADE_MS ? remaining / (float) WINNER_INTRO_FADE_MS : 1f;
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 2;
 
@@ -1299,12 +1257,11 @@ public class AnnouncementOverlay extends Overlay
      * renderRoundCompleteBanner's mid-game recap. */
     private void renderPlaceReveal(Graphics2D g)
     {
-        long remaining = plugin.getPlaceRevealUntil() - System.currentTimeMillis();
-        if (remaining <= 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getPlaceRevealUntil(), PLACE_REVEAL_FADE_MS);
+        if (alpha == null) return;
         String rsn = plugin.getPlaceRevealRsn();
         if (rsn == null) return;
 
-        float alpha = remaining < PLACE_REVEAL_FADE_MS ? remaining / (float) PLACE_REVEAL_FADE_MS : 1f;
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 2 - 20;
 
@@ -1323,10 +1280,9 @@ public class AnnouncementOverlay extends Overlay
      * directly behind the intro, for a 2-player game with nothing to individually reveal). */
     private void renderWinnerSuspenseBanner(Graphics2D g)
     {
-        long remaining = plugin.getWinnerSuspenseUntil() - System.currentTimeMillis();
-        if (remaining <= 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getWinnerSuspenseUntil(), WINNER_SUSPENSE_FADE_MS);
+        if (alpha == null) return;
 
-        float alpha = remaining < WINNER_SUSPENSE_FADE_MS ? remaining / (float) WINNER_SUSPENSE_FADE_MS : 1f;
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 2;
 
@@ -1342,12 +1298,11 @@ public class AnnouncementOverlay extends Overlay
      * this banner's own bounds. */
     private void renderWinnerReveal(Graphics2D g)
     {
-        long remaining = plugin.getWinnerRevealUntil() - System.currentTimeMillis();
-        if (remaining <= 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getWinnerRevealUntil(), WINNER_REVEAL_FADE_MS);
+        if (alpha == null) return;
         String rsn = plugin.getWinnerRsn();
         if (rsn == null) return;
 
-        float alpha = remaining < WINNER_REVEAL_FADE_MS ? remaining / (float) WINNER_REVEAL_FADE_MS : 1f;
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 2 - 10;
 
@@ -1387,10 +1342,9 @@ public class AnnouncementOverlay extends Overlay
      * a quick pop-up. */
     private void renderWelcomeBanner(Graphics2D g)
     {
-        long remaining = plugin.getWelcomeBannerUntil() - System.currentTimeMillis();
-        if (remaining <= 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getWelcomeBannerUntil(), WELCOME_FADE_MS);
+        if (alpha == null) return;
 
-        float alpha = remaining < WELCOME_FADE_MS ? remaining / (float) WELCOME_FADE_MS : 1f;
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 3;
 
@@ -1414,10 +1368,9 @@ public class AnnouncementOverlay extends Overlay
      * before the game has even started. */
     private void renderGameStartBanner(Graphics2D g)
     {
-        long remaining = plugin.getGameStartBannerUntil() - System.currentTimeMillis();
-        if (remaining <= 0) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getGameStartBannerUntil(), GAME_START_FADE_MS);
+        if (alpha == null) return;
 
-        float alpha = remaining < GAME_START_FADE_MS ? remaining / (float) GAME_START_FADE_MS : 1f;
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 3;
 
@@ -1518,9 +1471,9 @@ public class AnnouncementOverlay extends Overlay
         String rsn = plugin.getDiceRollRsn();
         if (rsn == null) return;
 
+        Float alpha = BannerAnim.fadeAlpha(plugin.getDiceRollUntil(), RunePartyPlugin.DICE_ROLL_FADE_MS);
+        if (alpha == null) return;
         long now = System.currentTimeMillis();
-        long remaining = plugin.getDiceRollUntil() - now;
-        if (remaining <= 0) return;
 
         long elapsed = now - plugin.getDiceRollStart();
         boolean spinning = elapsed < RunePartyPlugin.DICE_ROLL_SPIN_PHASE_MS;
@@ -1586,8 +1539,6 @@ public class AnnouncementOverlay extends Overlay
         int cx = client.getCanvasWidth() / 2 + jitterX;
         int cy = client.getCanvasHeight() / 2 + jitterY;
 
-        float alpha = remaining < RunePartyPlugin.DICE_ROLL_FADE_MS ? remaining / (float) RunePartyPlugin.DICE_ROLL_FADE_MS : 1f;
-
         RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
         Color color = seatColor != null ? seatColor.awt : Color.WHITE;
 
@@ -1638,6 +1589,18 @@ public class AnnouncementOverlay extends Overlay
         if (client.getLocalPlayer() == null) return null;
         String name = client.getLocalPlayer().getName();
         return name != null ? Text.toJagexName(name) : null;
+    }
+
+    /** Whether `rsn` is the local viewer -- collapses the `String localRsn = localRsn(); boolean
+     * isLocal = localRsn != null && localRsn.equalsIgnoreCase(rsn);` two-liner repeated at every
+     * "You…"/"&lt;rsn&gt;…" site (see ARCHITECTURE_REVIEW.md's C2 finding, part (c)). Deliberately
+     * only collapses the boolean, not the addressed text itself -- the actual phrasing differs in
+     * more than subject substitution across sites (verb conjugation: "You already have" vs.
+     * "&lt;rsn&gt; already has"), so a single templated format string doesn't fit every call site. */
+    private boolean isLocal(String rsn)
+    {
+        String local = localRsn();
+        return rsn != null && local != null && local.equalsIgnoreCase(rsn);
     }
 
     private static Color withAlpha(Color c, float alpha)

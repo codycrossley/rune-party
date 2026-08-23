@@ -69,15 +69,12 @@ public class StatsOverlay extends Overlay
         GamePhase phase = plugin.getPhase();
         if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE && phase != GamePhase.ENDED) return null;
 
-        List<RosterReducer.RosterEntry> players = new ArrayList<>();
-        for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().snapshot())
-        {
-            // role==PLAYER alone isn't enough -- a host can add someone via assignRole before
-            // they've ever run the join flow themselves (see RunePartyPlugin#addToGameMenuEntry),
-            // which leaves them "joined": false until they do. Excluding those keeps this HUD to
-            // players who are actually in the game right now, not just seated.
-            if (entry.role == RunePartyRole.PLAYER && entry.joined) players.add(entry);
-        }
+        // seatedPlayers() already excludes role==PLAYER-but-not-joined -- a host can add someone
+        // via assignRole before they've ever run the join flow themselves (see
+        // RunePartyPlugin#addToGameMenuEntry), which leaves them "joined": false until they do.
+        // Excluding those keeps this HUD to players who are actually in the game right now, not
+        // just seated.
+        List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
         if (players.isEmpty()) return null;
 
         // A Coin Rush round temporarily takes over this HUD entirely -- see

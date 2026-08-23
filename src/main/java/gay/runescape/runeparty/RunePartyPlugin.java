@@ -23,6 +23,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import net.runelite.api.ChatMessageType;
@@ -2065,15 +2066,32 @@ public class RunePartyPlugin extends Plugin
         return uiTimerExec.schedule(action, delay, TimeUnit.MILLISECONDS);
     }
 
+    /** Arms `banner` behind whatever turn-effect visual is already showing (see
+     * scheduleAfterTurnEffects) -- collapses the `<field>.task = scheduleAfterTurnEffects(...)  {
+     * <field>.payload = ...; <field>.until = now + duration; extendTurnEffectGate(...); }` shape
+     * repeated across ~6 of the scheduleXBanner methods below (see ARCHITECTURE_REVIEW.md's C6
+     * finding). Not applied to every scheduleXBanner method -- several have real behavior beyond
+     * "arm one banner" (bespoke until/gate math, chaining to a follow-up step, arming two banners
+     * at once) that this deliberately doesn't try to generalize; each of those keeps a one-line
+     * comment pointing back here instead of silently diverging from a pattern it never fit. */
+    private <T> void armBanner(TimedBanner<T> banner, long durationMs, Supplier<T> payload, boolean extendGate)
+    {
+        banner.task = scheduleAfterTurnEffects(banner.task, durationMs, () ->
+        {
+            banner.payload = payload.get();
+            banner.start = System.currentTimeMillis();
+            banner.until = banner.start + durationMs;
+            if (extendGate) extendTurnEffectGate(banner.until);
+        });
+    }
+
     /** Schedules AnnouncementOverlay's "<player>'s Turn" banner via scheduleAfterTurnEffects, so it
-     * never appears while e.g. the previous mover's coin popup is still settling. */
+     * never appears while e.g. the previous mover's coin popup is still settling. Deliberately the
+     * one armBanner call with extendGate=false -- unlike every other banner here, this one has
+     * never reserved the turn-effect gate for itself (matches its pre-C6 behavior exactly). */
     private void scheduleTurnAnnouncement(String rsn)
     {
-        turnAnnounce.task = scheduleAfterTurnEffects(turnAnnounce.task, TURN_ANNOUNCE_DURATION_MS, () ->
-        {
-            turnAnnounce.payload = rsn;
-            turnAnnounce.until = System.currentTimeMillis() + TURN_ANNOUNCE_DURATION_MS;
-        });
+        armBanner(turnAnnounce, TURN_ANNOUNCE_DURATION_MS, () -> rsn, false);
     }
 
     /** Schedules AnnouncementOverlay's "MINIGAME!" banner via scheduleAfterTurnEffects, so it never
@@ -2085,7 +2103,9 @@ public class RunePartyPlugin extends Plugin
      * this one, same MINIGAME_STARTED handler) starts right on schedule once that reservation
      * ends -- but the banner itself keeps rendering well past that (see the callback below), so
      * "MINIGAME!" stays up above the wheel for its own whole spin+reveal instead of disappearing
-     * the instant the wheel takes over. */
+     * the instant the wheel takes over. Not an armBanner call (see that method's own doc) -- its
+     * `until` is deliberately longer than what it reserves on the gate, which armBanner's uniform
+     * "until == gate reservation" shape can't express. */
     private void scheduleMinigameBanner()
     {
         minigameBanner.task = scheduleAfterTurnEffects(minigameBanner.task, MINIGAME_BANNER_DURATION_MS, () ->
@@ -2110,7 +2130,8 @@ public class RunePartyPlugin extends Plugin
      * the spin + settle-hold synchronously (see scheduleAfterTurnEffects), so the ready-check
      * screen -- which has no timed trigger of its own, see
      * AnnouncementOverlay#renderMinigameReadyCheck -- only starts reading as "the current screen"
-     * once this finishes. */
+     * once this finishes. Not an armBanner call (see that method's own doc) -- minigameSpinnerStart/
+     * Until are still raw fields, never migrated to a TimedBanner, out of scope for this pass. */
     private void scheduleMinigameSpinner()
     {
         minigameSpinnerTask = scheduleAfterTurnEffects(minigameSpinnerTask, MINIGAME_SPINNER_DURATION_MS, () ->
@@ -2129,13 +2150,7 @@ public class RunePartyPlugin extends Plugin
      * an item grant is a one-off event with nothing else keeping track of it in between. */
     private void scheduleItemSpinner(String rsn, String itemKey)
     {
-        itemSpinner.task = scheduleAfterTurnEffects(itemSpinner.task, ITEM_SPINNER_DURATION_MS, () ->
-        {
-            itemSpinner.payload = new ItemSpinnerPayload(rsn, itemKey);
-            itemSpinner.start = System.currentTimeMillis();
-            itemSpinner.until = itemSpinner.start + ITEM_SPINNER_DURATION_MS;
-            extendTurnEffectGate(itemSpinner.until);
-        });
+        armBanner(itemSpinner, ITEM_SPINNER_DURATION_MS, () -> new ItemSpinnerPayload(rsn, itemKey), true);
     }
 
     /** Schedules AnnouncementOverlay's "already have N items" announcement via
@@ -2144,12 +2159,7 @@ public class RunePartyPlugin extends Plugin
      * turn-effect visual is already showing the same way the item wheel itself would have. */
     private void scheduleItemCapBlockedAnnouncement(String rsn, int cap)
     {
-        itemCapBlocked.task = scheduleAfterTurnEffects(itemCapBlocked.task, ITEM_CAP_BLOCKED_DURATION_MS, () ->
-        {
-            itemCapBlocked.payload = new ItemCapBlockedPayload(rsn, cap);
-            itemCapBlocked.until = System.currentTimeMillis() + ITEM_CAP_BLOCKED_DURATION_MS;
-            extendTurnEffectGate(itemCapBlocked.until);
-        });
+        armBanner(itemCapBlocked, ITEM_CAP_BLOCKED_DURATION_MS, () -> new ItemCapBlockedPayload(rsn, cap), true);
     }
 
     /** Schedules AnnouncementOverlay's "You used/&lt;rsn&gt; used &lt;item&gt;!" banner via
@@ -2158,12 +2168,7 @@ public class RunePartyPlugin extends Plugin
      * already showing, same as scheduleItemCapBlockedAnnouncement. */
     private void scheduleItemUsedAnnouncement(String rsn, String itemKey)
     {
-        itemUsedAnnounce.task = scheduleAfterTurnEffects(itemUsedAnnounce.task, ITEM_USED_ANNOUNCE_DURATION_MS, () ->
-        {
-            itemUsedAnnounce.payload = new ItemUsedAnnouncePayload(rsn, itemKey);
-            itemUsedAnnounce.until = System.currentTimeMillis() + ITEM_USED_ANNOUNCE_DURATION_MS;
-            extendTurnEffectGate(itemUsedAnnounce.until);
-        });
+        armBanner(itemUsedAnnounce, ITEM_USED_ANNOUNCE_DURATION_MS, () -> new ItemUsedAnnouncePayload(rsn, itemKey), true);
     }
 
     /** Schedules AnnouncementOverlay's "You/&lt;rsn&gt; landed on a Coin Trap!" banner via
@@ -2173,19 +2178,16 @@ public class RunePartyPlugin extends Plugin
      * handler), no banner of their own. */
     private void scheduleCoinTrapTriggerAnnouncement(String victimRsn)
     {
-        coinTrapAnnounce.task = scheduleAfterTurnEffects(coinTrapAnnounce.task, COIN_TRAP_ANNOUNCE_DURATION_MS, () ->
-        {
-            coinTrapAnnounce.payload = victimRsn;
-            coinTrapAnnounce.until = System.currentTimeMillis() + COIN_TRAP_ANNOUNCE_DURATION_MS;
-            extendTurnEffectGate(coinTrapAnnounce.until);
-        });
+        armBanner(coinTrapAnnounce, COIN_TRAP_ANNOUNCE_DURATION_MS, () -> victimRsn, true);
     }
 
     /** Arms AnnouncementOverlay's mini-game rewards recap ("who got what") -- called from the
      * MINIGAME_ENDED handler, parsing its own "payouts" list once here rather than having
      * AnnouncementOverlay re-parse the raw event payload every frame. Extends turnEffectGateUntil
      * so both the round-complete recap (see scheduleRoundCompleteBanner) and the new round's first
-     * TURN_STARTED banner wait behind this one instead of overlapping it. */
+     * TURN_STARTED banner wait behind this one instead of overlapping it. Not an armBanner call
+     * (see that method's own doc) -- this arms synchronously, with no scheduleAfterTurnEffects
+     * wrapper to collapse. */
     private void triggerMinigameRewardsBanner(JsonObject payload)
     {
         minigameRewardsBanner.payload = Json.safeMinigameRewards(payload, "payouts");
@@ -2204,12 +2206,7 @@ public class RunePartyPlugin extends Plugin
      * those same standings itself right after, and this plain recap would spoil that. */
     private void scheduleRoundCompleteBanner()
     {
-        roundCompleteBanner.task = scheduleAfterTurnEffects(roundCompleteBanner.task, ROUND_COMPLETE_BANNER_DURATION_MS, () ->
-        {
-            roundCompleteBanner.payload = getCurrentRound();
-            roundCompleteBanner.until = System.currentTimeMillis() + ROUND_COMPLETE_BANNER_DURATION_MS;
-            extendTurnEffectGate(roundCompleteBanner.until); // belt-and-suspenders, see scheduleMinigameBanner's identical comment
-        });
+        armBanner(roundCompleteBanner, ROUND_COMPLETE_BANNER_DURATION_MS, this::getCurrentRound, true);
     }
 
     /** Final standings, ranked the same way renderRoundCompleteBanner already ranks the live
@@ -2219,11 +2216,7 @@ public class RunePartyPlugin extends Plugin
      * as every other standings view. */
     private List<RosterReducer.RosterEntry> computeFinalStandings()
     {
-        List<RosterReducer.RosterEntry> standings = new ArrayList<>();
-        for (RosterReducer.RosterEntry entry : rosterReducer.snapshot())
-        {
-            if (entry.role == RunePartyRole.PLAYER && entry.joined) standings.add(entry);
-        }
+        List<RosterReducer.RosterEntry> standings = rosterReducer.seatedPlayers();
         standings.sort(Comparator
             .comparingInt((RosterReducer.RosterEntry e) -> e.goldenGnomeCount).reversed()
             .thenComparing(Comparator.comparingInt((RosterReducer.RosterEntry e) -> e.coins).reversed()));
@@ -2237,7 +2230,11 @@ public class RunePartyPlugin extends Plugin
      * _resolve_minigame_if_complete) -- without waiting behind that banner's own gate reservation,
      * "GAME OVER!" would flash up mid-rewards-recap instead of politely queuing after it. No-ops if
      * nobody's actually seated (shouldn't happen for a game that reached GAME_ENDED, but a lone
-     * host force-ending an empty lobby is technically possible). */
+     * host force-ending an empty lobby is technically possible). Not an armBanner call, nor are
+     * the four scheduleX methods below it that continue this chain (see that method's own doc) --
+     * each carries real logic beyond arming one banner (building a reveal order, a chat message,
+     * arming two banners in the same callback), not just the arm-and-extend-gate shape armBanner
+     * covers. */
     private void triggerGameOverSequence()
     {
         List<RosterReducer.RosterEntry> standings = computeFinalStandings();
@@ -2317,7 +2314,8 @@ public class RunePartyPlugin extends Plugin
     /** Arms AnnouncementOverlay's "Welcome to Rune Party Showdown" title card -- called once, right
      * after createGame/joinGame succeeds, for the local player only (there's no server event for
      * this; it's purely a client-side "you're in!" splash, so it never fires for anyone already in
-     * the lobby when someone else joins). */
+     * the lobby when someone else joins). Not an armBanner call (see that method's own doc) --
+     * arms synchronously with no scheduleAfterTurnEffects wrapper, nothing to collapse. */
     private void triggerWelcomeBanner()
     {
         welcomeBanner.until = System.currentTimeMillis() + WELCOME_BANNER_DURATION_MS;

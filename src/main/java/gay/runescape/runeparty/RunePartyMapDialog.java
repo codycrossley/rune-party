@@ -238,9 +238,8 @@ public class RunePartyMapDialog extends JDialog
             }
 
             List<String> standing = new ArrayList<>();
-            for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().snapshot())
+            for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().seatedPlayers())
             {
-                if (entry.role != RunePartyRole.PLAYER || !entry.joined) continue;
                 TileReducer.TileEntry playerTile = plugin.getTileReducer().tileAtIndex(plugin.getPlayerPosition(entry.rsn));
                 if (playerTile != null && playerTile.point.equals(wp)) standing.add(entry.rsn);
             }
@@ -285,9 +284,8 @@ public class RunePartyMapDialog extends JDialog
             String localRsn = plugin.getLocalRsn();
 
             Map<Point, List<RosterReducer.RosterEntry>> byCell = new HashMap<>();
-            for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().snapshot())
+            for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().seatedPlayers())
             {
-                if (entry.role != RunePartyRole.PLAYER || !entry.joined) continue;
                 TileReducer.TileEntry tile = plugin.getTileReducer().tileAtIndex(plugin.getPlayerPosition(entry.rsn));
                 if (tile == null || tile.point.getPlane() != plane) continue;
                 byCell.computeIfAbsent(cellCenter(tile.point, minX, maxY), c -> new ArrayList<>()).add(entry);

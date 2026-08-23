@@ -1,0 +1,16 @@
+{
+  "description": "Locks in the exact PLAYER_LEFT/colorNumber-preservation property ARCHITECTURE_REVIEW.md's C7 flagged as drifted: a departed PLAYER is demoted to SPECTATOR (never deleted), and re-promoting them later restores their original colorNumber and join-order turn slot rather than handing them a new one. Server: _apply_roster_event + _finalize_roster (app.py), replayed by tests/test_roster_fold.py. Client: RosterReducer, replayed by RosterReducerTest#fixtureRoundTripMatchesServer, which folds these events via apply() and then calls syncFromRoster(expectedRoster) -- mirroring RunePartyPlugin's real live flow, since apply() alone never reconstructs 'number'/'colorNumber' from the event stream (see that test's own doc for why). Kept in sync by hand across the two separate repos -- there's no shared build between them (see check_event_parity.py's own doc for the same constraint on the event-type parity check).",
+  "events": [
+    {"type": "PLAYER_JOINED", "payload": {"player": "Zezima"}},
+    {"type": "ROLE_ASSIGNED", "payload": {"player": "Zezima", "role": "PLAYER"}},
+    {"type": "PLAYER_JOINED", "payload": {"player": "Woox"}},
+    {"type": "ROLE_ASSIGNED", "payload": {"player": "Woox", "role": "PLAYER"}},
+    {"type": "PLAYER_LEFT", "payload": {"player": "Zezima"}},
+    {"type": "PLAYER_JOINED", "payload": {"player": "Zezima"}},
+    {"type": "ROLE_ASSIGNED", "payload": {"player": "Zezima", "role": "PLAYER"}}
+  ],
+  "expectedRoster": [
+    {"rsn": "Zezima", "role": "PLAYER", "joined": true, "online": false, "number": "1", "colorNumber": "1", "coins": 0, "goldenGnomeCount": 0, "items": {}},
+    {"rsn": "Woox", "role": "PLAYER", "joined": true, "online": false, "number": "2", "colorNumber": "2", "coins": 0, "goldenGnomeCount": 0, "items": {}}
+  ]
+}
