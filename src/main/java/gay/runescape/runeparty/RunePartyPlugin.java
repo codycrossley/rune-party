@@ -911,6 +911,17 @@ public class RunePartyPlugin extends Plugin
         if (self == null || gid == null || token == null) return;
         if (!self.equalsIgnoreCase(currentTurnRsn) || pendingRoll || rollRequestSubmitted) return;
 
+        // Rolling abandons any still-armed item placement (see beginItemPlacement/
+        // cancelItemPlacement) -- the player chose to move instead of finishing it, so it goes
+        // back to unused (the server never heard about it either, see cancelItemPlacement's own
+        // doc) rather than staying stuck armed past the turn it was armed on. TURN_STARTED clears
+        // this too, as a backstop for any other path off this turn that isn't a roll.
+        if (itemPlacementKey != null)
+        {
+            itemPlacementKey = null;
+            refreshPanel();
+        }
+
         rollRequestSubmitted = true;
         submitAction("Roll dice", () -> apiClient.rollDice(gid, self, token), e ->
         {
@@ -1931,6 +1942,11 @@ public class RunePartyPlugin extends Plugin
                 pendingTargetIndices = Collections.emptyList();
                 arrivalSubmitted = false;
                 itemUsedThisTurn = false;
+                // Backstop for the same invariant rollDice() enforces on its own path (see that
+                // method's own doc) -- an armed-but-never-placed item must never survive into a
+                // turn other than the one it was armed on, regardless of how this turn actually
+                // ended.
+                itemPlacementKey = null;
                 if (!catchingUp)
                 {
                     scheduleTurnAnnouncement(currentTurnRsn);
