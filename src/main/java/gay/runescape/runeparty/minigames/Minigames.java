@@ -1,10 +1,8 @@
 package gay.runescape.runeparty.minigames;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
+import gay.runescape.runeparty.KeyedRegistry;
+
 import java.util.List;
-import java.util.Map;
 
 /** Client-side mini-game registry -- keyed the same way the server's own registry is (see
  * app.py/minigames' REGISTRY), so RunePartyPanel can look up the right Minigame's control panel
@@ -18,40 +16,26 @@ public final class Minigames
     // TrueOrFalseMinigame) so the selection wheel has more than three options to actually cycle
     // through. Dropping any of them would silently break that server's actual rounds by falling
     // back to a mini-game with no matching UI for what the server thinks is happening.
-    private static final String FALLBACK_KEY = "placeholder-1";
-
-    private static final Map<String, Minigame> REGISTRY = new LinkedHashMap<>();
+    private static final KeyedRegistry<Minigame> REGISTRY = new KeyedRegistry<>("placeholder-1");
 
     static
     {
-        register(new PlaceholderMinigame("placeholder-1", "Placeholder Mini-Game #1"));
-        register(new PlaceholderMinigame("placeholder-2", "Placeholder Mini-Game #2"));
-        register(new PlaceholderMinigame("placeholder-3", "Placeholder Mini-Game #3"));
-        register(new PlaceholderMinigame("placeholder-4", "Placeholder Mini-Game #4"));
-        register(new CoinRushMinigame());
-        register(new TrueOrFalseMinigame());
+        REGISTRY.register(new PlaceholderMinigame("placeholder-1", "Placeholder Mini-Game #1"));
+        REGISTRY.register(new PlaceholderMinigame("placeholder-2", "Placeholder Mini-Game #2"));
+        REGISTRY.register(new PlaceholderMinigame("placeholder-3", "Placeholder Mini-Game #3"));
+        REGISTRY.register(new PlaceholderMinigame("placeholder-4", "Placeholder Mini-Game #4"));
+        REGISTRY.register(new CoinRushMinigame());
+        REGISTRY.register(new TrueOrFalseMinigame());
     }
 
-    private static void register(Minigame minigame)
-    {
-        REGISTRY.put(minigame.getKey(), minigame);
-    }
-
-    /** Falls back to FALLBACK_KEY for an unrecognized or missing key -- e.g. a server running a
-     * mini-game this client build was never updated to know about -- rather than leaving the
-     * panel with nothing to show at all. */
     public static Minigame get(String key)
     {
-        Minigame minigame = key != null ? REGISTRY.get(key) : null;
-        return minigame != null ? minigame : REGISTRY.get(FALLBACK_KEY);
+        return REGISTRY.get(key);
     }
 
-    /** Every registered mini-game, in registration order -- stable across calls, so the selection
-     * spinner (see AnnouncementOverlay#renderMinigameSpinner) can assign each one a fixed wheel
-     * segment index. */
     public static List<Minigame> all()
     {
-        return Collections.unmodifiableList(new ArrayList<>(REGISTRY.values()));
+        return REGISTRY.all();
     }
 
     private Minigames()

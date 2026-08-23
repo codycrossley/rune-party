@@ -10,6 +10,11 @@ import java.awt.Graphics2D;
  * common shape, not either concrete type. */
 public interface WheelEntry
 {
+    /** Must match the key the matching server-side entity registers itself under (see app.py's
+     * items/minigames REGISTRY) -- how Minigames/Items (see KeyedRegistry) look an entry back up
+     * for whatever key a server event payload carried. */
+    String getKey();
+
     String getDisplayName();
 
     /** Draws this entry's icon centered at (x, y) at roughly {@code size} pixels across. Purely

@@ -16,11 +16,6 @@ import javax.swing.JComponent;
  * mini-game the same shared way it draws an Item -- see WheelEntry's own doc. */
 public interface Minigame extends WheelEntry
 {
-    /** Must match the "key" MINIGAME_STARTED's payload carries for this mini-game -- the same
-     * string the matching server-side Minigame subclass sets as its own `key` class attribute
-     * (see app.py/minigames). */
-    String getKey();
-
     /** Builds the interactive control(s) shown in the panel's mini-game section while this
      * mini-game is active -- e.g. the placeholder's score spinner + submit button. Called once
      * each time this mini-game becomes active (see RunePartyPanel#refresh), not on every repaint,

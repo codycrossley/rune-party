@@ -11,11 +11,6 @@ import gay.runescape.runeparty.WheelEntry;
  * instant it's used (see app.py's use-item endpoint and RunePartyPlugin#useItem). */
 public interface Item extends WheelEntry
 {
-    /** Must match the "itemKey"/"key" ITEM_GRANTED's payload carries for this item -- the same
-     * string the matching server-side Item subclass sets as its own `key` attribute (see
-     * app.py/items). */
-    String getKey();
-
     /** Whether AnnouncementOverlay should show a "You used/&lt;rsn&gt; used &lt;name&gt;!" banner
      * (see renderItemUsedAnnouncement) the moment this item's ITEM_USED lands. False by default --
      * PlaceholderItem's coin change already gets its own feedback from the coin popup, so most
