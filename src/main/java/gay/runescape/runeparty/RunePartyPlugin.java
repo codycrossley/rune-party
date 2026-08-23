@@ -1,13 +1,10 @@
 package gay.runescape.runeparty;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
 import com.google.inject.Provides;
 import gay.runescape.runeparty.items.Items;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -384,8 +381,17 @@ public class RunePartyPlugin extends Plugin
     private AnnouncementOverlay announcementOverlay;
     private ConfettiOverlay confettiOverlay;
     private RosterReducer rosterReducer;
-    private ApiClient apiClient;
+    ApiClient apiClient; // package-private: presenters (MinigamePresentation) issue their own requests
     private EventSocket eventSocket;
+
+    // Per-feature presenter objects (see ARCHITECTURE_REVIEW.md's C1 finding, step 2) -- each owns
+    // its own fields, folds its own event types via apply()/a dedicated method, and clears itself
+    // via reset(). Constructed once in startUp() (same convention as apiClient above), not
+    // reconstructed per game -- resetState() calls each one's reset() instead.
+    private GoldenGnomePresentation goldenGnomePresentation;
+    private CeremonyPresentation ceremonyPresentation;
+    private ItemPresentation itemPresentation;
+    private MinigamePresentation minigamePresentation;
     private RunePartyPanel panel;
     private NavigationButton navButton;
     private RunePartyMapDialog mapDialog; // lazily created on the first "Show Map" click, see showMap()
@@ -406,13 +412,15 @@ public class RunePartyPlugin extends Plugin
     // Dedicated to delayed, purely-cosmetic UI timers (see scheduleTurnAnnouncement) -- kept
     // separate from `executor` above so a pending delay can never queue behind (or block) a real
     // network call.
-    private final ScheduledExecutorService uiTimerExec = Executors.newSingleThreadScheduledExecutor(r ->
+    // Package-private: presenters (GoldenGnomePresentation's GOLDEN_GNOME_MOVED handling,
+    // MinigamePresentation's MINIGAME_COUNTDOWN_STARTED handling) schedule their own raw nested
+    // delayed callbacks against this, not just through scheduleAfterTurnEffects/armBanner.
+    final ScheduledExecutorService uiTimerExec = Executors.newSingleThreadScheduledExecutor(r ->
     {
         Thread t = new Thread(r, "runeparty-ui-timer");
         t.setDaemon(true);
         return t;
     });
-    private volatile ScheduledFuture<?> minigameSpinnerTask;
 
     /** Rolling "nothing turn-concluding should appear before this" gate. Every turn-effect visual
      * with its own on-screen duration -- currently just the coin popup, but meant to grow as more
@@ -429,9 +437,9 @@ public class RunePartyPlugin extends Plugin
     private volatile GamePhase phase = GamePhase.DISCONNECTED;
 
     // ---- session ----
-    private volatile String gameId = null;
+    volatile String gameId = null; // package-private: MinigamePresentation's collectCoinRushCoin reads this
     private volatile String writeKey = null; // non-null only for the host
-    private volatile String playerToken = null;
+    volatile String playerToken = null; // package-private: MinigamePresentation's collectCoinRushCoin reads this
     private volatile String joinCode = null;
     private volatile String hostRsn = null;
 
@@ -452,19 +460,15 @@ public class RunePartyPlugin extends Plugin
     // finishes -- onAnimationChanged only actually calls rollDice() on the animation change that
     // clears this, so the roll never fires mid-emote.
     private volatile boolean awaitingSpinFinish = false;
-    // Same idea as awaitingSpinFinish, one per response to a pending Golden Gnome offer -- see
-    // onAnimationChanged. At most one of these six "awaiting" flags is ever true at once: a roll
-    // and a Golden Gnome offer are both only possible outside a mini-game (isLocalPlayerReadyToRoll
-    // requires !minigameActive), a mini-game ready-check is only possible before its own countdown
-    // starts (isLocalPlayerAwaitingMinigameReady requires !minigameCountdownStarted), and a True or
-    // False answer is only possible once the round's actually playable (isLocalPlayerAwaitingTrueOrFalseAnswer
-    // requires isMinigamePlayable(), which itself requires the countdown to have both started and
-    // finished) -- so no two of these can ever overlap.
-    private volatile boolean awaitingGnomeYesFinish = false;
-    private volatile boolean awaitingGnomeNoFinish = false;
-    private volatile boolean awaitingMinigameReadyFinish = false;
-    private volatile boolean awaitingTrueOrFalseYesFinish = false;
-    private volatile boolean awaitingTrueOrFalseNoFinish = false;
+    // At most one of these six "awaiting" flags (this one plus GoldenGnomePresentation's own
+    // Golden Gnome pair, plus MinigamePresentation's own mini-game/True-or-False three) is ever
+    // true at once -- see onAnimationChanged. A roll and a Golden Gnome offer are both only
+    // possible outside a mini-game (isLocalPlayerReadyToRoll requires !minigameActive), a mini-game
+    // ready-check is only possible before its own countdown starts
+    // (isLocalPlayerAwaitingMinigameReady requires !minigameCountdownStarted), and a True or False
+    // answer is only possible once the round's actually playable
+    // (isLocalPlayerAwaitingTrueOrFalseAnswer requires isMinigamePlayable(), which itself requires
+    // the countdown to have both started and finished) -- so no two of these can ever overlap.
     // Candidate destination tiles for the current roll -- more than one when the roll's path
     // crosses a fork (see TileOverlay#renderTargetArrow, which draws one arrow per candidate).
     // Never null, only ever empty.
@@ -496,111 +500,10 @@ public class RunePartyPlugin extends Plugin
     private int boardViewSavedPitch;
     private int boardViewSavedYaw;
     private int boardViewSavedZoom;
-    private volatile boolean minigameActive = false;
-    private volatile String minigameInstructions = null;
-    // Which minigames/ registry entry is active -- see the server's own minigames package, whose
-    // Minigame.key values these match, and RunePartyPanel/gay.runescape.runeparty.minigames.
-    // Minigames#get, which looks up this key's own control-panel UI.
-    private volatile String minigameKey = null;
-    // Announced by AnnouncementOverlay's selection spinner once it settles -- see
-    // renderMinigameSpinner/renderMinigameReadyCheck, the only consumers.
-    private volatile String minigameDisplayName = null;
-    // ---- mini-game selection spinner (cosmetic-only timing, chained behind the "MINIGAME!"
-    // banner -- see scheduleMinigameSpinner) ----
-    private volatile long minigameSpinnerStart = 0;
-    private volatile long minigameSpinnerUntil = 0;
-    // Real state: true iff this MINIGAME_STARTED was applied during catch-up, meaning the spinner
-    // never plays for this client this round (see scheduleMinigameSpinner's !catchingUp guard) --
-    // so minigameSpinnerUntil staying 0 means "already resolved, skip straight to the ready-check"
-    // rather than "hasn't started yet." Set unconditionally in the MINIGAME_STARTED handler,
-    // exactly like minigameCountdownStarted's split for the same reason -- see
-    // AnnouncementOverlay#renderMinigameReadyCheck, the only consumer.
-    private volatile boolean minigameSpinnerSkippedForClient = false;
-    // ---- item wheel reveal (cosmetic-only timing, chained behind whatever turn-effect is
-    // already showing -- see scheduleItemSpinner). Payload identifies who got what, needed by the
-    // reveal text ("You got..."/"<rsn> got...", mirroring renderGoldenGnomeOutcome's own
-    // per-viewer split). Unlike the mini-game spinner, nothing else needs to distinguish "hasn't
-    // started yet" from "this client only caught up after the fact" -- no other screen chains
-    // behind this one the way the ready-check chains behind the mini-game spinner, so there's no
-    // *SkippedForClient flag needed here. ----
-    private final TimedBanner<ItemSpinnerPayload> itemSpinner = new TimedBanner<>();
-    // ---- item cap announcement (cosmetic-only timing, chained the same way as the item spinner
-    // above -- see scheduleItemCapBlockedAnnouncement). Fires instead of the item wheel when
-    // ITEM_CAP_BLOCKED lands, so at most one of {itemSpinner.until, itemCapBlocked.until} is ever
-    // "live" for the same landing. ----
-    private final TimedBanner<ItemCapBlockedPayload> itemCapBlocked = new TimedBanner<>();
-    // ---- item-used announcement (cosmetic-only timing, chained the same way as the item cap
-    // banner above -- see scheduleItemUsedAnnouncement). Only fired for items that opt in via
-    // Item#hasUseAnnouncement -- PlaceholderItem's coin change already has its own feedback. ----
-    private final TimedBanner<ItemUsedAnnouncePayload> itemUsedAnnounce = new TimedBanner<>();
-    // ---- Coin Trap trigger (cosmetic-only timing, chained the same way as the item-used
-    // announcement above -- see scheduleCoinTrapTriggerAnnouncement). Payload is whoever landed on
-    // it (the victim) -- the owner's own feedback is purely their coin popup, no banner of their
-    // own. ----
-    private final TimedBanner<String> coinTrapAnnounce = new TimedBanner<>(); // payload: victim rsn
-    // Real-time (not chained behind scheduleAfterTurnEffects -- see COIN_TRAP_TRIGGERED handling's
-    // own doc): where TileOverlay#updateCoinTrapModels should force-persist the model and fire its
-    // spring animation for COIN_TRAP_TRIGGER_PERSIST_MS after the server's own TILE_UNMARKED would
-    // otherwise have already made it vanish.
-    private volatile WorldPoint coinTrapTriggerPoint = null;
-    private volatile long coinTrapTriggerUntil = 0;
-    // ---- mini-game ready-check (server-driven, everyone sees it -- see MINIGAME_PLAYER_READY/
-    // MINIGAME_COUNTDOWN_STARTED handling). minigameReadyRsns is real state (who's actually
-    // YES-emoted so far), applied unconditionally catch-up or not -- same reasoning as
-    // playerPositions below. minigameCountdownStarted is likewise real state; only
-    // minigameCountdownBannerUntil (the visual "3...2...1... BEGIN!") is cosmetic-only, deliberately
-    // armed MINIGAME_COUNTDOWN_START_DELAY_MS after minigameCountdownStarted flips, so the
-    // ready-check screen gets to actually show everyone marked "Ready!" for a beat first (see
-    // renderMinigameReadyCheck/isMinigamePlayable, both of which need to tell "hasn't been armed
-    // yet, still in that pause" apart from "already resolved, this client only caught up" -- that's
-    // what minigameCountdownSkippedForClient is for, same idiom as minigameSpinnerSkippedForClient
-    // above). ----
-    private final Set<String> minigameReadyRsns = ConcurrentHashMap.newKeySet(); // lowercase rsn
-    private volatile boolean minigameCountdownStarted = false;
-    private volatile boolean minigameCountdownSkippedForClient = false;
-    private volatile long minigameCountdownBannerUntil = 0;
-    // ---- Coin Rush (server-driven spawns/collections -- see COIN_RUSH_SPAWN/COIN_RUSH_COLLECTED
-    // handling). coinRushSpawns is real state, applied catch-up or not: every currently-live
-    // spawn's WorldPoint keyed by the server's own spawn id, mirrored into a 3D model per spawn by
-    // TileOverlay#updateCoinRushModels the same "diff against the live set" pattern
-    // updateCoinTrapModels already uses. coinRushScores is this round's own live tally (lowercase
-    // rsn -> coins collected so far), reset fresh on every MINIGAME_STARTED for COIN_RUSH_KEY --
-    // read by StatsOverlay's live scoreboard, which replaces the normal roster view for exactly as
-    // long as a Coin Rush round is playable. coinRushRoundStartAt is the wall-clock moment the
-    // round actually became playable (see COIN_RUSH_DURATION_MS/getCoinRushEndsAt), set once per
-    // round -- precisely for a live client (the same "BEGIN!" instant minigameCountdownBannerUntil
-    // gets armed at), best-effort ("now") for a client that only caught up on an already-underway
-    // round. ----
-    private final Map<Integer, WorldPoint> coinRushSpawns = new ConcurrentHashMap<>();
-    private final Map<String, Integer> coinRushScores = new ConcurrentHashMap<>();
-    // Guards one spawn's own collect report against firing every tick while it's in flight -- same
-    // role arrivalSubmitted plays for confirmArrival, just one per spawn id (via a Set) instead of
-    // a single flag, since more than one spawn can be live -- and walked onto in quick succession
-    // -- at the same time. See checkCoinRushCollection, the only writer besides the
-    // COIN_RUSH_COLLECTED handler (which clears an entry once the server's own echo confirms it).
-    private final Set<Integer> coinRushCollectSubmitted = ConcurrentHashMap.newKeySet();
-    private volatile long coinRushRoundStartAt = 0;
-    // ---- True or False (server-driven rounds -- see TRUE_OR_FALSE_ROUND_STARTED/ANSWERED/
-    // ROUND_ENDED handling). All real state, applied catch-up or not: trueOrFalseQuestion/
-    // RoundNumber are the current round's own question text and 1-indexed round number (null/0
-    // once the round ends, until the next one starts or the mini-game itself ends).
-    // trueOrFalseAnsweredRsns mirrors minigameReadyRsns's own "who's confirmed" role, just scoped
-    // to the current round instead of the whole mini-game -- who's submitted an answer this round,
-    // not what they answered (see renderTrueOrFalseQuestion, the "Ready screen"-style tally this
-    // was asked for). trueOrFalseMyAnswer is the local player's own answer this round (null until
-    // they've answered), read by isLocalPlayerAwaitingTrueOrFalseAnswer to stop a YES/NO emote
-    // from resubmitting once they already have. trueOrFalseLastCorrectAnswer/Results are the most
-    // recent TRUE_OR_FALSE_ROUND_ENDED's own reveal, held onto (not cleared) through the next
-    // round's own trueOrFalseQuestion update, since renderTrueOrFalseReveal gates its own display
-    // on trueOrFalseRevealUntil, not on whether a new question already exists. ----
-    private volatile String trueOrFalseQuestion = null;
-    private volatile int trueOrFalseRoundNumber = 0;
-    private final Set<String> trueOrFalseAnsweredRsns = ConcurrentHashMap.newKeySet(); // lowercase rsn
-    private volatile Boolean trueOrFalseMyAnswer = null;
-    private volatile long trueOrFalseRoundStartedAt = 0; // wall-clock moment this round's own TRUE_OR_FALSE_ROUND_STARTED landed -- see getTrueOrFalseRoundEndsAt
-    private volatile Boolean trueOrFalseLastCorrectAnswer = null;
-    private volatile List<TrueOrFalseResult> trueOrFalseLastResults = Collections.emptyList();
-    private volatile long trueOrFalseRevealUntil = 0;
+    // Mini-game (selection/ready-check/countdown), Coin Rush, and True or False state now lives in
+    // MinigamePresentation (see ARCHITECTURE_REVIEW.md's C1 finding, step 2) -- minigamePresentation
+    // field is declared with the other presenters above, constructed in startUp(). Item wheel/cap/
+    // used-announcement and Coin Trap trigger state likewise now lives in ItemPresentation.
     // Host-set at start (see GAME_STARTED's maxRounds) and incremented once per completed round
     // (see MINIGAME_ENDED) -- together these are what StatsOverlay's "ROUND x/y" line reads via
     // getCurrentRound/getMaxRounds. 0 until GAME_STARTED actually lands.
@@ -625,206 +528,34 @@ public class RunePartyPlugin extends Plugin
     // ---- welcome title card (client-side, local-player-only -- see triggerWelcomeBanner) ----
     private final TimedBanner<Void> welcomeBanner = new TimedBanner<>();
 
-    // ---- minigame banner (server-driven, everyone sees it -- see MINIGAME_STARTED handling) ----
-    private final TimedBanner<Void> minigameBanner = new TimedBanner<>();
+    // minigameBanner/roundCompleteBanner/minigameRewardsBanner now live on MinigamePresentation,
+    // along with the mini-game fields/handleEvent cases/getters they back -- see
+    // ARCHITECTURE_REVIEW.md's C1 finding, step 2.
 
     // ---- game-start banner (server-driven, everyone sees it -- see GAME_STARTED handling) ----
     private final TimedBanner<Void> gameStartBanner = new TimedBanner<>();
 
-    // ---- round-complete banner (server-driven, everyone sees it -- see MINIGAME_ENDED handling
-    // and scheduleRoundCompleteBanner). Its payload is the *upcoming* round -- the one about to
-    // start, same number getCurrentRound() would return live -- snapshotted at trigger time so it
-    // stays stable through the banner's own display window regardless of whatever completedRounds
-    // does afterward. ----
-    private final TimedBanner<Integer> roundCompleteBanner = new TimedBanner<>(); // payload: upcoming round number
+    // MinigameReward, TrueOrFalseResult, and TimedBanner<T> now live in their own top-level files
+    // (same package) -- hoisted out so the new presenter classes (see ARCHITECTURE_REVIEW.md's C1
+    // finding, step 2) can reference them without a qualified RunePartyPlugin.X name. Every
+    // existing field declaration/getter here keeps compiling unchanged, same package + same simple
+    // name.
 
-    // ---- mini-game rewards recap (server-driven, everyone sees it -- see MINIGAME_ENDED handling
-    // and triggerMinigameRewardsBanner). Shown *before* the round-complete recap above, via
-    // scheduleRoundCompleteBanner deferring that one behind this banner's own gate extension. ----
-    private final TimedBanner<List<MinigameReward>> minigameRewardsBanner = new TimedBanner<>();
+    // ItemSpinnerPayload/ItemCapBlockedPayload/ItemUsedAnnouncePayload now live nested inside
+    // ItemPresentation, along with the fields/handleEvent cases/getters they back -- see
+    // ARCHITECTURE_REVIEW.md's C1 finding, step 2.
 
-    /** One entry in a MINIGAME_ENDED payload's "payouts" list -- see safeMinigameRewards. */
-    public static class MinigameReward
-    {
-        public final String rsn;
-        public final int coins;
+    // GoldenGnomeOutcomePayload/GoldenGnomePopupPayload now live nested inside
+    // GoldenGnomePresentation, along with the fields/handleEvent cases/getters they back -- see
+    // ARCHITECTURE_REVIEW.md's C1 finding, step 2.
 
-        public MinigameReward(String rsn, int coins)
-        {
-            this.rsn = rsn;
-            this.coins = coins;
-        }
-    }
+    // PlaceRevealPayload now lives nested inside CeremonyPresentation, along with the end-game
+    // ceremony fields/GAME_ENDED handling/getters it backs -- see ARCHITECTURE_REVIEW.md's C1
+    // finding, step 2.
 
-    /** One player's outcome on a single True or False round -- see TRUE_OR_FALSE_ROUND_ENDED's own
-     * "results" list and renderTrueOrFalseReveal, the only consumer. {@code answer} is null if
-     * they never answered in time (always incorrect in that case). */
-    public static class TrueOrFalseResult
-    {
-        public final String rsn;
-        public final Boolean answer;
-        public final boolean correct;
-
-        public TrueOrFalseResult(String rsn, Boolean answer, boolean correct)
-        {
-            this.rsn = rsn;
-            this.answer = answer;
-            this.correct = correct;
-        }
-    }
-
-    /** One cosmetic, client-only announcement banner's timing state -- until/payload/optionally a
-     * chained task. Replaces what used to be 2-5 separate parallel fields per banner (an xUntil
-     * timestamp, an xRsn/payload, sometimes an xStart, sometimes an xTask) -- see
-     * ARCHITECTURE_REVIEW.md's C1 finding. Purely a value holder: this class still owns exactly
-     * when/why each one gets armed (via its own scheduleXBanner/triggerX method) and every public
-     * getter still has its own name/signature, just delegating to one of these instead of a raw
-     * field -- AnnouncementOverlay and every other consumer needs no changes. Real,
-     * server-authoritative state (minigameReadyRsns, coinRushSpawns, trueOrFalseQuestion, etc.) is
-     * untouched -- this is purely the cosmetic-timer half. */
-    private static final class TimedBanner<T>
-    {
-        volatile long start;
-        volatile long until;
-        volatile T payload;
-        volatile ScheduledFuture<?> task;
-
-        void reset()
-        {
-            if (task != null) { task.cancel(false); task = null; }
-            start = 0;
-            until = 0;
-            payload = null;
-        }
-    }
-
-    /** Payload for the item wheel reveal -- see scheduleItemSpinner. */
-    private static final class ItemSpinnerPayload
-    {
-        final String rsn;
-        final String itemKey;
-
-        ItemSpinnerPayload(String rsn, String itemKey)
-        {
-            this.rsn = rsn;
-            this.itemKey = itemKey;
-        }
-    }
-
-    /** Payload for the "already have N items" announcement -- see scheduleItemCapBlockedAnnouncement. */
-    private static final class ItemCapBlockedPayload
-    {
-        final String rsn;
-        final int cap;
-
-        ItemCapBlockedPayload(String rsn, int cap)
-        {
-            this.rsn = rsn;
-            this.cap = cap;
-        }
-    }
-
-    /** Payload for the "You/&lt;rsn&gt; used &lt;item&gt;!" banner -- see scheduleItemUsedAnnouncement. */
-    private static final class ItemUsedAnnouncePayload
-    {
-        final String rsn;
-        final String itemKey;
-
-        ItemUsedAnnouncePayload(String rsn, String itemKey)
-        {
-            this.rsn = rsn;
-            this.itemKey = itemKey;
-        }
-    }
-
-    /** Payload for the Golden Gnome purchase outcome banner ("You got a Golden Gnome!"/"You can't
-     * afford this!") -- see the GOLDEN_GNOME_OFFER_RESOLVED handler. */
-    private static final class GoldenGnomeOutcomePayload
-    {
-        final String outcome; // "purchased" | "declined" | "cant_afford"
-        final String rsn;
-
-        GoldenGnomeOutcomePayload(String outcome, String rsn)
-        {
-            this.outcome = outcome;
-            this.rsn = rsn;
-        }
-    }
-
-    /** Payload for the Golden Gnome count "+1" popup -- see the GOLDEN_GNOME_OFFER_RESOLVED handler. */
-    private static final class GoldenGnomePopupPayload
-    {
-        final String rsn;
-        final int newTotal;
-
-        GoldenGnomePopupPayload(String rsn, int newTotal)
-        {
-            this.rsn = rsn;
-            this.newTotal = newTotal;
-        }
-    }
-
-    /** Payload for one place-reveal step in the end-game ceremony -- see schedulePlaceReveal. */
-    private static final class PlaceRevealPayload
-    {
-        final String rsn;
-        final int rank; // 1-based rank within gameOverStandings
-        final int coins;
-        final int goldenGnomes;
-
-        PlaceRevealPayload(String rsn, int rank, int coins, int goldenGnomes)
-        {
-            this.rsn = rsn;
-            this.rank = rank;
-            this.coins = coins;
-            this.goldenGnomes = goldenGnomes;
-        }
-    }
-
-    // ---- end-game awards ceremony (server-driven, everyone sees it -- see GAME_ENDED handling and
-    // triggerGameOverSequence). A chain of banners, each scheduled behind the last via
-    // scheduleAfterTurnEffects: "GAME OVER!" -> "Now it's time to see the winner..." -> one
-    // "In Nth place..." reveal per eliminated player (worst to best, stopping once only the top two
-    // remain) -> "And the winner is..." -> the winner's name plus ConfettiOverlay's burst.
-    // gameOverStandings is the final ranking (coins desc, Golden Gnomes tiebreak, same order
-    // renderRoundCompleteBanner already uses), snapshotted once at trigger time since no further
-    // coin/gnome changes are possible once the server's flipped the game out of ACTIVE. ----
-    private volatile ScheduledFuture<?> gameOverTask; // one handle threaded through every step below, not owned by any single one
-    private volatile List<RosterReducer.RosterEntry> gameOverStandings = Collections.emptyList();
-    private final TimedBanner<Void> gameOverBanner = new TimedBanner<>();
-    private final TimedBanner<Void> winnerIntroBanner = new TimedBanner<>();
-    private final TimedBanner<PlaceRevealPayload> placeReveal = new TimedBanner<>();
-    private final TimedBanner<Void> winnerSuspenseBanner = new TimedBanner<>();
-    private final TimedBanner<String> winnerRevealBanner = new TimedBanner<>(); // payload: winner rsn
-    private final TimedBanner<Void> confettiBanner = new TimedBanner<>();
-
-    // ---- Golden Gnome offer (server-driven, everyone sees it -- see GOLDEN_GNOME_OFFERED/
-    // GOLDEN_GNOME_OFFER_RESOLVED handling). goldenGnomeOfferRsn is real state (non-null exactly
-    // while a response is outstanding, same role pendingRoll plays for a roll) -- it gates whether
-    // a YES/NO emote does anything (see isLocalPlayerAwaitingGoldenGnomeResponse) as well as the
-    // offer banner, and who AnnouncementOverlay#renderGoldenGnomeOffer addresses "You found..." to
-    // vs "<rsn> found...". goldenGnomeOutcome below is purely the follow-up announcement ("You got
-    // a Golden Gnome!"/"You can't afford this!"), cosmetic only -- its own rsn payload is what lets
-    // that banner address the actual buyer ("You...") differently from everyone else watching
-    // ("<rsn>..."), the same split goldenGnomeOfferRsn already does for the offer itself. ----
-    private volatile String goldenGnomeOfferRsn = null;
-    private final TimedBanner<GoldenGnomeOutcomePayload> goldenGnomeOutcome = new TimedBanner<>();
-
-    // ---- Golden Gnome count popup (client-side timer -- see PlayerOverlay#drawGoldenGnomePopup,
-    // same "+1" -> running-total shape and timing as the coin popup) ----
-    private final TimedBanner<GoldenGnomePopupPayload> goldenGnomePopup = new TimedBanner<>();
-
-    // ---- Golden Gnome relocation choreography (client-side timers -- see TileOverlay#
-    // updateGoldenGnomeModels, the only reader). TileReducer already has the *real* tile state the
-    // instant TILE_UNMARKED/TILE_MARKED land (tileReducer.apply runs unconditionally for every
-    // event, before this class's own switch on event type even looks at what kind it is) -- these
-    // four fields are purely about *when the model visually catches up to that*, so the sequence
-    // reads as spotanim -> vanish -> spotanim -> reappear instead of the model teleporting
-    // instantly while the spotanims play catch-up after the fact. ----
-    private volatile WorldPoint goldenGnomeMoveOldPoint = null;
-    private volatile long goldenGnomeMoveHideOldAt = 0; // model still force-shown at goldenGnomeMoveOldPoint until this passes, even though TileReducer already dropped it
-    private volatile WorldPoint goldenGnomeMoveNewPoint = null;
-    private volatile long goldenGnomeMoveShowNewAt = 0; // model force-hidden at goldenGnomeMoveNewPoint until this passes, even though TileReducer already has it
+    // Golden Gnome offer/outcome/popup/relocation state now lives in GoldenGnomePresentation (see
+    // ARCHITECTURE_REVIEW.md's C1 finding, step 2) -- goldenGnomePresentation field is declared
+    // with the other presenters below, constructed in startUp().
 
     // ---- coin popup (client-side timer -- see PlayerOverlay#drawCoinPopup). Keyed per player
     // (player_lower -> an ordered queue of not-yet-expired popups for them) rather than one global
@@ -886,6 +617,10 @@ public class RunePartyPlugin extends Plugin
         loadTileTypeCatalog();
         rosterReducer = new RosterReducer();
         tileReducer = new TileReducer();
+        goldenGnomePresentation = new GoldenGnomePresentation(this);
+        ceremonyPresentation = new CeremonyPresentation(this);
+        itemPresentation = new ItemPresentation(this);
+        minigamePresentation = new MinigamePresentation(this);
 
         tileOverlay = new TileOverlay(client, config, this, tileReducer);
         overlayManager.add(tileOverlay);
@@ -1052,8 +787,9 @@ public class RunePartyPlugin extends Plugin
     // authoritative result always arrives back through handleEvent().
     // -------------------------------------------------------------------------
 
+    // Package-private: MinigamePresentation's collectCoinRushCoin passes a lambda to submitAction.
     @FunctionalInterface
-    private interface ApiCall
+    interface ApiCall
     {
         void run() throws Exception;
     }
@@ -1064,7 +800,7 @@ public class RunePartyPlugin extends Plugin
      * both (see confirmArrival/rollDice below for callers that need the latter). Every action
      * method in this section used to hand-write this exact executor.submit/try/catch/log wrapper
      * around its own apiClient call. */
-    private void submitAction(String logLabel, ApiCall call, Consumer<Exception> onFailure)
+    void submitAction(String logLabel, ApiCall call, Consumer<Exception> onFailure)
     {
         executor.submit(() ->
         {
@@ -1077,7 +813,7 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
-    private void submitAction(String logLabel, ApiCall call)
+    void submitAction(String logLabel, ApiCall call)
     {
         submitAction(logLabel, call, null);
     }
@@ -1085,7 +821,7 @@ public class RunePartyPlugin extends Plugin
     /** Same as {@link #submitAction(String, ApiCall, Consumer)}, plus {@code finallyAction}, run
      * once {@code call} has resolved either way (success or failure) -- createGame/joinGame's own
      * "refresh the panel regardless of outcome" epilogue, the only two callers that need one. */
-    private void submitAction(String logLabel, ApiCall call, Consumer<Exception> onFailure, Runnable finallyAction)
+    void submitAction(String logLabel, ApiCall call, Consumer<Exception> onFailure, Runnable finallyAction)
     {
         executor.submit(() ->
         {
@@ -1212,43 +948,9 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
-    /** Checks the local player's current position against every currently-live Coin Rush spawn
-     * (see coinRushSpawns) and reports a claim the instant it matches one -- called every tick
-     * while a Coin Rush round is playable (see onGameTick). coinRushCollectSubmitted guards each
-     * spawn id against being reported more than once while its first report is still in flight: the
-     * server's own COIN_RUSH_COLLECTED echo is what actually removes the spawn from coinRushSpawns
-     * (and clears the guard), so standing on a still-live spawn tile for several ticks in a row
-     * before the echo lands doesn't fire a fresh request every single tick. */
-    private void checkCoinRushCollection(Player selfPlayer)
-    {
-        WorldPoint pos = selfPlayer != null ? selfPlayer.getWorldLocation() : null;
-        if (pos == null) return;
-
-        for (Map.Entry<Integer, WorldPoint> entry : coinRushSpawns.entrySet())
-        {
-            if (!entry.getValue().equals(pos)) continue;
-            int spawnId = entry.getKey();
-            if (!coinRushCollectSubmitted.add(spawnId)) continue; // already reported, awaiting the echo
-            collectCoinRushCoin(spawnId, pos);
-        }
-    }
-
-    /** Reports the local player reaching a still-live Coin Rush spawn tile. Same
-     * report-then-wait-for-the-echo shape as confirmArrival: the server -- not this call's caller
-     * -- decides who actually wins a spawn racing multiple simultaneous reports (see
-     * COIN_RUSH_COLLECTED, the only source of truth for who got the coins), so this never assumes
-     * success locally. A failed request (network blip, not a "someone else already got it" 409)
-     * clears the guard so checkCoinRushCollection retries it on a later tick. */
-    private void collectCoinRushCoin(int spawnId, WorldPoint pos)
-    {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) { coinRushCollectSubmitted.remove(spawnId); return; }
-
-        submitAction("Collect Coin Rush coin", () -> apiClient.collectCoinRushCoin(gid, self, token, spawnId, pos.getX(), pos.getY(), pos.getPlane()),
-            e -> coinRushCollectSubmitted.remove(spawnId));
-    }
+    // checkCoinRushCollection/collectCoinRushCoin now live on MinigamePresentation, along with the
+    // Coin Rush fields/handleEvent cases/getters they back -- see ARCHITECTURE_REVIEW.md's C1
+    // finding, step 2.
 
     /** Reports the local player standing on the START tile during the pre-game gathering window
      * (GAME_STARTED fired, currentTurnRsn still null). Called automatically from onGameTick --
@@ -1612,7 +1314,7 @@ public class RunePartyPlugin extends Plugin
         // the pendingRoll-gated checks the rest of onGameTick uses.
         if (isCoinRushActive() && isMinigamePlayable())
         {
-            checkCoinRushCollection(selfPlayer);
+            minigamePresentation.checkCoinRushCollection(selfPlayer);
         }
 
         // GAME_STARTED fired but turn order hasn't begun yet (currentTurnRsn still null) -- this
@@ -1698,10 +1400,11 @@ public class RunePartyPlugin extends Plugin
      * animation change away from whichever emote ID matched -- i.e. the emote actually finishing,
      * not just starting -- so the roll (and the screen-centered dice reveal every client sees, see
      * AnnouncementOverlay#renderDiceRoll) or whichever response fires never happens mid-emote;
-     * awaitingSpinFinish/awaitingGnomeYesFinish/awaitingGnomeNoFinish/awaitingMinigameReadyFinish/
-     * awaitingTrueOrFalseYesFinish/awaitingTrueOrFalseNoFinish are what carry that wait across the
-     * two AnimationChanged firings, exactly one set at a time (see those six fields' own doc for
-     * why none of the underlying situations can ever overlap). Gates the actual roll on
+     * awaitingSpinFinish here, plus GoldenGnomePresentation's own awaitingYesFinish/awaitingNoFinish
+     * and MinigamePresentation's own awaitingMinigameReadyFinish/awaitingTrueOrFalseYesFinish/
+     * awaitingTrueOrFalseNoFinish, are what carry that wait across the two AnimationChanged
+     * firings, exactly one set at a time (see awaitingSpinFinish's own doc for why none of the
+     * underlying situations can ever overlap). Gates the actual roll on
      * isLocalPlayerReadyToRoll() -- same check AnnouncementOverlay#renderSpinHint uses to decide
      * whether to show the "Use the SPIN! emote" reminder -- and each response on its own matching
      * isLocalPlayerAwaiting*() check, so no hint is ever showing when the matching emote wouldn't
@@ -1729,15 +1432,15 @@ public class RunePartyPlugin extends Plugin
         {
             if (isLocalPlayerAwaitingGoldenGnomeResponse())
             {
-                awaitingGnomeYesFinish = true;
+                goldenGnomePresentation.armAwaitingYesFinish();
             }
             else if (isLocalPlayerAwaitingMinigameReady())
             {
-                awaitingMinigameReadyFinish = true;
+                minigamePresentation.armAwaitingMinigameReadyFinish();
             }
             else if (isLocalPlayerAwaitingTrueOrFalseAnswer())
             {
-                awaitingTrueOrFalseYesFinish = true;
+                minigamePresentation.armAwaitingTrueOrFalseYesFinish();
             }
             return;
         }
@@ -1746,11 +1449,11 @@ public class RunePartyPlugin extends Plugin
         {
             if (isLocalPlayerAwaitingGoldenGnomeResponse())
             {
-                awaitingGnomeNoFinish = true;
+                goldenGnomePresentation.armAwaitingNoFinish();
             }
             else if (isLocalPlayerAwaitingTrueOrFalseAnswer())
             {
-                awaitingTrueOrFalseNoFinish = true;
+                minigamePresentation.armAwaitingTrueOrFalseNoFinish();
             }
             return;
         }
@@ -1760,29 +1463,29 @@ public class RunePartyPlugin extends Plugin
             awaitingSpinFinish = false;
             rollDice();
         }
-        else if (awaitingGnomeYesFinish)
+        else if (goldenGnomePresentation.isAwaitingYesFinish())
         {
-            awaitingGnomeYesFinish = false;
+            goldenGnomePresentation.clearAwaitingYesFinish();
             respondGoldenGnomeOffer(true);
         }
-        else if (awaitingGnomeNoFinish)
+        else if (goldenGnomePresentation.isAwaitingNoFinish())
         {
-            awaitingGnomeNoFinish = false;
+            goldenGnomePresentation.clearAwaitingNoFinish();
             respondGoldenGnomeOffer(false);
         }
-        else if (awaitingMinigameReadyFinish)
+        else if (minigamePresentation.isAwaitingMinigameReadyFinish())
         {
-            awaitingMinigameReadyFinish = false;
+            minigamePresentation.clearAwaitingMinigameReadyFinish();
             confirmMinigameReady();
         }
-        else if (awaitingTrueOrFalseYesFinish)
+        else if (minigamePresentation.isAwaitingTrueOrFalseYesFinish())
         {
-            awaitingTrueOrFalseYesFinish = false;
+            minigamePresentation.clearAwaitingTrueOrFalseYesFinish();
             answerTrueOrFalse(true);
         }
-        else if (awaitingTrueOrFalseNoFinish)
+        else if (minigamePresentation.isAwaitingTrueOrFalseNoFinish())
         {
-            awaitingTrueOrFalseNoFinish = false;
+            minigamePresentation.clearAwaitingTrueOrFalseNoFinish();
             answerTrueOrFalse(false);
         }
     }
@@ -1809,8 +1512,8 @@ public class RunePartyPlugin extends Plugin
      * direct Player#getWorldLocation() call here would crash off the client thread. */
     public boolean isLocalPlayerReadyToRoll()
     {
-        if (phase != GamePhase.ACTIVE || pendingRoll || rollRequestSubmitted || minigameActive) return false;
-        if (goldenGnomeOfferRsn != null) return false;
+        if (phase != GamePhase.ACTIVE || pendingRoll || rollRequestSubmitted || minigamePresentation.isActive()) return false;
+        if (goldenGnomePresentation.getOfferRsn() != null) return false;
         if (System.currentTimeMillis() < turnEffectGateUntil) return false;
 
         String self = localRsn();
@@ -1830,8 +1533,8 @@ public class RunePartyPlugin extends Plugin
      * way. */
     public boolean isAwaitingSomeonesRoll()
     {
-        if (phase != GamePhase.ACTIVE || pendingRoll || minigameActive) return false;
-        if (goldenGnomeOfferRsn != null) return false;
+        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive()) return false;
+        if (goldenGnomePresentation.getOfferRsn() != null) return false;
         if (System.currentTimeMillis() < turnEffectGateUntil) return false;
         return currentTurnRsn != null;
     }
@@ -1843,9 +1546,10 @@ public class RunePartyPlugin extends Plugin
      * on the exact same thing). */
     public boolean isLocalPlayerAwaitingGoldenGnomeResponse()
     {
-        if (phase != GamePhase.ACTIVE || goldenGnomeOfferRsn == null) return false;
+        String offerRsn = goldenGnomePresentation.getOfferRsn();
+        if (phase != GamePhase.ACTIVE || offerRsn == null) return false;
         String self = localRsn();
-        return self != null && self.equalsIgnoreCase(goldenGnomeOfferRsn);
+        return self != null && self.equalsIgnoreCase(offerRsn);
     }
 
     /** Whether the local player still needs to YES-emote ready for the current mini-game --
@@ -1855,9 +1559,9 @@ public class RunePartyPlugin extends Plugin
      * the exact same thing, so it stops nagging a player the instant their own ready lands). */
     public boolean isLocalPlayerAwaitingMinigameReady()
     {
-        if (phase != GamePhase.ACTIVE || !minigameActive || minigameCountdownStarted) return false;
+        if (phase != GamePhase.ACTIVE || !minigamePresentation.isActive() || minigamePresentation.isCountdownStarted()) return false;
         String self = localRsn();
-        return self != null && !minigameReadyRsns.contains(self.toLowerCase(Locale.ROOT));
+        return self != null && !minigamePresentation.getMinigameReadyRsns().contains(self.toLowerCase(Locale.ROOT));
     }
 
     /** Whether the panel should show the current mini-game's real play controls (see
@@ -1873,9 +1577,10 @@ public class RunePartyPlugin extends Plugin
      * a moment that's long since passed. */
     public boolean isMinigamePlayable()
     {
-        if (!minigameActive || !minigameCountdownStarted) return false;
-        if (minigameCountdownSkippedForClient) return true;
-        return minigameCountdownBannerUntil != 0 && System.currentTimeMillis() >= minigameCountdownBannerUntil;
+        if (!minigamePresentation.isActive() || !minigamePresentation.isCountdownStarted()) return false;
+        if (minigamePresentation.isCountdownSkippedForClient()) return true;
+        long countdownBannerUntil = minigamePresentation.getCountdownBannerUntil();
+        return countdownBannerUntil != 0 && System.currentTimeMillis() >= countdownBannerUntil;
     }
 
     /** Whether the local player still needs to answer the current True or False round -- mirrors
@@ -1887,9 +1592,9 @@ public class RunePartyPlugin extends Plugin
      * instant their own answer lands). */
     public boolean isLocalPlayerAwaitingTrueOrFalseAnswer()
     {
-        if (!TRUE_OR_FALSE_KEY.equals(minigameKey) || !isMinigamePlayable() || trueOrFalseQuestion == null) return false;
+        if (!TRUE_OR_FALSE_KEY.equals(minigamePresentation.getKey()) || !isMinigamePlayable() || minigamePresentation.getTrueOrFalseQuestion() == null) return false;
         String self = localRsn();
-        return self != null && !trueOrFalseAnsweredRsns.contains(self.toLowerCase(Locale.ROOT));
+        return self != null && !minigamePresentation.getTrueOrFalseAnsweredRsns().contains(self.toLowerCase(Locale.ROOT));
     }
 
     /** Whether {@code localPlayer} is standing on {@code rsn}'s tracked board position -- see
@@ -1990,7 +1695,7 @@ public class RunePartyPlugin extends Plugin
      * the same way when it starts, and nothing else needs to change -- every "what's next"
      * announcement already waits on this one gate via scheduleAfterTurnEffects. Never moves the
      * gate backward, so two effects landing close together both get their own full window. */
-    private void extendTurnEffectGate(long untilTimestamp)
+    void extendTurnEffectGate(long untilTimestamp)
     {
         turnEffectGateUntil = Math.max(turnEffectGateUntil, untilTimestamp);
     }
@@ -2008,16 +1713,16 @@ public class RunePartyPlugin extends Plugin
      * of their own coin-popup queue, else "now" if nothing's currently showing. A different player
      * always gets their own popup immediately regardless of what's showing for anyone else (see the
      * Coin Trap owner's simultaneous +N popup). */
-    private void enqueueCoinPopup(String rsn, int delta, int newTotal, long durationMs, boolean totalless)
+    void enqueueCoinPopup(String rsn, int delta, int newTotal, long durationMs, boolean totalless)
     {
         String key = rsn.toLowerCase(Locale.ROOT);
         long now = System.currentTimeMillis();
 
         Deque<CoinPopup> queue = coinPopups.computeIfAbsent(key, k -> new ConcurrentLinkedDeque<>());
         CoinPopup tailPopup = queue.peekLast();
-        String samePlayerGnomePopupRsn = goldenGnomePopup.payload != null ? goldenGnomePopup.payload.rsn : null;
-        boolean samePlayerGnomePopupShowing = rsn.equalsIgnoreCase(samePlayerGnomePopupRsn) && goldenGnomePopup.until > now;
-        long start = samePlayerGnomePopupShowing ? goldenGnomePopup.until
+        String samePlayerGnomePopupRsn = goldenGnomePresentation.getPopupRsn();
+        boolean samePlayerGnomePopupShowing = rsn.equalsIgnoreCase(samePlayerGnomePopupRsn) && goldenGnomePresentation.getPopupUntil() > now;
+        long start = samePlayerGnomePopupShowing ? goldenGnomePresentation.getPopupUntil()
             : (tailPopup != null && tailPopup.until > now) ? tailPopup.until
             : now;
         long until = start + durationMs;
@@ -2046,7 +1751,7 @@ public class RunePartyPlugin extends Plugin
      * scheduled for the same moment instead of one waiting on the other. Shared by every "the turn
      * is over, here's what's next" announcement -- anything new in that category should go through
      * this too rather than growing its own bespoke delay math. */
-    private ScheduledFuture<?> scheduleAfterTurnEffects(ScheduledFuture<?> previousTask, long durationMs, Runnable action)
+    ScheduledFuture<?> scheduleAfterTurnEffects(ScheduledFuture<?> previousTask, long durationMs, Runnable action)
     {
         if (previousTask != null) previousTask.cancel(false);
 
@@ -2074,7 +1779,7 @@ public class RunePartyPlugin extends Plugin
      * "arm one banner" (bespoke until/gate math, chaining to a follow-up step, arming two banners
      * at once) that this deliberately doesn't try to generalize; each of those keeps a one-line
      * comment pointing back here instead of silently diverging from a pattern it never fit. */
-    private <T> void armBanner(TimedBanner<T> banner, long durationMs, Supplier<T> payload, boolean extendGate)
+    <T> void armBanner(TimedBanner<T> banner, long durationMs, Supplier<T> payload, boolean extendGate)
     {
         banner.task = scheduleAfterTurnEffects(banner.task, durationMs, () ->
         {
@@ -2094,222 +1799,11 @@ public class RunePartyPlugin extends Plugin
         armBanner(turnAnnounce, TURN_ANNOUNCE_DURATION_MS, () -> rsn, false);
     }
 
-    /** Schedules AnnouncementOverlay's "MINIGAME!" banner via scheduleAfterTurnEffects, so it never
-     * appears while the last roller's own turn -- including their coin popup -- is still settling.
-     * minigameActive/minigameInstructions are set immediately in the MINIGAME_STARTED handler,
-     * unaffected by this delay: this only postpones the celebratory banner, not the mini-game
-     * itself. scheduleAfterTurnEffects reserves the gate for this banner's own
-     * MINIGAME_BANNER_DURATION_MS synchronously, so scheduleMinigameSpinner (called right behind
-     * this one, same MINIGAME_STARTED handler) starts right on schedule once that reservation
-     * ends -- but the banner itself keeps rendering well past that (see the callback below), so
-     * "MINIGAME!" stays up above the wheel for its own whole spin+reveal instead of disappearing
-     * the instant the wheel takes over. Not an armBanner call (see that method's own doc) -- its
-     * `until` is deliberately longer than what it reserves on the gate, which armBanner's uniform
-     * "until == gate reservation" shape can't express. */
-    private void scheduleMinigameBanner()
-    {
-        minigameBanner.task = scheduleAfterTurnEffects(minigameBanner.task, MINIGAME_BANNER_DURATION_MS, () ->
-        {
-            long now = System.currentTimeMillis();
-            // Rendered for MINIGAME_BANNER_DURATION_MS + MINIGAME_SPINNER_DURATION_MS -- longer
-            // than what's reserved on the gate below -- so "MINIGAME!" stays visible above the
-            // selection wheel for the wheel's own entire spin+reveal (scheduleMinigameSpinner,
-            // called right behind this one in the same MINIGAME_STARTED handler) instead of
-            // vanishing the instant the wheel appears. The gate reservation deliberately stays at
-            // the shorter MINIGAME_BANNER_DURATION_MS (belt-and-suspenders against scheduler
-            // jitter, same as ever) -- extending it to match would also push back the wheel's own
-            // start, which isn't the goal here.
-            minigameBanner.until = now + MINIGAME_BANNER_DURATION_MS + MINIGAME_SPINNER_DURATION_MS;
-            extendTurnEffectGate(now + MINIGAME_BANNER_DURATION_MS);
-        });
-    }
-
-    /** Schedules AnnouncementOverlay's mini-game selection spinner via scheduleAfterTurnEffects,
-     * so it waits behind the "MINIGAME!" banner (scheduleMinigameBanner, called right before this
-     * in the MINIGAME_STARTED handler) instead of both appearing at once. The gate is reserved for
-     * the spin + settle-hold synchronously (see scheduleAfterTurnEffects), so the ready-check
-     * screen -- which has no timed trigger of its own, see
-     * AnnouncementOverlay#renderMinigameReadyCheck -- only starts reading as "the current screen"
-     * once this finishes. Not an armBanner call (see that method's own doc) -- minigameSpinnerStart/
-     * Until are still raw fields, never migrated to a TimedBanner, out of scope for this pass. */
-    private void scheduleMinigameSpinner()
-    {
-        minigameSpinnerTask = scheduleAfterTurnEffects(minigameSpinnerTask, MINIGAME_SPINNER_DURATION_MS, () ->
-        {
-            minigameSpinnerStart = System.currentTimeMillis();
-            minigameSpinnerUntil = minigameSpinnerStart + MINIGAME_SPINNER_DURATION_MS;
-            extendTurnEffectGate(minigameSpinnerUntil); // belt-and-suspenders, see scheduleMinigameBanner's identical comment
-        });
-    }
-
-    /** Schedules AnnouncementOverlay's item wheel reveal via scheduleAfterTurnEffects, so it waits
-     * behind whatever turn-effect visual is already showing (a coin popup from the same landing,
-     * the previous player's own effects still settling, etc.) instead of appearing on top of it.
-     * {@code rsn}/{@code itemKey} are captured here rather than read back off some "current grant"
-     * plugin field, since -- unlike the mini-game key, which stays put for the whole mini-game --
-     * an item grant is a one-off event with nothing else keeping track of it in between. */
-    private void scheduleItemSpinner(String rsn, String itemKey)
-    {
-        armBanner(itemSpinner, ITEM_SPINNER_DURATION_MS, () -> new ItemSpinnerPayload(rsn, itemKey), true);
-    }
-
-    /** Schedules AnnouncementOverlay's "already have N items" announcement via
-     * scheduleAfterTurnEffects -- fired instead of scheduleItemSpinner when the server's own
-     * ITEM_CAP_BLOCKED lands (see app.py's ITEM_TILE handling), so it waits behind whatever
-     * turn-effect visual is already showing the same way the item wheel itself would have. */
-    private void scheduleItemCapBlockedAnnouncement(String rsn, int cap)
-    {
-        armBanner(itemCapBlocked, ITEM_CAP_BLOCKED_DURATION_MS, () -> new ItemCapBlockedPayload(rsn, cap), true);
-    }
-
-    /** Schedules AnnouncementOverlay's "You used/&lt;rsn&gt; used &lt;item&gt;!" banner via
-     * scheduleAfterTurnEffects -- fired on ITEM_USED for whichever item opts in via
-     * Item#hasUseAnnouncement (see that handler), so it waits behind whatever turn-effect visual is
-     * already showing, same as scheduleItemCapBlockedAnnouncement. */
-    private void scheduleItemUsedAnnouncement(String rsn, String itemKey)
-    {
-        armBanner(itemUsedAnnounce, ITEM_USED_ANNOUNCE_DURATION_MS, () -> new ItemUsedAnnouncePayload(rsn, itemKey), true);
-    }
-
-    /** Schedules AnnouncementOverlay's "You/&lt;rsn&gt; landed on a Coin Trap!" banner via
-     * scheduleAfterTurnEffects -- fired on COIN_TRAP_TRIGGERED, same shape as
-     * scheduleItemUsedAnnouncement. {@code victimRsn} is whoever landed on it, not the trap's
-     * owner -- the owner's own feedback is purely their +N coin popup (see the COINS_CHANGED
-     * handler), no banner of their own. */
-    private void scheduleCoinTrapTriggerAnnouncement(String victimRsn)
-    {
-        armBanner(coinTrapAnnounce, COIN_TRAP_ANNOUNCE_DURATION_MS, () -> victimRsn, true);
-    }
-
-    /** Arms AnnouncementOverlay's mini-game rewards recap ("who got what") -- called from the
-     * MINIGAME_ENDED handler, parsing its own "payouts" list once here rather than having
-     * AnnouncementOverlay re-parse the raw event payload every frame. Extends turnEffectGateUntil
-     * so both the round-complete recap (see scheduleRoundCompleteBanner) and the new round's first
-     * TURN_STARTED banner wait behind this one instead of overlapping it. Not an armBanner call
-     * (see that method's own doc) -- this arms synchronously, with no scheduleAfterTurnEffects
-     * wrapper to collapse. */
-    private void triggerMinigameRewardsBanner(JsonObject payload)
-    {
-        minigameRewardsBanner.payload = Json.safeMinigameRewards(payload, "payouts");
-        minigameRewardsBanner.until = System.currentTimeMillis() + MINIGAME_REWARDS_BANNER_DURATION_MS;
-        extendTurnEffectGate(minigameRewardsBanner.until);
-    }
-
-    /** Schedules AnnouncementOverlay's post-round "ROUND x" / "Current Standings" recap via
-     * scheduleAfterTurnEffects, so it waits behind the mini-game rewards recap
-     * (triggerMinigameRewardsBanner) that always fires first on the same MINIGAME_ENDED event,
-     * instead of both appearing at once. Snapshots getCurrentRound() -- the round about to start,
-     * not the one that just finished (completedRounds is already incremented by the time this
-     * runs, so getCurrentRound() here is the same "upcoming round" number the next TURN_STARTED's
-     * own banner and StatsOverlay's live "ROUND x/y" line would show). Not called at all for the
-     * game's final round -- see the MINIGAME_ENDED handler -- since triggerGameOverSequence reveals
-     * those same standings itself right after, and this plain recap would spoil that. */
-    private void scheduleRoundCompleteBanner()
-    {
-        armBanner(roundCompleteBanner, ROUND_COMPLETE_BANNER_DURATION_MS, this::getCurrentRound, true);
-    }
-
-    /** Final standings, ranked the same way renderRoundCompleteBanner already ranks the live
-     * mid-game ones -- Golden Gnome count descending, coins as tiebreak -- snapshotted once on
-     * GAME_ENDED rather than read live, since no further coin/gnome changes are possible once the
-     * server's flipped the game out of ACTIVE. Spectators and never-joined seats are excluded, same
-     * as every other standings view. */
-    private List<RosterReducer.RosterEntry> computeFinalStandings()
-    {
-        List<RosterReducer.RosterEntry> standings = rosterReducer.seatedPlayers();
-        standings.sort(Comparator
-            .comparingInt((RosterReducer.RosterEntry e) -> e.goldenGnomeCount).reversed()
-            .thenComparing(Comparator.comparingInt((RosterReducer.RosterEntry e) -> e.coins).reversed()));
-        return standings;
-    }
-
-    /** Kicks off the end-game awards ceremony on GAME_ENDED -- a chain of banners, each scheduled
-     * behind the last via scheduleAfterTurnEffects (see the field block's own doc for the full
-     * sequence). This first step is itself gated the same way, since GAME_ENDED can land in the
-     * very same event batch as the final round's own MINIGAME_ENDED (see app.py's
-     * _resolve_minigame_if_complete) -- without waiting behind that banner's own gate reservation,
-     * "GAME OVER!" would flash up mid-rewards-recap instead of politely queuing after it. No-ops if
-     * nobody's actually seated (shouldn't happen for a game that reached GAME_ENDED, but a lone
-     * host force-ending an empty lobby is technically possible). Not an armBanner call, nor are
-     * the four scheduleX methods below it that continue this chain (see that method's own doc) --
-     * each carries real logic beyond arming one banner (building a reveal order, a chat message,
-     * arming two banners in the same callback), not just the arm-and-extend-gate shape armBanner
-     * covers. */
-    private void triggerGameOverSequence()
-    {
-        List<RosterReducer.RosterEntry> standings = computeFinalStandings();
-        if (standings.isEmpty()) return;
-        gameOverStandings = standings;
-
-        gameOverTask = scheduleAfterTurnEffects(gameOverTask, GAME_OVER_TITLE_DURATION_MS, () ->
-        {
-            gameOverBanner.until = System.currentTimeMillis() + GAME_OVER_TITLE_DURATION_MS;
-            extendTurnEffectGate(gameOverBanner.until);
-            scheduleWinnerIntro();
-        });
-    }
-
-    private void scheduleWinnerIntro()
-    {
-        gameOverTask = scheduleAfterTurnEffects(gameOverTask, WINNER_INTRO_DURATION_MS, () ->
-        {
-            winnerIntroBanner.until = System.currentTimeMillis() + WINNER_INTRO_DURATION_MS;
-            extendTurnEffectGate(winnerIntroBanner.until);
-
-            // Worst to best, stopping once only the top two remain -- e.g. a 4-player game reveals
-            // 4th then 3rd, leaving 1st/2nd for the "And the winner is..." showdown. A 2-player (or
-            // fewer) game has nothing to reveal here at all, so this list ends up empty and
-            // schedulePlaceReveal falls straight through to scheduleWinnerSuspense.
-            List<RosterReducer.RosterEntry> revealOrder = new ArrayList<>();
-            for (int i = gameOverStandings.size() - 1; i >= 2; i--) revealOrder.add(gameOverStandings.get(i));
-            schedulePlaceReveal(revealOrder, 0);
-        });
-    }
-
-    private void schedulePlaceReveal(List<RosterReducer.RosterEntry> revealOrder, int index)
-    {
-        if (index >= revealOrder.size())
-        {
-            scheduleWinnerSuspense();
-            return;
-        }
-
-        gameOverTask = scheduleAfterTurnEffects(gameOverTask, PLACE_REVEAL_DURATION_MS, () ->
-        {
-            RosterReducer.RosterEntry entry = revealOrder.get(index);
-            placeReveal.payload = new PlaceRevealPayload(entry.rsn, gameOverStandings.indexOf(entry) + 1, entry.coins, entry.goldenGnomeCount);
-            placeReveal.until = System.currentTimeMillis() + PLACE_REVEAL_DURATION_MS;
-            extendTurnEffectGate(placeReveal.until);
-            schedulePlaceReveal(revealOrder, index + 1);
-        });
-    }
-
-    private void scheduleWinnerSuspense()
-    {
-        gameOverTask = scheduleAfterTurnEffects(gameOverTask, WINNER_SUSPENSE_DURATION_MS, () ->
-        {
-            winnerSuspenseBanner.until = System.currentTimeMillis() + WINNER_SUSPENSE_DURATION_MS;
-            extendTurnEffectGate(winnerSuspenseBanner.until);
-            scheduleWinnerReveal();
-        });
-    }
-
-    /** The ceremony's final step -- the winner's own name, held alongside ConfettiOverlay's burst
-     * (confettiBanner, shorter than WINNER_REVEAL_DURATION_MS so the confetti finishes settling
-     * while the name's still up rather than both cutting off together). gameOverStandings is sorted
-     * winner-first, so index 0 is always the winner. */
-    private void scheduleWinnerReveal()
-    {
-        gameOverTask = scheduleAfterTurnEffects(gameOverTask, WINNER_REVEAL_DURATION_MS, () ->
-        {
-            RosterReducer.RosterEntry winner = gameOverStandings.get(0);
-            winnerRevealBanner.payload = winner.rsn;
-            long now = System.currentTimeMillis();
-            winnerRevealBanner.until = now + WINNER_REVEAL_DURATION_MS;
-            confettiBanner.until = now + CONFETTI_DURATION_MS;
-            addChatMessage(winner.rsn + " wins Rune Party!");
-        });
-    }
+    // scheduleMinigameBanner/scheduleMinigameSpinner/triggerMinigameRewardsBanner/
+    // scheduleRoundCompleteBanner, and scheduleItemSpinner/scheduleItemCapBlockedAnnouncement/
+    // scheduleItemUsedAnnouncement/scheduleCoinTrapTriggerAnnouncement, now live on
+    // MinigamePresentation/ItemPresentation respectively, along with the fields/handleEvent cases/
+    // getters they back -- see ARCHITECTURE_REVIEW.md's C1 finding, step 2.
 
     /** Arms AnnouncementOverlay's "Welcome to Rune Party Showdown" title card -- called once, right
      * after createGame/joinGame succeeds, for the local player only (there's no server event for
@@ -2397,7 +1891,7 @@ public class RunePartyPlugin extends Plugin
                 phase = GamePhase.ENDED;
                 if (!catchingUp)
                 {
-                    triggerGameOverSequence();
+                    ceremonyPresentation.triggerGameOverSequence();
                 }
                 break;
 
@@ -2482,93 +1976,17 @@ public class RunePartyPlugin extends Plugin
             }
 
             case Events.GOLDEN_GNOME_OFFERED:
-            {
-                // Real state, applied catch-up or not: non-null exactly while a response is
-                // outstanding, gating both a YES/NO emote doing anything (see
-                // isLocalPlayerAwaitingGoldenGnomeResponse) and rolling again (see
-                // isLocalPlayerReadyToRoll). Pauses TILE_EFFECT/COINS_CHANGED for the underlying
-                // tile until GOLDEN_GNOME_OFFER_RESOLVED -- see the server's confirm_arrival/
-                // respond_golden_gnome_offer split.
-                goldenGnomeOfferRsn = Json.requiredStr(e.payload, type, "player");
-                if (!catchingUp)
-                {
-                    addChatMessage(goldenGnomeOfferRsn + " found a Golden Gnome!");
-                }
-                break;
-            }
-
             case Events.GOLDEN_GNOME_OFFER_RESOLVED:
-            {
-                goldenGnomeOfferRsn = null; // always clear, catch-up or not -- real state
-                awaitingGnomeYesFinish = false;
-                awaitingGnomeNoFinish = false;
-                // "declined" gets no banner/chat of its own -- the offer simply disappears, same
-                // silence a declined confirm-start or an un-rolled turn would get. "purchased"'s
-                // own announcement comes from the GOLDEN_GNOME_PURCHASED case below instead (it
-                // carries the new total, which this event doesn't), so only "cant_afford" actually
-                // needs to arm anything here.
-                if (!catchingUp && "cant_afford".equals(Json.requiredStr(e.payload, type, "outcome")))
-                {
-                    goldenGnomeOutcome.payload = new GoldenGnomeOutcomePayload("cant_afford", Json.requiredStr(e.payload, type, "player"));
-                    goldenGnomeOutcome.until = System.currentTimeMillis() + GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
-                    extendTurnEffectGate(goldenGnomeOutcome.until);
-                    addChatMessage("Can't afford the Golden Gnome!");
-                }
-                break;
-            }
-
             case Events.GOLDEN_GNOME_PURCHASED:
             {
-                // The running total itself lives in rosterReducer (updated unconditionally above,
-                // catch-up or not) -- everything here is purely cosmetic: the "You got a Golden
-                // Gnome!" announcement (goldenGnomeOutcome, reusing the same banner
-                // renderGoldenGnomeOutcome uses for "cant_afford") plus the "+1 Golden Gnome"
-                // popup, both fired from this one event since it's the only one carrying the new
-                // total the popup needs.
-                if (!catchingUp)
-                {
-                    String rsn = Json.requiredStr(e.payload, type, "player");
-                    Integer total = Json.requiredInt(e.payload, type, "goldenGnomeCount");
-                    goldenGnomePopup.payload = new GoldenGnomePopupPayload(rsn, total != null ? total : 0);
-                    goldenGnomePopup.start = System.currentTimeMillis();
-                    goldenGnomePopup.until = goldenGnomePopup.start + COIN_POPUP_DURATION_MS;
-                    extendTurnEffectGate(goldenGnomePopup.until);
-
-                    goldenGnomeOutcome.payload = new GoldenGnomeOutcomePayload("purchased", rsn); // same event, same player
-                    goldenGnomeOutcome.until = System.currentTimeMillis() + GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
-                    extendTurnEffectGate(goldenGnomeOutcome.until);
-
-                    addChatMessage(rsn + " got a Golden Gnome!");
-                }
+                goldenGnomePresentation.apply(e, catchingUp);
                 break;
             }
 
             case Events.ITEM_GRANTED:
-            {
-                // Inventory itself is updated unconditionally by rosterReducer.apply above --
-                // everything here is purely the wheel reveal's own cosmetics.
-                if (!catchingUp)
-                {
-                    String rsn = Json.requiredStr(e.payload, type, "player");
-                    String itemKey = Json.requiredStr(e.payload, type, "itemKey");
-                    String itemDisplayName = Json.requiredStr(e.payload, type, "itemDisplayName");
-                    scheduleItemSpinner(rsn, itemKey);
-                    addChatMessage(rsn + " got " + itemDisplayName + "!");
-                }
-                break;
-            }
-
             case Events.ITEM_CAP_BLOCKED:
             {
-                // No inventory change -- the server refused to grant anything, see app.py's
-                // ITEM_TILE handling. Purely cosmetic, same as ITEM_GRANTED's own reveal.
-                if (!catchingUp)
-                {
-                    String rsn = Json.requiredStr(e.payload, type, "player");
-                    Integer cap = Json.requiredInt(e.payload, type, "itemCap");
-                    scheduleItemCapBlockedAnnouncement(rsn, cap != null ? cap : 0);
-                    addChatMessage(rsn + " already has too many items!");
-                }
+                itemPresentation.apply(e, catchingUp);
                 break;
             }
 
@@ -2579,50 +1997,13 @@ public class RunePartyPlugin extends Plugin
                 // always the same turn TURN_STARTED just reset it for. Inventory itself is already
                 // decremented unconditionally by rosterReducer.apply above.
                 itemUsedThisTurn = true;
-                if (!catchingUp)
-                {
-                    String rsn = Json.requiredStr(e.payload, type, "player");
-                    String itemKey = Json.requiredStr(e.payload, type, "itemKey");
-                    if (Items.get(itemKey).hasUseAnnouncement())
-                    {
-                        scheduleItemUsedAnnouncement(rsn, itemKey);
-                    }
-                }
+                itemPresentation.handleItemUsed(e, catchingUp);
                 break;
             }
 
             case Events.GOLDEN_GNOME_MOVED:
             {
-                // The real relocation is carried by the paired TILE_UNMARKED/TILE_MARKED events,
-                // already applied unconditionally via tileReducer.apply above (catch-up or not) by
-                // the time this case even runs. Everything here is choreographing the *visual*
-                // catch-up -- see goldenGnomeMoveOldPoint/goldenGnomeMoveNewPoint's own doc -- so
-                // it's entirely skipped during catch-up like every other purely-visual event.
-                // Sequence: spotanim at the old spot -> (VANISH_DELAY later) model disappears ->
-                // (GAP after the spotanim) spotanim at the new spot -> (APPEAR_DELAY later) model
-                // appears, rather than the model instantly teleporting while the spotanims play
-                // catch-up after the fact.
-                if (!catchingUp)
-                {
-                    WorldPoint oldPoint = Json.safeWorldPoint(e.payload, "oldPoint");
-                    WorldPoint newPoint = Json.safeWorldPoint(e.payload, "newPoint");
-
-                    if (oldPoint != null)
-                    {
-                        triggerSpotAnimAtWorldPoint(GOLDEN_GNOME_MOVE_SPOTANIM_ID, oldPoint);
-                        goldenGnomeMoveOldPoint = oldPoint;
-                        goldenGnomeMoveHideOldAt = System.currentTimeMillis() + GOLDEN_GNOME_MOVE_VANISH_DELAY_MS;
-                    }
-                    if (newPoint != null)
-                    {
-                        uiTimerExec.schedule(() ->
-                        {
-                            triggerSpotAnimAtWorldPoint(GOLDEN_GNOME_MOVE_SPOTANIM_ID, newPoint);
-                            goldenGnomeMoveNewPoint = newPoint;
-                            goldenGnomeMoveShowNewAt = System.currentTimeMillis() + GOLDEN_GNOME_MOVE_APPEAR_DELAY_MS;
-                        }, GOLDEN_GNOME_MOVE_SPOTANIM_GAP_MS, TimeUnit.MILLISECONDS);
-                    }
-                }
+                goldenGnomePresentation.apply(e, catchingUp);
                 break;
             }
 
@@ -2641,32 +2022,7 @@ public class RunePartyPlugin extends Plugin
 
             case Events.COIN_TRAP_TRIGGERED:
             {
-                // Real-time, not chained behind scheduleAfterTurnEffects -- unlike the announcement
-                // banner below, the model/animation choreography is tied to a specific spot on the
-                // board (see TileOverlay#updateCoinTrapModels), not the screen-centered UI other
-                // "what happened" banners share a queue for, so delaying it to wait its turn would
-                // just look like the trap sprang for no visible reason moments after the player
-                // actually landed on it.
-                if (!catchingUp)
-                {
-                    String victim = Json.requiredStr(e.payload, type, "player");
-                    String owner = Json.requiredStr(e.payload, type, "owner");
-                    Integer stolen = Json.requiredInt(e.payload, type, "stolen");
-                    Integer x = Json.requiredInt(e.payload, type, "x");
-                    Integer y = Json.requiredInt(e.payload, type, "y");
-                    Integer plane = Json.requiredInt(e.payload, type, "plane");
-                    if (x != null && y != null && plane != null)
-                    {
-                        coinTrapTriggerPoint = new WorldPoint(x, y, plane);
-                        coinTrapTriggerUntil = System.currentTimeMillis() + COIN_TRAP_TRIGGER_PERSIST_MS;
-                    }
-                    if (victim != null)
-                    {
-                        scheduleCoinTrapTriggerAnnouncement(victim);
-                        addChatMessage(victim + " landed on a Coin Trap" + (owner != null ? " set by " + owner : "")
-                            + "! " + (stolen != null ? stolen : 0) + " coins stolen.");
-                    }
-                }
+                itemPresentation.apply(e, catchingUp);
                 break;
             }
 
@@ -2710,266 +2066,28 @@ public class RunePartyPlugin extends Plugin
             }
 
             case Events.MINIGAME_STARTED:
-                // minigameActive/minigameInstructions/minigameKey/minigameDisplayName take effect
-                // immediately, catch-up or not -- a player joining mid-minigame needs the panel to
-                // correctly show it's underway. Ready-check state resets fresh for this mini-game
-                // instance too, real state regardless of catch-up. Only the celebratory banner and
-                // the spinner that follows it are cosmetic-only and skipped during catch-up.
-                minigameActive = true;
-                minigameInstructions = Json.requiredStr(e.payload, type, "instructions");
-                minigameKey = Json.requiredStr(e.payload, type, "key");
-                minigameDisplayName = Json.requiredStr(e.payload, type, "displayName");
-                minigameReadyRsns.clear();
-                minigameCountdownStarted = false;
-                minigameCountdownSkippedForClient = false;
-                minigameCountdownBannerUntil = 0;
-                minigameSpinnerStart = 0;
-                minigameSpinnerUntil = 0;
-                minigameSpinnerSkippedForClient = catchingUp;
-                // Real state, applied catch-up or not: a fresh Coin Rush instance starts with no
-                // spawns and no tally, regardless of whether this client watched the previous
-                // round's own leftovers get cleaned up by its own MINIGAME_ENDED (see that case
-                // below -- redundant here for a live client, but a catching-up client that missed
-                // the previous round's MINIGAME_ENDED entirely still needs this reset).
-                // coinRushRoundStartAt deliberately isn't set here -- MINIGAME_STARTED lands before
-                // the round is actually playable (the ready-check still has to run first), so
-                // stamping "now" at this point would undercount the round's remaining time; see the
-                // MINIGAME_COUNTDOWN_STARTED case below, the only writer.
-                if (COIN_RUSH_KEY.equals(minigameKey))
-                {
-                    coinRushSpawns.clear();
-                    coinRushScores.clear();
-                    coinRushCollectSubmitted.clear();
-                    coinRushRoundStartAt = 0;
-                }
-                // Same reasoning as Coin Rush's own reset just above -- a fresh True or False
-                // instance starts with no question/answers/reveal, regardless of catch-up.
-                if (TRUE_OR_FALSE_KEY.equals(minigameKey))
-                {
-                    trueOrFalseQuestion = null;
-                    trueOrFalseRoundNumber = 0;
-                    trueOrFalseAnsweredRsns.clear();
-                    trueOrFalseMyAnswer = null;
-                    trueOrFalseRoundStartedAt = 0;
-                    trueOrFalseLastCorrectAnswer = null;
-                    trueOrFalseLastResults = Collections.emptyList();
-                    trueOrFalseRevealUntil = 0;
-                }
-                if (!catchingUp)
-                {
-                    scheduleMinigameBanner();
-                    scheduleMinigameSpinner();
-                    addChatMessage("Mini-game! " + minigameInstructions);
-                }
-                break;
-
             case Events.MINIGAME_PLAYER_READY:
-            {
-                // Real state, applied catch-up or not -- see isLocalPlayerAwaitingMinigameReady/
-                // isMinigamePlayable, which both need an accurate ready set regardless of whether
-                // this client watched it happen live.
-                String readyRsn = Json.requiredStr(e.payload, type, "player");
-                if (readyRsn != null) minigameReadyRsns.add(readyRsn.toLowerCase(Locale.ROOT));
-                break;
-            }
-
             case Events.MINIGAME_COUNTDOWN_STARTED:
-                // Real state, applied catch-up or not -- see isMinigamePlayable, the reason this
-                // is split from the cosmetic-only banner timestamp below.
-                minigameCountdownStarted = true;
-                minigameCountdownSkippedForClient = catchingUp;
-                // Coin Rush's own round clock (see COIN_RUSH_DURATION_MS/getCoinRushEndsAt) starts
-                // ticking from here, not MINIGAME_STARTED -- this is the event that actually marks
-                // the round playable (once the countdown itself finishes, see isMinigamePlayable).
-                // A catching-up client has no live "BEGIN!" moment of its own to hang this off of
-                // (see minigameCountdownBannerUntil's own catch-up doc), so "now" is the closest
-                // available approximation; a live client gets the precise instant instead, stamped
-                // below once the countdown's own delay actually elapses.
-                if (catchingUp && COIN_RUSH_KEY.equals(minigameKey))
-                {
-                    coinRushRoundStartAt = System.currentTimeMillis();
-                }
-                if (!catchingUp)
-                {
-                    // Arming minigameCountdownBannerUntil is itself delayed by
-                    // MINIGAME_COUNTDOWN_START_DELAY_MS -- see renderMinigameReadyCheck, which
-                    // keeps showing every player as "Ready!" until this actually fires, instead of
-                    // the screen changing the instant the last person emotes.
-                    uiTimerExec.schedule(() ->
-                    {
-                        minigameCountdownBannerUntil = System.currentTimeMillis() + MINIGAME_COUNTDOWN_DURATION_MS;
-                        extendTurnEffectGate(minigameCountdownBannerUntil);
-                        if (COIN_RUSH_KEY.equals(minigameKey)) coinRushRoundStartAt = minigameCountdownBannerUntil;
-                        // RunePartyPanel only re-checks isMinigamePlayable() reactively, when
-                        // refreshPanel() runs -- unlike AnnouncementOverlay's per-frame render(),
-                        // the panel has no ordinary reason to refresh again once the countdown
-                        // naturally finishes a few seconds from now (no further server event marks
-                        // that moment). Without this, the panel's play controls silently never
-                        // appeared until some unrelated event happened to trigger a refresh
-                        // afterward. Chained here (nested inside this same callback) rather than
-                        // scheduled as its own independent MINIGAME_COUNTDOWN_START_DELAY_MS +
-                        // MINIGAME_COUNTDOWN_DURATION_MS delay off the original event -- two
-                        // separately-scheduled tasks race against each other under normal
-                        // scheduler jitter, and if this one's own delay ran even a couple of
-                        // milliseconds long, the independently-scheduled refresh could fire before
-                        // minigameCountdownBannerUntil above was actually reached, leaving
-                        // isMinigamePlayable() still false at the one moment anything checked it.
-                        // Nesting the schedule call here instead means its delay is always measured
-                        // from this exact point, so it's guaranteed to fire strictly after
-                        // minigameCountdownBannerUntil regardless of how long this task itself took
-                        // to actually run.
-                        uiTimerExec.schedule(this::refreshPanel, MINIGAME_COUNTDOWN_DURATION_MS, TimeUnit.MILLISECONDS);
-                    }, MINIGAME_COUNTDOWN_START_DELAY_MS, TimeUnit.MILLISECONDS);
-                }
-                break;
-
-            case Events.MINIGAME_ENDED:
-                minigameActive = false;
-                minigameInstructions = null;
-                minigameKey = null;
-                minigameDisplayName = null;
-                minigameReadyRsns.clear();
-                minigameCountdownStarted = false;
-                minigameCountdownSkippedForClient = false;
-                minigameCountdownBannerUntil = 0;
-                // Unconditional (harmless no-op if this round wasn't Coin Rush) rather than gated
-                // on COIN_RUSH_KEY.equals(minigameKey) -- minigameKey is already cleared above by
-                // this point. Any coin still standing when the round ends shouldn't keep rendering
-                // (see TileOverlay#updateCoinRushModels, which just mirrors this map's own keys) --
-                // real state, applied catch-up or not. The scoreboard tally itself (coinRushScores)
-                // is deliberately left as-is rather than cleared here: StatsOverlay's own gate
-                // (isCoinRushActive() && isMinigamePlayable(), both now false) already stops
-                // rendering it, and the next MINIGAME_STARTED resets it fresh regardless.
-                coinRushSpawns.clear();
-                coinRushCollectSubmitted.clear();
-                // Same reasoning as the Coin Rush cleanup just above -- no question/reveal should
-                // keep rendering once the mini-game itself has ended.
-                trueOrFalseQuestion = null;
-                trueOrFalseRoundNumber = 0;
-                trueOrFalseAnsweredRsns.clear();
-                trueOrFalseMyAnswer = null;
-                // Real state, applied catch-up or not -- one MINIGAME_ENDED is exactly one
-                // completed round (see the server's own _resolve_minigame_if_complete, which
-                // counts these events the same way to decide when maxRounds is reached). See
-                // getCurrentRound/StatsOverlay's "ROUND x/y" line, the only consumer.
-                completedRounds++;
-                if (!catchingUp)
-                {
-                    addChatMessage("Mini-game complete!");
-                    triggerMinigameRewardsBanner(e.payload);
-                    // Skipped on the game's last round -- GAME_ENDED fires right behind this same
-                    // MINIGAME_ENDED (see app.py's _resolve_minigame_if_complete, which checks
-                    // maxRounds immediately after inserting this event) and triggerGameOverSequence
-                    // reveals the very same standings itself, dramatically, one place at a time.
-                    // Showing the plain "Current Standings" recap first would spoil that reveal.
-                    if (maxRounds <= 0 || completedRounds < maxRounds)
-                    {
-                        scheduleRoundCompleteBanner();
-                    }
-                }
-                break;
-
             case Events.COIN_RUSH_SPAWN:
-            {
-                // Real state, applied catch-up or not: a coin genuinely exists on the board at
-                // this point the instant the server says so, regardless of whether this client
-                // watched it appear live -- see TileOverlay#updateCoinRushModels, which just
-                // mirrors coinRushSpawns's own current keys every frame.
-                Integer spawnId = Json.requiredInt(e.payload, type, "id");
-                WorldPoint point = Json.safeWorldPoint(e.payload, "point");
-                if (spawnId != null && point != null) coinRushSpawns.put(spawnId, point);
-                break;
-            }
-
             case Events.COIN_RUSH_COLLECTED:
-            {
-                // Real state, applied catch-up or not: the spawn is gone (whoever the server
-                // credited already claimed it) and the tally reflects it, regardless of whether
-                // this client watched the race happen live -- a catching-up client still needs an
-                // accurate live scoreboard the instant it starts rendering one. This event never
-                // carries a real coin-total change of its own -- the server doesn't actually credit
-                // a Coin Rush pickup to the player's balance until the round ends, one lump sum per
-                // player (see COINS_CHANGED's own "coin_rush" case) -- so the only thing worth
-                // showing live, right now, is a purely cosmetic "+2" flash (see enqueueCoinPopup's
-                // totalless=true), never a running total.
-                Integer spawnId = Json.requiredInt(e.payload, type, "id");
-                if (spawnId != null)
-                {
-                    coinRushSpawns.remove(spawnId);
-                    coinRushCollectSubmitted.remove(spawnId);
-                }
-                String collector = Json.requiredStr(e.payload, type, "player");
-                if (collector != null)
-                {
-                    coinRushScores.merge(collector.toLowerCase(Locale.ROOT), 1, Integer::sum);
-                }
-                if (!catchingUp && collector != null)
-                {
-                    enqueueCoinPopup(collector, COIN_RUSH_REWARD, 0, COIN_RUSH_BUMP_POPUP_DURATION_MS, true);
-                    addChatMessage(collector + " grabbed a coin!");
-                }
-                break;
-            }
-
             case Events.TRUE_OR_FALSE_ROUND_STARTED:
-            {
-                // Real state, applied catch-up or not: a fresh round genuinely started at this
-                // point regardless of whether this client watched it happen live -- a catching-up
-                // client still needs to know the current question/round number the instant it
-                // starts rendering anything. Never carries the correct answer (see the server's own
-                // TRUE_OR_FALSE_ROUND_STARTED payload -- only questionIndex, resolved into text by
-                // the server itself before broadcast), so there's nothing here for a client to read
-                // early. Per-round-only state (who's answered, my own answer) resets fresh; the
-                // *previous* round's reveal (trueOrFalseLastCorrectAnswer/Results) is deliberately
-                // left alone here, same "let the timer/next reset clear it" idiom coinRushScores
-                // already uses -- renderTrueOrFalseReveal gates its own display on
-                // trueOrFalseRevealUntil, not on whether a new question already exists.
-                trueOrFalseQuestion = Json.requiredStr(e.payload, type, "question");
-                Integer roundNumber = Json.requiredInt(e.payload, type, "roundNumber");
-                if (roundNumber != null) trueOrFalseRoundNumber = roundNumber;
-                trueOrFalseAnsweredRsns.clear();
-                trueOrFalseMyAnswer = null;
-                // "Now" regardless of catch-up -- a live client gets the genuinely-accurate instant
-                // since this event only ever arrives right as the round actually starts either way;
-                // a catching-up client gets the same best-effort approximation coinRushRoundStartAt's
-                // own catch-up branch uses.
-                trueOrFalseRoundStartedAt = System.currentTimeMillis();
-                break;
-            }
-
             case Events.TRUE_OR_FALSE_ANSWERED:
-            {
-                // Real state, applied catch-up or not -- see isLocalPlayerAwaitingTrueOrFalseAnswer/
-                // renderTrueOrFalseQuestion, both of which need an accurate answered-set regardless
-                // of whether this client watched each answer land live.
-                String answeredRsn = Json.requiredStr(e.payload, type, "player");
-                if (answeredRsn != null)
-                {
-                    trueOrFalseAnsweredRsns.add(answeredRsn.toLowerCase(Locale.ROOT));
-                    String self = localRsn();
-                    if (self != null && self.equalsIgnoreCase(answeredRsn))
-                    {
-                        JsonElement answerEl = e.payload.get("answer");
-                        if (answerEl != null && !answerEl.isJsonNull()) trueOrFalseMyAnswer = answerEl.getAsBoolean();
-                    }
-                }
-                break;
-            }
-
             case Events.TRUE_OR_FALSE_ROUND_ENDED:
             {
-                // Real state, applied catch-up or not: the correct answer is now public regardless
-                // of whether this client watched the round happen live.
-                JsonElement correctEl = e.payload.get("correctAnswer");
-                trueOrFalseLastCorrectAnswer = correctEl != null && !correctEl.isJsonNull() ? correctEl.getAsBoolean() : null;
-                trueOrFalseLastResults = Json.safeTrueOrFalseResults(e.payload);
-                if (!catchingUp)
-                {
-                    trueOrFalseRevealUntil = System.currentTimeMillis() + TRUE_OR_FALSE_REVEAL_DURATION_MS;
-                    extendTurnEffectGate(trueOrFalseRevealUntil);
-                }
+                minigamePresentation.apply(e, catchingUp);
                 break;
             }
+
+            case Events.MINIGAME_ENDED:
+                // Real state, applied catch-up or not -- one MINIGAME_ENDED is exactly one
+                // completed round (see the server's own _resolve_minigame_if_complete, which
+                // counts these events the same way to decide when maxRounds is reached). This is
+                // core whole-game progress, not one mini-game instance's own state -- see
+                // getCurrentRound/StatsOverlay's "ROUND x/y" line, the only consumer -- so it stays
+                // inline rather than moving into MinigamePresentation with the rest of this case.
+                completedRounds++;
+                minigamePresentation.handleMinigameEnded(e.payload, catchingUp, maxRounds, completedRounds);
+                break;
 
             default:
                 break;
@@ -2985,7 +2103,7 @@ public class RunePartyPlugin extends Plugin
     // Helpers
     // -------------------------------------------------------------------------
 
-    private void addChatMessage(String message)
+    void addChatMessage(String message)
     {
         clientThread.invokeLater(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", message, null));
     }
@@ -3012,12 +2130,12 @@ public class RunePartyPlugin extends Plugin
         triggerSpotAnimAtWorldPoint(spotAnimId, point, SPOTANIM_DEFAULT_DURATION_CYCLES);
     }
 
-    private void refreshPanel()
+    void refreshPanel()
     {
         if (panel != null) SwingUtilities.invokeLater(panel::refresh);
     }
 
-    private String localRsn()
+    String localRsn()
     {
         if (client.getLocalPlayer() == null) return null;
         String name = client.getLocalPlayer().getName();
@@ -3036,48 +2154,24 @@ public class RunePartyPlugin extends Plugin
         if (boardViewActive) clientThread.invoke(this::restoreCameraFromBoardView);
         if (eventSocket != null) eventSocket.stop();
         turnAnnounce.reset();
-        minigameBanner.reset();
-        if (minigameSpinnerTask != null) { minigameSpinnerTask.cancel(false); minigameSpinnerTask = null; }
-        itemSpinner.reset();
-        itemCapBlocked.reset();
-        itemUsedAnnounce.reset();
-        coinTrapAnnounce.reset();
-        roundCompleteBanner.reset();
-        if (gameOverTask != null) { gameOverTask.cancel(false); gameOverTask = null; }
+        itemPresentation.reset();
         turnEffectGateUntil = 0;
         gameId = null; writeKey = null; playerToken = null; joinCode = null; hostRsn = null;
         phase = GamePhase.DISCONNECTED;
         coursePlacementMode = false; selectedPreset = null; presetRotationSteps = 0;
         currentTurnRsn = null; lastDiceRoll = null; pendingRoll = false; rollRequestSubmitted = false;
         awaitingSpinFinish = false;
-        awaitingGnomeYesFinish = false; awaitingGnomeNoFinish = false; awaitingMinigameReadyFinish = false;
-        awaitingTrueOrFalseYesFinish = false; awaitingTrueOrFalseNoFinish = false;
         pendingTargetIndices = Collections.emptyList();
         arrivalSubmitted = false; itemUsedThisTurn = false; standingOnTrackedPositionCached = false;
         itemPlacementKey = null;
-        minigameActive = false; minigameInstructions = null; minigameKey = null;
-        minigameDisplayName = null;
-        minigameSpinnerStart = 0; minigameSpinnerUntil = 0; minigameSpinnerSkippedForClient = false;
-        coinTrapTriggerPoint = null; coinTrapTriggerUntil = 0;
-        minigameReadyRsns.clear();
-        minigameCountdownStarted = false; minigameCountdownSkippedForClient = false; minigameCountdownBannerUntil = 0;
-        coinRushSpawns.clear(); coinRushScores.clear(); coinRushCollectSubmitted.clear(); coinRushRoundStartAt = 0;
-        trueOrFalseQuestion = null; trueOrFalseRoundNumber = 0; trueOrFalseAnsweredRsns.clear();
-        trueOrFalseMyAnswer = null; trueOrFalseRoundStartedAt = 0;
-        trueOrFalseLastCorrectAnswer = null; trueOrFalseLastResults = Collections.emptyList(); trueOrFalseRevealUntil = 0;
+        minigamePresentation.reset();
         maxRounds = 0; completedRounds = 0;
         playerPositions.clear();
         startConfirmSubmitted = false;
         welcomeBanner.reset();
         gameStartBanner.reset();
-        minigameRewardsBanner.reset();
-        gameOverStandings = Collections.emptyList(); gameOverBanner.reset(); winnerIntroBanner.reset();
-        placeReveal.reset();
-        winnerSuspenseBanner.reset(); winnerRevealBanner.reset(); confettiBanner.reset();
-        goldenGnomeOfferRsn = null; goldenGnomeOutcome.reset();
-        goldenGnomePopup.reset();
-        goldenGnomeMoveOldPoint = null; goldenGnomeMoveHideOldAt = 0;
-        goldenGnomeMoveNewPoint = null; goldenGnomeMoveShowNewAt = 0;
+        ceremonyPresentation.reset();
+        goldenGnomePresentation.reset();
         coinPopups.clear();
         diceRollRsn = null; diceRollValue = 0; diceRollBonus = 0; diceRollStart = 0; diceRollUntil = 0;
         if (rosterReducer != null) rosterReducer.reset();
@@ -3104,7 +2198,10 @@ public class RunePartyPlugin extends Plugin
     public boolean isPendingRoll() { return pendingRoll; }
     public boolean isItemUsedThisTurn() { return itemUsedThisTurn; }
     public List<Integer> getPendingTargetIndices() { return pendingTargetIndices; }
-    public boolean isMinigameActive() { return minigameActive; }
+    // Delegating facade -- MinigamePresentation owns the actual state (see ARCHITECTURE_REVIEW.md's
+    // C1 finding, step 2). Every name/signature below is unchanged, so no external caller
+    // (AnnouncementOverlay, RunePartyPanel, StatsOverlay) needs to change.
+    public boolean isMinigameActive() { return minigamePresentation.isActive(); }
     /** The board tile (pathIndex) {@code rsn} is currently standing at, per the last PLAYER_MOVED
      * seen for them -- 0 (START) if they haven't moved yet this game. See TileOverlay#
      * renderReturnToPositionArrow, the only consumer. */
@@ -3114,64 +2211,67 @@ public class RunePartyPlugin extends Plugin
         Integer idx = playerPositions.get(rsn.toLowerCase(Locale.ROOT));
         return idx != null ? idx : 0;
     }
-    public String getMinigameInstructions() { return minigameInstructions; }
-    public String getMinigameKey() { return minigameKey; }
-    public String getMinigameDisplayName() { return minigameDisplayName; }
-    public long getMinigameSpinnerStart() { return minigameSpinnerStart; }
-    public long getMinigameSpinnerUntil() { return minigameSpinnerUntil; }
-    public boolean isMinigameSpinnerSkippedForClient() { return minigameSpinnerSkippedForClient; }
-    public long getItemSpinnerStart() { return itemSpinner.start; }
-    public long getItemSpinnerUntil() { return itemSpinner.until; }
-    public String getItemGrantRsn() { return itemSpinner.payload != null ? itemSpinner.payload.rsn : null; }
-    public String getItemGrantKey() { return itemSpinner.payload != null ? itemSpinner.payload.itemKey : null; }
-    public long getItemCapBlockedUntil() { return itemCapBlocked.until; }
-    public String getItemCapBlockedRsn() { return itemCapBlocked.payload != null ? itemCapBlocked.payload.rsn : null; }
-    public int getItemCapBlockedCap() { return itemCapBlocked.payload != null ? itemCapBlocked.payload.cap : 0; }
-    public long getItemUsedAnnounceUntil() { return itemUsedAnnounce.until; }
-    public String getItemUsedAnnounceRsn() { return itemUsedAnnounce.payload != null ? itemUsedAnnounce.payload.rsn : null; }
-    public String getItemUsedAnnounceItemKey() { return itemUsedAnnounce.payload != null ? itemUsedAnnounce.payload.itemKey : null; }
-    public long getCoinTrapAnnounceUntil() { return coinTrapAnnounce.until; }
-    public String getCoinTrapAnnounceRsn() { return coinTrapAnnounce.payload; }
-    public WorldPoint getCoinTrapTriggerPoint() { return coinTrapTriggerPoint; }
-    public long getCoinTrapTriggerUntil() { return coinTrapTriggerUntil; }
+    public String getMinigameInstructions() { return minigamePresentation.getInstructions(); }
+    public String getMinigameKey() { return minigamePresentation.getKey(); }
+    public String getMinigameDisplayName() { return minigamePresentation.getDisplayName(); }
+    public long getMinigameSpinnerStart() { return minigamePresentation.getMinigameSpinnerStart(); }
+    public long getMinigameSpinnerUntil() { return minigamePresentation.getMinigameSpinnerUntil(); }
+    public boolean isMinigameSpinnerSkippedForClient() { return minigamePresentation.isMinigameSpinnerSkippedForClient(); }
+    // Delegating facade -- ItemPresentation owns the actual state (see ARCHITECTURE_REVIEW.md's C1
+    // finding, step 2). Every name/signature below is unchanged, so no external caller
+    // (AnnouncementOverlay, TileOverlay) needs to change.
+    public long getItemSpinnerStart() { return itemPresentation.getItemSpinnerStart(); }
+    public long getItemSpinnerUntil() { return itemPresentation.getItemSpinnerUntil(); }
+    public String getItemGrantRsn() { return itemPresentation.getItemGrantRsn(); }
+    public String getItemGrantKey() { return itemPresentation.getItemGrantKey(); }
+    public long getItemCapBlockedUntil() { return itemPresentation.getItemCapBlockedUntil(); }
+    public String getItemCapBlockedRsn() { return itemPresentation.getItemCapBlockedRsn(); }
+    public int getItemCapBlockedCap() { return itemPresentation.getItemCapBlockedCap(); }
+    public long getItemUsedAnnounceUntil() { return itemPresentation.getItemUsedAnnounceUntil(); }
+    public String getItemUsedAnnounceRsn() { return itemPresentation.getItemUsedAnnounceRsn(); }
+    public String getItemUsedAnnounceItemKey() { return itemPresentation.getItemUsedAnnounceItemKey(); }
+    public long getCoinTrapAnnounceUntil() { return itemPresentation.getCoinTrapAnnounceUntil(); }
+    public String getCoinTrapAnnounceRsn() { return itemPresentation.getCoinTrapAnnounceRsn(); }
+    public WorldPoint getCoinTrapTriggerPoint() { return itemPresentation.getCoinTrapTriggerPoint(); }
+    public long getCoinTrapTriggerUntil() { return itemPresentation.getCoinTrapTriggerUntil(); }
 
     /** Every currently-live Coin Rush spawn, keyed by the server's own spawn id -- see
      * TileOverlay#updateCoinRushModels, the only consumer. */
-    public Map<Integer, WorldPoint> getCoinRushSpawns() { return Collections.unmodifiableMap(coinRushSpawns); }
+    public Map<Integer, WorldPoint> getCoinRushSpawns() { return Collections.unmodifiableMap(minigamePresentation.getCoinRushSpawns()); }
     /** This round's live Coin Rush tally, lowercase rsn -> coins collected so far -- see
      * StatsOverlay's live scoreboard, the only consumer. */
-    public Map<String, Integer> getCoinRushScores() { return Collections.unmodifiableMap(coinRushScores); }
-    public boolean isCoinRushActive() { return minigameActive && COIN_RUSH_KEY.equals(minigameKey); }
+    public Map<String, Integer> getCoinRushScores() { return Collections.unmodifiableMap(minigamePresentation.getCoinRushScores()); }
+    public boolean isCoinRushActive() { return minigamePresentation.isCoinRushActive(); }
     /** When the current Coin Rush round's own clock (see COIN_RUSH_DURATION_MS) runs out -- 0 if
      * no round is active yet or the round hasn't actually become playable (see
      * coinRushRoundStartAt's own doc on when that gets stamped). */
-    public long getCoinRushEndsAt() { return coinRushRoundStartAt != 0 ? coinRushRoundStartAt + COIN_RUSH_DURATION_MS : 0; }
+    public long getCoinRushEndsAt() { return minigamePresentation.getCoinRushEndsAt(); }
 
-    public String getTrueOrFalseQuestion() { return trueOrFalseQuestion; }
-    public int getTrueOrFalseRoundNumber() { return trueOrFalseRoundNumber; }
+    public String getTrueOrFalseQuestion() { return minigamePresentation.getTrueOrFalseQuestion(); }
+    public int getTrueOrFalseRoundNumber() { return minigamePresentation.getTrueOrFalseRoundNumber(); }
     /** Who's answered the *current* round so far -- see renderTrueOrFalseQuestion's own
      * "Ready screen"-style tally, the only consumer. */
-    public Set<String> getTrueOrFalseAnsweredRsns() { return Collections.unmodifiableSet(trueOrFalseAnsweredRsns); }
-    public Boolean getTrueOrFalseMyAnswer() { return trueOrFalseMyAnswer; }
+    public Set<String> getTrueOrFalseAnsweredRsns() { return Collections.unmodifiableSet(minigamePresentation.getTrueOrFalseAnsweredRsns()); }
+    public Boolean getTrueOrFalseMyAnswer() { return minigamePresentation.getTrueOrFalseMyAnswer(); }
     /** When the current True or False round's reading period ends and its answer countdown starts
      * ticking (see TRUE_OR_FALSE_READING_DURATION_MS) -- 0 if no round is currently open, same
      * gating as getTrueOrFalseRoundEndsAt. renderTrueOrFalseQuestion hides the countdown number
      * until this passes. */
-    public long getTrueOrFalseAnswerWindowStartsAt() { return trueOrFalseQuestion != null && trueOrFalseRoundStartedAt != 0 ? trueOrFalseRoundStartedAt + TRUE_OR_FALSE_READING_DURATION_MS : 0; }
+    public long getTrueOrFalseAnswerWindowStartsAt() { return minigamePresentation.getTrueOrFalseAnswerWindowStartsAt(); }
     /** When the current True or False round's own clock (see TRUE_OR_FALSE_READING_DURATION_MS +
      * TRUE_OR_FALSE_ROUND_DURATION_MS) runs out -- 0 if no round is currently open (see
      * trueOrFalseRoundStartedAt's own doc on when that gets stamped, and trueOrFalseQuestion,
      * cleared the instant the round ends). */
-    public long getTrueOrFalseRoundEndsAt() { return trueOrFalseQuestion != null && trueOrFalseRoundStartedAt != 0 ? trueOrFalseRoundStartedAt + TRUE_OR_FALSE_READING_DURATION_MS + TRUE_OR_FALSE_ROUND_DURATION_MS : 0; }
-    public Boolean getTrueOrFalseLastCorrectAnswer() { return trueOrFalseLastCorrectAnswer; }
-    public List<TrueOrFalseResult> getTrueOrFalseLastResults() { return trueOrFalseLastResults; }
-    public long getTrueOrFalseRevealUntil() { return trueOrFalseRevealUntil; }
+    public long getTrueOrFalseRoundEndsAt() { return minigamePresentation.getTrueOrFalseRoundEndsAt(); }
+    public Boolean getTrueOrFalseLastCorrectAnswer() { return minigamePresentation.getTrueOrFalseLastCorrectAnswer(); }
+    public List<TrueOrFalseResult> getTrueOrFalseLastResults() { return minigamePresentation.getTrueOrFalseLastResults(); }
+    public long getTrueOrFalseRevealUntil() { return minigamePresentation.getTrueOrFalseRevealUntil(); }
 
     public String getItemPlacementKey() { return itemPlacementKey; }
-    public Set<String> getMinigameReadyRsns() { return minigameReadyRsns; }
-    public boolean isMinigameCountdownStarted() { return minigameCountdownStarted; }
-    public boolean isMinigameCountdownSkippedForClient() { return minigameCountdownSkippedForClient; }
-    public long getMinigameCountdownBannerUntil() { return minigameCountdownBannerUntil; }
+    public Set<String> getMinigameReadyRsns() { return minigamePresentation.getMinigameReadyRsns(); }
+    public boolean isMinigameCountdownStarted() { return minigamePresentation.isCountdownStarted(); }
+    public boolean isMinigameCountdownSkippedForClient() { return minigamePresentation.isCountdownSkippedForClient(); }
+    public long getMinigameCountdownBannerUntil() { return minigamePresentation.getCountdownBannerUntil(); }
     public int getMaxRounds() { return maxRounds; }
     /** 1-indexed round currently in progress, capped at maxRounds so the round the final
      * MINIGAME_ENDED just completed doesn't briefly read as "one past the end" before GAME_ENDED
@@ -3185,24 +2285,27 @@ public class RunePartyPlugin extends Plugin
     public String getTurnAnnounceRsn() { return turnAnnounce.payload; }
     public long getTurnAnnounceUntil() { return turnAnnounce.until; }
     public long getWelcomeBannerUntil() { return welcomeBanner.until; }
-    public long getMinigameBannerUntil() { return minigameBanner.until; }
+    public long getMinigameBannerUntil() { return minigamePresentation.getMinigameBannerUntil(); }
     public long getGameStartBannerUntil() { return gameStartBanner.until; }
-    public long getRoundCompleteBannerUntil() { return roundCompleteBanner.until; }
-    public int getRoundCompleteRoundNumber() { return roundCompleteBanner.payload != null ? roundCompleteBanner.payload : 0; }
-    public long getMinigameRewardsBannerUntil() { return minigameRewardsBanner.until; }
-    public List<MinigameReward> getMinigameRewards() { return minigameRewardsBanner.payload != null ? minigameRewardsBanner.payload : Collections.emptyList(); }
-    public List<RosterReducer.RosterEntry> getGameOverStandings() { return gameOverStandings; }
-    public long getGameOverBannerUntil() { return gameOverBanner.until; }
-    public long getWinnerIntroBannerUntil() { return winnerIntroBanner.until; }
-    public long getPlaceRevealUntil() { return placeReveal.until; }
-    public String getPlaceRevealRsn() { return placeReveal.payload != null ? placeReveal.payload.rsn : null; }
-    public int getPlaceRevealRank() { return placeReveal.payload != null ? placeReveal.payload.rank : 0; }
-    public int getPlaceRevealCoins() { return placeReveal.payload != null ? placeReveal.payload.coins : 0; }
-    public int getPlaceRevealGoldenGnomes() { return placeReveal.payload != null ? placeReveal.payload.goldenGnomes : 0; }
-    public long getWinnerSuspenseUntil() { return winnerSuspenseBanner.until; }
-    public long getWinnerRevealUntil() { return winnerRevealBanner.until; }
-    public String getWinnerRsn() { return winnerRevealBanner.payload; }
-    public long getConfettiUntil() { return confettiBanner.until; }
+    public long getRoundCompleteBannerUntil() { return minigamePresentation.getRoundCompleteBannerUntil(); }
+    public int getRoundCompleteRoundNumber() { return minigamePresentation.getRoundCompleteRoundNumber(); }
+    public long getMinigameRewardsBannerUntil() { return minigamePresentation.getMinigameRewardsBannerUntil(); }
+    public List<MinigameReward> getMinigameRewards() { return minigamePresentation.getMinigameRewards(); }
+    // Delegating facade -- CeremonyPresentation owns the actual state (see
+    // ARCHITECTURE_REVIEW.md's C1 finding, step 2). Every name/signature below is unchanged, so no
+    // external caller (AnnouncementOverlay, ConfettiOverlay) needs to change.
+    public List<RosterReducer.RosterEntry> getGameOverStandings() { return ceremonyPresentation.getGameOverStandings(); }
+    public long getGameOverBannerUntil() { return ceremonyPresentation.getGameOverBannerUntil(); }
+    public long getWinnerIntroBannerUntil() { return ceremonyPresentation.getWinnerIntroBannerUntil(); }
+    public long getPlaceRevealUntil() { return ceremonyPresentation.getPlaceRevealUntil(); }
+    public String getPlaceRevealRsn() { return ceremonyPresentation.getPlaceRevealRsn(); }
+    public int getPlaceRevealRank() { return ceremonyPresentation.getPlaceRevealRank(); }
+    public int getPlaceRevealCoins() { return ceremonyPresentation.getPlaceRevealCoins(); }
+    public int getPlaceRevealGoldenGnomes() { return ceremonyPresentation.getPlaceRevealGoldenGnomes(); }
+    public long getWinnerSuspenseUntil() { return ceremonyPresentation.getWinnerSuspenseUntil(); }
+    public long getWinnerRevealUntil() { return ceremonyPresentation.getWinnerRevealUntil(); }
+    public String getWinnerRsn() { return ceremonyPresentation.getWinnerRsn(); }
+    public long getConfettiUntil() { return ceremonyPresentation.getConfettiUntil(); }
     /** {@code rsn}'s currently-showing coin popup, or null if none -- see PlayerOverlay#
      * drawCoinPopup, the only consumer. Drops expired entries off the front of this player's queue
      * first (see coinPopups's own doc for why it's a queue, not a single slot) so an old, already-
@@ -3227,16 +2330,19 @@ public class RunePartyPlugin extends Plugin
     public int getDiceRollBonus() { return diceRollBonus; }
     public long getDiceRollStart() { return diceRollStart; }
     public long getDiceRollUntil() { return diceRollUntil; }
-    public String getGoldenGnomeOfferRsn() { return goldenGnomeOfferRsn; }
-    public String getGoldenGnomeOutcome() { return goldenGnomeOutcome.payload != null ? goldenGnomeOutcome.payload.outcome : null; }
-    public String getGoldenGnomeOutcomeRsn() { return goldenGnomeOutcome.payload != null ? goldenGnomeOutcome.payload.rsn : null; }
-    public long getGoldenGnomeOutcomeBannerUntil() { return goldenGnomeOutcome.until; }
-    public String getGoldenGnomePopupRsn() { return goldenGnomePopup.payload != null ? goldenGnomePopup.payload.rsn : null; }
-    public int getGoldenGnomePopupNewTotal() { return goldenGnomePopup.payload != null ? goldenGnomePopup.payload.newTotal : 0; }
-    public long getGoldenGnomePopupStart() { return goldenGnomePopup.start; }
-    public long getGoldenGnomePopupUntil() { return goldenGnomePopup.until; }
-    public WorldPoint getGoldenGnomeMoveOldPoint() { return goldenGnomeMoveOldPoint; }
-    public long getGoldenGnomeMoveHideOldAt() { return goldenGnomeMoveHideOldAt; }
-    public WorldPoint getGoldenGnomeMoveNewPoint() { return goldenGnomeMoveNewPoint; }
-    public long getGoldenGnomeMoveShowNewAt() { return goldenGnomeMoveShowNewAt; }
+    // Delegating facade -- GoldenGnomePresentation owns the actual state (see
+    // ARCHITECTURE_REVIEW.md's C1 finding, step 2). Every name/signature below is unchanged, so no
+    // external caller (AnnouncementOverlay, PlayerOverlay, TileOverlay) needs to change.
+    public String getGoldenGnomeOfferRsn() { return goldenGnomePresentation.getOfferRsn(); }
+    public String getGoldenGnomeOutcome() { return goldenGnomePresentation.getOutcome(); }
+    public String getGoldenGnomeOutcomeRsn() { return goldenGnomePresentation.getOutcomeRsn(); }
+    public long getGoldenGnomeOutcomeBannerUntil() { return goldenGnomePresentation.getOutcomeBannerUntil(); }
+    public String getGoldenGnomePopupRsn() { return goldenGnomePresentation.getPopupRsn(); }
+    public int getGoldenGnomePopupNewTotal() { return goldenGnomePresentation.getPopupNewTotal(); }
+    public long getGoldenGnomePopupStart() { return goldenGnomePresentation.getPopupStart(); }
+    public long getGoldenGnomePopupUntil() { return goldenGnomePresentation.getPopupUntil(); }
+    public WorldPoint getGoldenGnomeMoveOldPoint() { return goldenGnomePresentation.getMoveOldPoint(); }
+    public long getGoldenGnomeMoveHideOldAt() { return goldenGnomePresentation.getMoveHideOldAt(); }
+    public WorldPoint getGoldenGnomeMoveNewPoint() { return goldenGnomePresentation.getMoveNewPoint(); }
+    public long getGoldenGnomeMoveShowNewAt() { return goldenGnomePresentation.getMoveShowNewAt(); }
 }

@@ -112,11 +112,11 @@ public final class Json
     /** Reads MINIGAME_ENDED's "payouts" list -- {@code [{"player": rsn, "coins": int}, ...]} --
      * one entry per player a mini-game's own Minigame.resolve_rewards() decided to reward (see
      * app.py); players who got nothing simply aren't in the list. Never null, only empty. */
-    public static List<RunePartyPlugin.MinigameReward> safeMinigameRewards(JsonObject o, String key)
+    public static List<MinigameReward> safeMinigameRewards(JsonObject o, String key)
     {
         if (o == null || !o.has(key) || o.get(key).isJsonNull() || !o.get(key).isJsonArray()) return Collections.emptyList();
         JsonArray arr = o.get(key).getAsJsonArray();
-        List<RunePartyPlugin.MinigameReward> out = new ArrayList<>(arr.size());
+        List<MinigameReward> out = new ArrayList<>(arr.size());
         for (int i = 0; i < arr.size(); i++)
         {
             try
@@ -124,7 +124,7 @@ public final class Json
                 JsonObject entry = arr.get(i).getAsJsonObject();
                 String rsn = safeStr(entry, "player");
                 Integer coins = safeInt(entry, "coins");
-                if (rsn != null && coins != null) out.add(new RunePartyPlugin.MinigameReward(rsn, coins));
+                if (rsn != null && coins != null) out.add(new MinigameReward(rsn, coins));
             }
             catch (Exception ignored) { /* skip malformed entry */ }
         }
@@ -132,14 +132,14 @@ public final class Json
     }
 
     /** Parses a TRUE_OR_FALSE_ROUND_ENDED payload's "results" list -- see
-     * RunePartyPlugin.TrueOrFalseResult's own doc and renderTrueOrFalseReveal, the only consumer.
+     * TrueOrFalseResult's own doc and renderTrueOrFalseReveal, the only consumer.
      * {@code answer} is nullable (missing/null JSON means the player never answered that round at
      * all, not that they answered false). */
-    public static List<RunePartyPlugin.TrueOrFalseResult> safeTrueOrFalseResults(JsonObject o)
+    public static List<TrueOrFalseResult> safeTrueOrFalseResults(JsonObject o)
     {
         if (o == null || !o.has("results") || o.get("results").isJsonNull() || !o.get("results").isJsonArray()) return Collections.emptyList();
         JsonArray arr = o.get("results").getAsJsonArray();
-        List<RunePartyPlugin.TrueOrFalseResult> out = new ArrayList<>(arr.size());
+        List<TrueOrFalseResult> out = new ArrayList<>(arr.size());
         for (int i = 0; i < arr.size(); i++)
         {
             try
@@ -151,7 +151,7 @@ public final class Json
                 Boolean answer = answerEl != null && !answerEl.isJsonNull() ? answerEl.getAsBoolean() : null;
                 JsonElement correctEl = entry.get("correct");
                 boolean correct = correctEl != null && !correctEl.isJsonNull() && correctEl.getAsBoolean();
-                out.add(new RunePartyPlugin.TrueOrFalseResult(rsn, answer, correct));
+                out.add(new TrueOrFalseResult(rsn, answer, correct));
             }
             catch (Exception ignored) { /* skip malformed entry */ }
         }

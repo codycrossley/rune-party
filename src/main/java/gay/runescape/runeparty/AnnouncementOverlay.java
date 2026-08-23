@@ -1091,7 +1091,7 @@ public class AnnouncementOverlay extends Overlay
         Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_REVEAL_LINE_SIZE);
         Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(TRUE_OR_FALSE_REVEAL_LINE_SIZE);
         int lineY = y + 36;
-        for (RunePartyPlugin.TrueOrFalseResult result : plugin.getTrueOrFalseLastResults())
+        for (TrueOrFalseResult result : plugin.getTrueOrFalseLastResults())
         {
             String answerText = result.answer == null ? "no answer" : (result.answer ? "True" : "False");
             String status = "   " + answerText + (result.correct ? " -- correct!" : " -- wrong");
@@ -1160,7 +1160,7 @@ public class AnnouncementOverlay extends Overlay
         drawCenteredRainbowText(g, "REWARDS", RAINBOW_LETTER_COLORS, centerX, y, alpha);
 
         Map<String, Integer> rewardByRsn = new HashMap<>();
-        for (RunePartyPlugin.MinigameReward reward : plugin.getMinigameRewards())
+        for (MinigameReward reward : plugin.getMinigameRewards())
         {
             rewardByRsn.put(reward.rsn.toLowerCase(), reward.coins);
         }
