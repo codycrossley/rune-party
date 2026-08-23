@@ -34,17 +34,9 @@ import java.util.Set;
 @Slf4j
 public class TileOverlay extends Overlay
 {
-    private static final Color COLOR_UNKNOWN_TYPE = new Color(255, 255, 0); // fallback for any tile type not explicitly recognized below
-    private static final Color COLOR_PATH          = new Color(40, 130, 230); // the "standard" tile -- plain, always worth 3 coins on landing
-    private static final Color COLOR_PENALTY_TILE  = new Color(220, 50, 50); // functions like PATH, but -3 coins on landing (floored at 0)
-    private static final Color COLOR_START         = new Color(60, 179, 74);
-    // Only used for the live placement preview now (see renderPresetPreview) -- a committed Golden
-    // Gnome tile renders as a 3D model instead (model 31481, see updateGoldenGnomeModels), but the
-    // preview is a lightweight dashed-outline pass over the whole course before it's even
-    // committed, same as every other tile type there, so it keeps the plain outline look.
-    private static final Color COLOR_GOLDEN_GNOME_TILE = new Color(255, 210, 0);
-    private static final Color COLOR_EVENT_TILE    = new Color(170, 80, 220);
-    private static final Color COLOR_ITEM_TILE     = new Color(255, 140, 0); // landing spins the item wheel (see AnnouncementOverlay#renderItemSpinner) and grants a random item
+    // Fallback for any tile type the served catalog doesn't have (see defaultColorFor) -- not
+    // itself served, since it only ever needs to exist client-side.
+    private static final Color COLOR_UNKNOWN_TYPE = new Color(255, 255, 0);
     private static final Color COLOR_ROUTE_LINE    = new Color(255, 255, 255, 100);
     private static final Color COLOR_TARGET_ARROW  = new Color(255, 215, 0);
 
@@ -610,7 +602,7 @@ public class TileOverlay extends Overlay
         TileReducer.TileEntry start = tileReducer.tileAtIndex(0);
         if (start == null) return;
 
-        drawBouncingArrowWithLabel(g, start.point, "Start Here!", COLOR_START);
+        drawBouncingArrowWithLabel(g, start.point, "Start Here!", defaultColorFor("START"));
     }
 
     /** "Place" arrows over the two candidate tiles (one step ahead, one step behind the local
@@ -872,18 +864,18 @@ public class TileOverlay extends Overlay
         return new Color(c.getRed(), c.getGreen(), c.getBlue(), alpha);
     }
 
-    private static Color defaultColorFor(String tileType)
+    /** Looks up this tile type's color in the served catalog (see RunePartyPlugin#getTileTypeCatalog,
+     * populated once at startup from GET /v1/tile-types) rather than a hardcoded table -- falls
+     * back to COLOR_UNKNOWN_TYPE for a type the catalog doesn't have (yet, or ever). */
+    private Color defaultColorFor(String tileType)
     {
-        if ("PATH".equals(tileType)) return COLOR_PATH;
-        if ("PENALTY_TILE".equals(tileType)) return COLOR_PENALTY_TILE;
-        if ("START".equals(tileType)) return COLOR_START;
-        if ("GOLDEN_GNOME_TILE".equals(tileType)) return COLOR_GOLDEN_GNOME_TILE;
-        if ("EVENT_TILE".equals(tileType)) return COLOR_EVENT_TILE;
-        if ("ITEM_TILE".equals(tileType)) return COLOR_ITEM_TILE;
-        return COLOR_UNKNOWN_TYPE;
+        ApiClient.TileTypeOut t = plugin.getTileTypeCatalog().get(tileType);
+        if (t == null || t.colorHex == null) return COLOR_UNKNOWN_TYPE;
+        try { return Color.decode(t.colorHex); }
+        catch (NumberFormatException e) { return COLOR_UNKNOWN_TYPE; }
     }
 
-    private static Color resolveColor(String hex, String tileType)
+    private Color resolveColor(String hex, String tileType)
     {
         if (hex == null || hex.isBlank()) return defaultColorFor(tileType);
         try { return Color.decode(hex); }

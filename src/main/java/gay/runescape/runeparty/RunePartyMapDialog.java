@@ -264,22 +264,14 @@ public class RunePartyMapDialog extends JDialog
 
         /** Plain-English gloss for one tile/modifier -- see buildLegend for the same reward
          * numbers' short-form color-swatch summary; this is the fuller per-tile version, including
-         * its pathIndex where that's meaningful. Numbers here mirror app.py's own
-         * STANDARD_TILE_REWARD/PENALTY_TILE_PENALTY/GOLDEN_GNOME_PRICE/COIN_TRAP_STEAL_AMOUNT --
-         * duplicated rather than shared, same as tileColor's own doc explains for this file. */
+         * its pathIndex where that's meaningful. The gloss itself comes from the served catalog
+         * (see RunePartyPlugin#getTileTypeCatalog) -- only the "(pathIndex N)" suffix is added
+         * here, since that's per-instance data the static catalog doesn't have. */
         private String tileDescription(TileReducer.TileEntry t)
         {
-            switch (t.tileType)
-            {
-                case "START": return "Start";
-                case "PATH": return "Standard tile (pathIndex " + t.pathIndex + ") -- +3 coins";
-                case "PENALTY_TILE": return "Penalty tile (pathIndex " + t.pathIndex + ") -- -3 coins";
-                case "ITEM_TILE": return "Item Space (pathIndex " + t.pathIndex + ") -- grants a random item";
-                case "EVENT_TILE": return "Event tile (pathIndex " + t.pathIndex + ") -- TBD";
-                case "GOLDEN_GNOME_TILE": return "Golden Gnome -- buy for 20 coins";
-                case "COIN_TRAP_TILE": return "Coin Trap -- steals up to 20 coins from anyone but its owner";
-                default: return t.tileType;
-            }
+            ApiClient.TileTypeOut type = plugin.getTileTypeCatalog().get(t.tileType);
+            if (type == null) return t.tileType;
+            return t.pathIndex != null ? type.description + " (pathIndex " + t.pathIndex + ")" : type.description;
         }
 
         /** One dot per seated, joined PLAYER at their live board position (see
@@ -413,11 +405,14 @@ public class RunePartyMapDialog extends JDialog
         legend.setBackground(BACKGROUND);
         legend.setBorder(BorderFactory.createEmptyBorder(6, PADDING, 8, PADDING));
 
-        legend.add(legendRow(tileColor("START", null), "Start"));
-        legend.add(legendRow(tileColor("PATH", null), "Standard tile (+3 coins)"));
-        legend.add(legendRow(tileColor("PENALTY_TILE", null), "Penalty tile (-3 coins)"));
-        legend.add(legendRow(tileColor("ITEM_TILE", null), "Item Space (random item)"));
-        legend.add(legendRow(tileColor("EVENT_TILE", null), "Event tile (TBD)"));
+        // Non-modifier types come from the served catalog (see RunePartyPlugin#getTileTypeCatalog),
+        // in the server's own REGISTRY order -- the 2 modifiers stay hardcoded below since they
+        // render with their own bespoke marker glyph/color, not a tile-outline color.
+        for (ApiClient.TileTypeOut t : plugin.getTileTypeCatalog().values())
+        {
+            if (t.isModifier) continue;
+            legend.add(legendRow(tileColor(t.key, null), t.description));
+        }
         legend.add(legendRow(GOLDEN_GNOME_MARKER, "Golden Gnome (▲ marker -- buy for 20 coins)"));
         legend.add(legendRow(COIN_TRAP_MARKER, "Coin Trap (◆ marker -- steals up to 20 coins)"));
 
@@ -451,23 +446,20 @@ public class RunePartyMapDialog extends JDialog
         return row;
     }
 
-    /** Same tile-type-to-color mapping as TileOverlay#resolveColor/defaultColorFor -- duplicated
-     * rather than shared, matching how this plugin's overlays each already keep their own small
-     * copy of this kind of thing (see e.g. every class with its own localRsn()/isLocalPlayer()). */
-    private static Color tileColor(String tileType, String hex)
+    /** Same served catalog TileOverlay#defaultColorFor reads (see RunePartyPlugin#
+     * getTileTypeCatalog, populated once at startup from GET /v1/tile-types) rather than its own
+     * hardcoded table -- falls back to plain yellow for a type the catalog doesn't have. */
+    private Color tileColor(String tileType, String hex)
     {
         if (hex != null && !hex.isBlank())
         {
             try { return Color.decode(hex); }
             catch (NumberFormatException ignored) { /* fall through to the type default below */ }
         }
-        if ("PATH".equals(tileType)) return new Color(40, 130, 230);
-        if ("PENALTY_TILE".equals(tileType)) return new Color(220, 50, 50);
-        if ("START".equals(tileType)) return new Color(60, 179, 74);
-        if ("EVENT_TILE".equals(tileType)) return new Color(170, 80, 220);
-        if ("ITEM_TILE".equals(tileType)) return new Color(255, 140, 0);
-        if ("GOLDEN_GNOME_TILE".equals(tileType)) return GOLDEN_GNOME_MARKER;
-        return new Color(255, 255, 0);
+        ApiClient.TileTypeOut t = plugin.getTileTypeCatalog().get(tileType);
+        if (t == null || t.colorHex == null) return new Color(255, 255, 0);
+        try { return Color.decode(t.colorHex); }
+        catch (NumberFormatException e) { return new Color(255, 255, 0); }
     }
 
     private static Color withAlpha(Color c, int alpha)

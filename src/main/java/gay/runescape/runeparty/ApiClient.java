@@ -456,6 +456,27 @@ public class ApiClient
         }
     }
 
+    /** Static, server-wide catalog of tile-type colors/labels/descriptions
+     * -- not game-scoped, so unlike fetchRoster this only needs fetching once per
+     * plugin session, not per game. See RunePartyPlugin#loadTileTypeCatalog. */
+    public TileTypesResponse fetchTileTypes() throws IOException
+    {
+        Request req = new Request.Builder()
+            .url(BASE_URL + "/v1/tile-types")
+            .get()
+            .build();
+
+        try (Response resp = http.newCall(req).execute())
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Fetch tile types failed (" + resp.code() + "): " + raw);
+            TileTypesResponse parsed = gson.fromJson(raw, TileTypesResponse.class);
+            if (parsed == null) throw new IOException("Empty response from tile-types endpoint");
+            if (parsed.tileTypes == null) parsed.tileTypes = Collections.emptyList();
+            return parsed;
+        }
+    }
+
     public RosterSnapshot fetchRoster(String gameId) throws IOException
     {
         Request req = new Request.Builder()
@@ -622,6 +643,20 @@ public class ApiClient
         public int coins;
         public int goldenGnomeCount;
         public Map<String, Integer> items = new HashMap<>(); // itemKey -> count held, defaulted so an older server response without this field doesn't NPE
+    }
+
+    public static class TileTypesResponse
+    {
+        public List<TileTypeOut> tileTypes;
+    }
+
+    public static class TileTypeOut
+    {
+        public String key;
+        public String displayName;
+        public String colorHex;
+        public String description;
+        public boolean isModifier;
     }
 
     public static class TilesResponse

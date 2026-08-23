@@ -1,0 +1,160 @@
+package gay.runescape.runeparty;
+
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.coords.WorldPoint;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+/** Every payload-field reader used to fold an event's JsonObject payload into client state --
+ * consolidated here from what used to be three byte-for-byte-identical private copies of
+ * safeStr/safeInt (one each in RunePartyPlugin, RosterReducer, TileReducer) plus a handful of
+ * RunePartyPlugin-only readers for shapes more than one field wide. See ARCHITECTURE_REVIEW.md's
+ * X1 finding.
+ * <p>
+ * {@code safeStr}/{@code safeInt} silently return null on a missing/null field, same as before --
+ * that's still the right default for a field a caller already null-guards or has a sensible
+ * fallback for. {@code requiredStr}/{@code requiredInt} are new: same behavior, but log a warning
+ * the moment the field is actually missing, for the reads where a missing field is a genuine
+ * "something's out of sync between client and server" bug rather than a normal empty case -- see
+ * each call site's own reasoning for why it's required. eventType is passed in purely to make that
+ * warning actionable (which event, which field) without every call site building its own message. */
+@Slf4j
+public final class Json
+{
+    private Json() {}
+
+    public static String safeStr(JsonObject o, String key)
+    {
+        return (o != null && o.has(key) && !o.get(key).isJsonNull()) ? o.get(key).getAsString() : null;
+    }
+
+    public static Integer safeInt(JsonObject o, String key)
+    {
+        try { return (o != null && o.has(key) && !o.get(key).isJsonNull()) ? o.get(key).getAsInt() : null; }
+        catch (Exception ignored) { return null; }
+    }
+
+    /** Same as {@link #safeStr}, but logs a warning if {@code key} is missing/null -- use this at
+     * a read the existing code already treats as required (a null-guard right after the read). */
+    public static String requiredStr(JsonObject o, String eventType, String key)
+    {
+        String v = safeStr(o, key);
+        if (v == null) log.warn("{} payload missing required field \"{}\"", eventType, key);
+        return v;
+    }
+
+    /** Same as {@link #safeInt}, but logs a warning if {@code key} is missing/null -- see
+     * {@link #requiredStr}'s own doc on when to reach for this instead of the plain variant. */
+    public static Integer requiredInt(JsonObject o, String eventType, String key)
+    {
+        Integer v = safeInt(o, key);
+        if (v == null) log.warn("{} payload missing required field \"{}\"", eventType, key);
+        return v;
+    }
+
+    /** Reads a nested {@code {x, y, plane}} object -- see GOLDEN_GNOME_MOVED's oldPoint/newPoint,
+     * the only current callers. Null if the key's missing or any of the three fields is. */
+    public static WorldPoint safeWorldPoint(JsonObject o, String key)
+    {
+        if (o == null || !o.has(key) || !o.get(key).isJsonObject()) return null;
+        JsonObject p = o.getAsJsonObject(key);
+        Integer x = safeInt(p, "x");
+        Integer y = safeInt(p, "y");
+        Integer plane = safeInt(p, "plane");
+        if (x == null || y == null || plane == null) return null;
+        return new WorldPoint(x, y, plane);
+    }
+
+    /** Reads DICE_ROLLED's targetIndices -- plural since a fork can offer more than one candidate
+     * destination for a single roll (see TileOverlay#renderTargetArrow). Never null, only empty. */
+    public static List<Integer> safeIntList(JsonObject o, String key)
+    {
+        if (o == null || !o.has(key) || o.get(key).isJsonNull() || !o.get(key).isJsonArray()) return Collections.emptyList();
+        JsonArray arr = o.get(key).getAsJsonArray();
+        List<Integer> out = new ArrayList<>(arr.size());
+        for (int i = 0; i < arr.size(); i++)
+        {
+            try { out.add(arr.get(i).getAsInt()); }
+            catch (Exception ignored) { /* skip malformed entry */ }
+        }
+        return out;
+    }
+
+    /** Same shape as {@link #safeIntList}, returning a primitive array instead -- see
+     * TileReducer's own nextIndices, the only caller. One malformed element discards the whole
+     * array rather than skipping just that entry (unlike safeIntList), matching TileReducer's
+     * original behavior. */
+    public static int[] safeIntArray(JsonObject o, String key)
+    {
+        if (o == null || !o.has(key) || o.get(key).isJsonNull() || !o.get(key).isJsonArray()) return new int[0];
+        JsonArray arr = o.get(key).getAsJsonArray();
+        int[] out = new int[arr.size()];
+        for (int i = 0; i < arr.size(); i++)
+        {
+            try { out[i] = arr.get(i).getAsInt(); }
+            catch (Exception ignored) { return new int[0]; }
+        }
+        return out;
+    }
+
+    /** Reads a JsonArray field, or an empty JsonArray if missing/null/not-an-array -- see
+     * TileReducer's own TILES_MARKED/TILES_UNMARKED handling, the only caller. */
+    public static JsonArray safeArray(JsonObject o, String key)
+    {
+        return (o != null && o.has(key) && o.get(key).isJsonArray()) ? o.get(key).getAsJsonArray() : new JsonArray();
+    }
+
+    /** Reads MINIGAME_ENDED's "payouts" list -- {@code [{"player": rsn, "coins": int}, ...]} --
+     * one entry per player a mini-game's own Minigame.resolve_rewards() decided to reward (see
+     * app.py); players who got nothing simply aren't in the list. Never null, only empty. */
+    public static List<RunePartyPlugin.MinigameReward> safeMinigameRewards(JsonObject o, String key)
+    {
+        if (o == null || !o.has(key) || o.get(key).isJsonNull() || !o.get(key).isJsonArray()) return Collections.emptyList();
+        JsonArray arr = o.get(key).getAsJsonArray();
+        List<RunePartyPlugin.MinigameReward> out = new ArrayList<>(arr.size());
+        for (int i = 0; i < arr.size(); i++)
+        {
+            try
+            {
+                JsonObject entry = arr.get(i).getAsJsonObject();
+                String rsn = safeStr(entry, "player");
+                Integer coins = safeInt(entry, "coins");
+                if (rsn != null && coins != null) out.add(new RunePartyPlugin.MinigameReward(rsn, coins));
+            }
+            catch (Exception ignored) { /* skip malformed entry */ }
+        }
+        return out;
+    }
+
+    /** Parses a TRUE_OR_FALSE_ROUND_ENDED payload's "results" list -- see
+     * RunePartyPlugin.TrueOrFalseResult's own doc and renderTrueOrFalseReveal, the only consumer.
+     * {@code answer} is nullable (missing/null JSON means the player never answered that round at
+     * all, not that they answered false). */
+    public static List<RunePartyPlugin.TrueOrFalseResult> safeTrueOrFalseResults(JsonObject o)
+    {
+        if (o == null || !o.has("results") || o.get("results").isJsonNull() || !o.get("results").isJsonArray()) return Collections.emptyList();
+        JsonArray arr = o.get("results").getAsJsonArray();
+        List<RunePartyPlugin.TrueOrFalseResult> out = new ArrayList<>(arr.size());
+        for (int i = 0; i < arr.size(); i++)
+        {
+            try
+            {
+                JsonObject entry = arr.get(i).getAsJsonObject();
+                String rsn = safeStr(entry, "player");
+                if (rsn == null) continue;
+                JsonElement answerEl = entry.get("answer");
+                Boolean answer = answerEl != null && !answerEl.isJsonNull() ? answerEl.getAsBoolean() : null;
+                JsonElement correctEl = entry.get("correct");
+                boolean correct = correctEl != null && !correctEl.isJsonNull() && correctEl.getAsBoolean();
+                out.add(new RunePartyPlugin.TrueOrFalseResult(rsn, answer, correct));
+            }
+            catch (Exception ignored) { /* skip malformed entry */ }
+        }
+        return out;
+    }
+}

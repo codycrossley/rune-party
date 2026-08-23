@@ -171,7 +171,7 @@ public class EventSocket
                 // wrapped message instead of one frame each --
                 // unwrap it back into individual onEvent calls, in order, so nothing downstream
                 // (TileReducer, RosterReducer, handleEvent's switch) needs to know batching exists.
-                if ("EVENTS_BATCH".equals(e.type))
+                if (Events.EVENTS_BATCH.equals(e.type))
                 {
                     EventsBatch batch = gson.fromJson(text, EventsBatch.class);
                     if (batch.events == null) return;

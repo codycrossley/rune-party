@@ -1,6 +1,5 @@
 package gay.runescape.runeparty;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import net.runelite.api.coords.WorldPoint;
@@ -41,27 +40,27 @@ public class TileReducer
         if (e == null || e.type == null) return;
         String type = e.type.toUpperCase(Locale.ROOT);
 
-        if ("TILE_MARKED".equals(type))
+        if (Events.TILE_MARKED.equals(type))
         {
             applyMark(e.payload);
         }
-        else if ("TILE_UNMARKED".equals(type))
+        else if (Events.TILE_UNMARKED.equals(type))
         {
             applyUnmark(e.payload);
         }
-        else if ("TILES_MARKED".equals(type))
+        else if (Events.TILES_MARKED.equals(type))
         {
             // Bulk counterpart to TILE_MARKED -- one event carrying a whole course's worth of
             // tiles (see mark-tiles/commitPreset), so a big course commit is one event to apply
             // here instead of hundreds, even though each individual tile is applied identically.
-            for (JsonElement el : asArray(e.payload, "tiles"))
+            for (JsonElement el : Json.safeArray(e.payload, "tiles"))
             {
                 if (el.isJsonObject()) applyMark(el.getAsJsonObject());
             }
         }
-        else if ("TILES_UNMARKED".equals(type))
+        else if (Events.TILES_UNMARKED.equals(type))
         {
-            for (JsonElement el : asArray(e.payload, "tiles"))
+            for (JsonElement el : Json.safeArray(e.payload, "tiles"))
             {
                 if (el.isJsonObject()) applyUnmark(el.getAsJsonObject());
             }
@@ -70,17 +69,17 @@ public class TileReducer
 
     private void applyMark(JsonObject tile)
     {
-        Integer x = safeInt(tile, "x");
-        Integer y = safeInt(tile, "y");
-        Integer plane = safeInt(tile, "plane");
+        Integer x = Json.requiredInt(tile, Events.TILE_MARKED, "x");
+        Integer y = Json.requiredInt(tile, Events.TILE_MARKED, "y");
+        Integer plane = Json.requiredInt(tile, Events.TILE_MARKED, "plane");
         if (x == null || y == null || plane == null) return;
 
-        String tileType = safeStr(tile, "tileType");
+        String tileType = Json.requiredStr(tile, Events.TILE_MARKED, "tileType");
         if (tileType == null) return; // server always requires/validates a real tileType
-        String color = safeStr(tile, "color");
-        Integer orientation = safeInt(tile, "orientation");
-        Integer pathIndex = safeInt(tile, "pathIndex");
-        int[] nextIndices = safeIntArray(tile, "nextIndices");
+        String color = Json.safeStr(tile, "color");
+        Integer orientation = Json.safeInt(tile, "orientation");
+        Integer pathIndex = Json.safeInt(tile, "pathIndex");
+        int[] nextIndices = Json.safeIntArray(tile, "nextIndices");
 
         tiles.put(key(x, y, plane, tileType),
             new TileEntry(new WorldPoint(x, y, plane), tileType, color, orientation, pathIndex, nextIndices));
@@ -88,12 +87,12 @@ public class TileReducer
 
     private void applyUnmark(JsonObject tile)
     {
-        Integer x = safeInt(tile, "x");
-        Integer y = safeInt(tile, "y");
-        Integer plane = safeInt(tile, "plane");
+        Integer x = Json.requiredInt(tile, Events.TILE_UNMARKED, "x");
+        Integer y = Json.requiredInt(tile, Events.TILE_UNMARKED, "y");
+        Integer plane = Json.requiredInt(tile, Events.TILE_UNMARKED, "plane");
         if (x == null || y == null || plane == null) return;
 
-        String tileType = safeStr(tile, "tileType");
+        String tileType = Json.safeStr(tile, "tileType");
         if (tileType != null)
         {
             tiles.remove(key(x, y, plane, tileType));
@@ -103,11 +102,6 @@ public class TileReducer
             String prefix = x + ":" + y + ":" + plane + ":";
             tiles.keySet().removeIf(k -> k.startsWith(prefix));
         }
-    }
-
-    private static JsonArray asArray(JsonObject o, String k)
-    {
-        return (o != null && o.has(k) && o.get(k).isJsonArray()) ? o.get(k).getAsJsonArray() : new JsonArray();
     }
 
     public void loadAll(List<ApiClient.TileOut> tileList)
@@ -217,29 +211,5 @@ public class TileReducer
     private static String key(int x, int y, int plane, String tileType)
     {
         return x + ":" + y + ":" + plane + ":" + tileType;
-    }
-
-    private static String safeStr(JsonObject o, String k)
-    {
-        return (o != null && o.has(k) && !o.get(k).isJsonNull()) ? o.get(k).getAsString() : null;
-    }
-
-    private static Integer safeInt(JsonObject o, String k)
-    {
-        try { return (o != null && o.has(k) && !o.get(k).isJsonNull()) ? o.get(k).getAsInt() : null; }
-        catch (Exception ignored) { return null; }
-    }
-
-    private static int[] safeIntArray(JsonObject o, String k)
-    {
-        if (o == null || !o.has(k) || o.get(k).isJsonNull() || !o.get(k).isJsonArray()) return new int[0];
-        JsonArray arr = o.get(k).getAsJsonArray();
-        int[] out = new int[arr.size()];
-        for (int i = 0; i < arr.size(); i++)
-        {
-            try { out[i] = arr.get(i).getAsInt(); }
-            catch (Exception ignored) { return new int[0]; }
-        }
-        return out;
     }
 }

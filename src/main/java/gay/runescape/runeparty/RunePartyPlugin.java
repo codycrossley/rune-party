@@ -1,20 +1,16 @@
 package gay.runescape.runeparty;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.inject.Provides;
 import gay.runescape.runeparty.items.Items;
-import java.awt.Color;
-import java.awt.Graphics2D;
-import java.awt.RenderingHints;
-import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -392,6 +388,12 @@ public class RunePartyPlugin extends Plugin
     private RunePartyPanel panel;
     private NavigationButton navButton;
     private RunePartyMapDialog mapDialog; // lazily created on the first "Show Map" click, see showMap()
+
+    // Server-wide, not game-scoped -- fetched once at startup (see loadTileTypeCatalog) rather
+    // than per-game like the roster, since the tiles/ registry it mirrors never changes at
+    // runtime. Empty until the fetch completes (or forever, if it fails) -- every consumer
+    // (TileOverlay, RunePartyMapDialog) already falls back to a default color/label on a miss.
+    private volatile Map<String, ApiClient.TileTypeOut> tileTypeCatalog = new LinkedHashMap<>();
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r ->
     {
@@ -880,6 +882,7 @@ public class RunePartyPlugin extends Plugin
         log.debug("Rune Party starting up");
 
         apiClient = new ApiClient(okHttpClient, gson);
+        loadTileTypeCatalog();
         rosterReducer = new RosterReducer();
         tileReducer = new TileReducer();
 
@@ -1926,6 +1929,36 @@ public class RunePartyPlugin extends Plugin
             .onClick(me -> assignRole(targetRsn, RunePartyRole.PLAYER));
     }
 
+    public Map<String, ApiClient.TileTypeOut> getTileTypeCatalog()
+    {
+        return tileTypeCatalog;
+    }
+
+    /** Fetches the tile-type color/label/description catalog once, at startup -- see
+     * ApiClient#fetchTileTypes's own doc for why this doesn't need re-fetching per game the way
+     * syncRosterSnapshot does. Leaves tileTypeCatalog empty on failure rather than retrying; every
+     * consumer already degrades gracefully on a missing key. */
+    private void loadTileTypeCatalog()
+    {
+        executor.submit(() ->
+        {
+            try
+            {
+                ApiClient.TileTypesResponse resp = apiClient.fetchTileTypes();
+                Map<String, ApiClient.TileTypeOut> byKey = new LinkedHashMap<>();
+                for (ApiClient.TileTypeOut t : resp.tileTypes)
+                {
+                    byKey.put(t.key, t);
+                }
+                tileTypeCatalog = byKey;
+            }
+            catch (Exception ex)
+            {
+                log.warn("Fetch tile types failed", ex);
+            }
+        });
+    }
+
     /** Pulls a fresh /roster snapshot and merges it into RosterReducer -- the only source for the
      * turn-order "number" every RunePartyColor lookup (roster panel, PlayerOverlay, TileOverlay's
      * target arrow) depends on, since it never travels in the event stream itself. */
@@ -2155,7 +2188,7 @@ public class RunePartyPlugin extends Plugin
      * TURN_STARTED banner wait behind this one instead of overlapping it. */
     private void triggerMinigameRewardsBanner(JsonObject payload)
     {
-        minigameRewardsBanner.payload = safeMinigameRewards(payload, "payouts");
+        minigameRewardsBanner.payload = Json.safeMinigameRewards(payload, "payouts");
         minigameRewardsBanner.until = System.currentTimeMillis() + MINIGAME_REWARDS_BANNER_DURATION_MS;
         extendTurnEffectGate(minigameRewardsBanner.until);
     }
@@ -2342,9 +2375,10 @@ public class RunePartyPlugin extends Plugin
         rosterReducer.apply(e);
         tileReducer.apply(e);
 
-        switch (e.type.toUpperCase(Locale.ROOT))
+        String type = e.type.toUpperCase(Locale.ROOT);
+        switch (type)
         {
-            case "GAME_STARTED":
+            case Events.GAME_STARTED:
             {
                 phase = GamePhase.ACTIVE;
                 // currentTurnRsn stays null here -- see confirmStart/checkGatheringAtStart, turn
@@ -2352,7 +2386,7 @@ public class RunePartyPlugin extends Plugin
                 startConfirmSubmitted = false;
                 // Real state, applied catch-up or not -- see getCurrentRound/StatsOverlay's
                 // "ROUND x/y" line, the only consumer.
-                Integer mr = safeInt(e.payload, "maxRounds");
+                Integer mr = Json.requiredInt(e.payload, type, "maxRounds");
                 if (mr != null) maxRounds = mr;
                 if (!catchingUp)
                 {
@@ -2361,7 +2395,7 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
-            case "GAME_ENDED":
+            case Events.GAME_ENDED:
                 phase = GamePhase.ENDED;
                 if (!catchingUp)
                 {
@@ -2369,10 +2403,10 @@ public class RunePartyPlugin extends Plugin
                 }
                 break;
 
-            case "PLAYER_READY":
+            case Events.PLAYER_READY:
                 if (!catchingUp)
                 {
-                    addChatMessage(safeStr(e.payload, "player") + " is ready at the start!");
+                    addChatMessage(Json.requiredStr(e.payload, type, "player") + " is ready at the start!");
                 }
                 break;
 
@@ -2383,18 +2417,18 @@ public class RunePartyPlugin extends Plugin
             // snapshot rather than trying to derive numbers from the event stream itself. Skipped
             // during catch-up -- connectEventStream does one roster sync after the whole backlog
             // instead of one REST call per historical join/promotion/leave.
-            case "PLAYER_JOINED":
-            case "ROLE_ASSIGNED":
-            case "PLAYER_LEFT":
+            case Events.PLAYER_JOINED:
+            case Events.ROLE_ASSIGNED:
+            case Events.PLAYER_LEFT:
                 if (!catchingUp)
                 {
                     syncRosterSnapshot();
                 }
                 break;
 
-            case "TURN_STARTED":
+            case Events.TURN_STARTED:
             {
-                currentTurnRsn = safeStr(e.payload, "player");
+                currentTurnRsn = Json.requiredStr(e.payload, type, "player");
                 pendingRoll = false;
                 rollRequestSubmitted = false;
                 awaitingSpinFinish = false;
@@ -2414,20 +2448,20 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
-            case "DICE_ROLLED":
+            case Events.DICE_ROLLED:
             {
-                lastDiceRoll = safeInt(e.payload, "value");
-                pendingTargetIndices = safeIntList(e.payload, "targetIndices");
+                lastDiceRoll = Json.requiredInt(e.payload, type, "value");
+                pendingTargetIndices = Json.safeIntList(e.payload, "targetIndices");
                 pendingRoll = true;
                 rollRequestSubmitted = false; // pendingRoll is now the authoritative in-flight guard
                 arrivalSubmitted = false;
                 if (!catchingUp)
                 {
-                    String roller = safeStr(e.payload, "player");
+                    String roller = Json.requiredStr(e.payload, type, "player");
                     addChatMessage(roller + " rolled a " + lastDiceRoll + "!");
                     if (lastDiceRoll != null)
                     {
-                        Integer bonus = safeInt(e.payload, "bonus");
+                        Integer bonus = Json.safeInt(e.payload, "bonus");
                         diceRollRsn = roller;
                         diceRollValue = lastDiceRoll;
                         diceRollBonus = bonus != null ? bonus : 0;
@@ -2438,10 +2472,10 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
-            case "PLAYER_MOVED":
+            case Events.PLAYER_MOVED:
             {
-                String mover = safeStr(e.payload, "player");
-                Integer toIndex = safeInt(e.payload, "toIndex");
+                String mover = Json.requiredStr(e.payload, type, "player");
+                Integer toIndex = Json.requiredInt(e.payload, type, "toIndex");
                 if (mover != null && toIndex != null)
                 {
                     playerPositions.put(mover.toLowerCase(Locale.ROOT), toIndex);
@@ -2449,7 +2483,7 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
-            case "GOLDEN_GNOME_OFFERED":
+            case Events.GOLDEN_GNOME_OFFERED:
             {
                 // Real state, applied catch-up or not: non-null exactly while a response is
                 // outstanding, gating both a YES/NO emote doing anything (see
@@ -2457,7 +2491,7 @@ public class RunePartyPlugin extends Plugin
                 // isLocalPlayerReadyToRoll). Pauses TILE_EFFECT/COINS_CHANGED for the underlying
                 // tile until GOLDEN_GNOME_OFFER_RESOLVED -- see the server's confirm_arrival/
                 // respond_golden_gnome_offer split.
-                goldenGnomeOfferRsn = safeStr(e.payload, "player");
+                goldenGnomeOfferRsn = Json.requiredStr(e.payload, type, "player");
                 if (!catchingUp)
                 {
                     addChatMessage(goldenGnomeOfferRsn + " found a Golden Gnome!");
@@ -2465,7 +2499,7 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
-            case "GOLDEN_GNOME_OFFER_RESOLVED":
+            case Events.GOLDEN_GNOME_OFFER_RESOLVED:
             {
                 goldenGnomeOfferRsn = null; // always clear, catch-up or not -- real state
                 awaitingGnomeYesFinish = false;
@@ -2475,9 +2509,9 @@ public class RunePartyPlugin extends Plugin
                 // own announcement comes from the GOLDEN_GNOME_PURCHASED case below instead (it
                 // carries the new total, which this event doesn't), so only "cant_afford" actually
                 // needs to arm anything here.
-                if (!catchingUp && "cant_afford".equals(safeStr(e.payload, "outcome")))
+                if (!catchingUp && "cant_afford".equals(Json.requiredStr(e.payload, type, "outcome")))
                 {
-                    goldenGnomeOutcome.payload = new GoldenGnomeOutcomePayload("cant_afford", safeStr(e.payload, "player"));
+                    goldenGnomeOutcome.payload = new GoldenGnomeOutcomePayload("cant_afford", Json.requiredStr(e.payload, type, "player"));
                     goldenGnomeOutcome.until = System.currentTimeMillis() + GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
                     extendTurnEffectGate(goldenGnomeOutcome.until);
                     addChatMessage("Can't afford the Golden Gnome!");
@@ -2485,7 +2519,7 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
-            case "GOLDEN_GNOME_PURCHASED":
+            case Events.GOLDEN_GNOME_PURCHASED:
             {
                 // The running total itself lives in rosterReducer (updated unconditionally above,
                 // catch-up or not) -- everything here is purely cosmetic: the "You got a Golden
@@ -2495,8 +2529,8 @@ public class RunePartyPlugin extends Plugin
                 // total the popup needs.
                 if (!catchingUp)
                 {
-                    String rsn = safeStr(e.payload, "player");
-                    Integer total = safeInt(e.payload, "goldenGnomeCount");
+                    String rsn = Json.requiredStr(e.payload, type, "player");
+                    Integer total = Json.requiredInt(e.payload, type, "goldenGnomeCount");
                     goldenGnomePopup.payload = new GoldenGnomePopupPayload(rsn, total != null ? total : 0);
                     goldenGnomePopup.start = System.currentTimeMillis();
                     goldenGnomePopup.until = goldenGnomePopup.start + COIN_POPUP_DURATION_MS;
@@ -2511,36 +2545,36 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
-            case "ITEM_GRANTED":
+            case Events.ITEM_GRANTED:
             {
                 // Inventory itself is updated unconditionally by rosterReducer.apply above --
                 // everything here is purely the wheel reveal's own cosmetics.
                 if (!catchingUp)
                 {
-                    String rsn = safeStr(e.payload, "player");
-                    String itemKey = safeStr(e.payload, "itemKey");
-                    String itemDisplayName = safeStr(e.payload, "itemDisplayName");
+                    String rsn = Json.requiredStr(e.payload, type, "player");
+                    String itemKey = Json.requiredStr(e.payload, type, "itemKey");
+                    String itemDisplayName = Json.requiredStr(e.payload, type, "itemDisplayName");
                     scheduleItemSpinner(rsn, itemKey);
                     addChatMessage(rsn + " got " + itemDisplayName + "!");
                 }
                 break;
             }
 
-            case "ITEM_CAP_BLOCKED":
+            case Events.ITEM_CAP_BLOCKED:
             {
                 // No inventory change -- the server refused to grant anything, see app.py's
                 // ITEM_TILE handling. Purely cosmetic, same as ITEM_GRANTED's own reveal.
                 if (!catchingUp)
                 {
-                    String rsn = safeStr(e.payload, "player");
-                    Integer cap = safeInt(e.payload, "itemCap");
+                    String rsn = Json.requiredStr(e.payload, type, "player");
+                    Integer cap = Json.requiredInt(e.payload, type, "itemCap");
                     scheduleItemCapBlockedAnnouncement(rsn, cap != null ? cap : 0);
                     addChatMessage(rsn + " already has too many items!");
                 }
                 break;
             }
 
-            case "ITEM_USED":
+            case Events.ITEM_USED:
             {
                 // Real state, applied catch-up or not: an ITEM_USED can only ever be inserted for
                 // the current turn's player (see the server's _require_ready_to_act), so this is
@@ -2549,8 +2583,8 @@ public class RunePartyPlugin extends Plugin
                 itemUsedThisTurn = true;
                 if (!catchingUp)
                 {
-                    String rsn = safeStr(e.payload, "player");
-                    String itemKey = safeStr(e.payload, "itemKey");
+                    String rsn = Json.requiredStr(e.payload, type, "player");
+                    String itemKey = Json.requiredStr(e.payload, type, "itemKey");
                     if (Items.get(itemKey).hasUseAnnouncement())
                     {
                         scheduleItemUsedAnnouncement(rsn, itemKey);
@@ -2559,7 +2593,7 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
-            case "GOLDEN_GNOME_MOVED":
+            case Events.GOLDEN_GNOME_MOVED:
             {
                 // The real relocation is carried by the paired TILE_UNMARKED/TILE_MARKED events,
                 // already applied unconditionally via tileReducer.apply above (catch-up or not) by
@@ -2572,8 +2606,8 @@ public class RunePartyPlugin extends Plugin
                 // catch-up after the fact.
                 if (!catchingUp)
                 {
-                    WorldPoint oldPoint = safeWorldPoint(e.payload, "oldPoint");
-                    WorldPoint newPoint = safeWorldPoint(e.payload, "newPoint");
+                    WorldPoint oldPoint = Json.safeWorldPoint(e.payload, "oldPoint");
+                    WorldPoint newPoint = Json.safeWorldPoint(e.payload, "newPoint");
 
                     if (oldPoint != null)
                     {
@@ -2594,19 +2628,19 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
-            case "TILE_EFFECT":
+            case Events.TILE_EFFECT:
             {
                 // PATH is the only tile type with a real effect so far (see the COINS_CHANGED
                 // case below, which is what actually pays it out) -- every other type is still a
                 // no-op, but the event fires for all of them so this chat line is always accurate.
                 if (!catchingUp)
                 {
-                    addChatMessage(safeStr(e.payload, "player") + " landed on a " + safeStr(e.payload, "tileType") + " tile.");
+                    addChatMessage(Json.requiredStr(e.payload, type, "player") + " landed on a " + Json.requiredStr(e.payload, type, "tileType") + " tile.");
                 }
                 break;
             }
 
-            case "COIN_TRAP_TRIGGERED":
+            case Events.COIN_TRAP_TRIGGERED:
             {
                 // Real-time, not chained behind scheduleAfterTurnEffects -- unlike the announcement
                 // banner below, the model/animation choreography is tied to a specific spot on the
@@ -2616,12 +2650,12 @@ public class RunePartyPlugin extends Plugin
                 // actually landed on it.
                 if (!catchingUp)
                 {
-                    String victim = safeStr(e.payload, "player");
-                    String owner = safeStr(e.payload, "owner");
-                    Integer stolen = safeInt(e.payload, "stolen");
-                    Integer x = safeInt(e.payload, "x");
-                    Integer y = safeInt(e.payload, "y");
-                    Integer plane = safeInt(e.payload, "plane");
+                    String victim = Json.requiredStr(e.payload, type, "player");
+                    String owner = Json.requiredStr(e.payload, type, "owner");
+                    Integer stolen = Json.requiredInt(e.payload, type, "stolen");
+                    Integer x = Json.requiredInt(e.payload, type, "x");
+                    Integer y = Json.requiredInt(e.payload, type, "y");
+                    Integer plane = Json.requiredInt(e.payload, type, "plane");
                     if (x != null && y != null && plane != null)
                     {
                         coinTrapTriggerPoint = new WorldPoint(x, y, plane);
@@ -2637,7 +2671,7 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
-            case "COINS_CHANGED":
+            case Events.COINS_CHANGED:
             {
                 // The standard-tile reward, an item's own coin effect, and a Coin Trap steal all
                 // get the popup treatment -- a Golden Gnome purchase or a mini-game's own
@@ -2658,14 +2692,14 @@ public class RunePartyPlugin extends Plugin
                 // TRUE_OR_FALSE_ROUND_ENDED). The real coin total itself lives in rosterReducer
                 // (updated unconditionally above, catch-up or not) -- everything in this block is
                 // purely the popup's own cosmetics.
-                String coinsChangedReason = safeStr(e.payload, "reason");
+                String coinsChangedReason = Json.requiredStr(e.payload, type, "reason");
                 if (!catchingUp && ("standard_tile".equals(coinsChangedReason) || "item".equals(coinsChangedReason)
                     || "coin_trap".equals(coinsChangedReason) || "coin_rush".equals(coinsChangedReason)
                     || "true_or_false".equals(coinsChangedReason)))
                 {
-                    String coinsChangedRsn = safeStr(e.payload, "player");
-                    Integer delta = safeInt(e.payload, "delta");
-                    Integer total = safeInt(e.payload, "coins");
+                    String coinsChangedRsn = Json.requiredStr(e.payload, type, "player");
+                    Integer delta = Json.requiredInt(e.payload, type, "delta");
+                    Integer total = Json.requiredInt(e.payload, type, "coins");
 
                     if (coinsChangedRsn != null)
                     {
@@ -2676,16 +2710,16 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
-            case "MINIGAME_STARTED":
+            case Events.MINIGAME_STARTED:
                 // minigameActive/minigameInstructions/minigameKey/minigameDisplayName take effect
                 // immediately, catch-up or not -- a player joining mid-minigame needs the panel to
                 // correctly show it's underway. Ready-check state resets fresh for this mini-game
                 // instance too, real state regardless of catch-up. Only the celebratory banner and
                 // the spinner that follows it are cosmetic-only and skipped during catch-up.
                 minigameActive = true;
-                minigameInstructions = safeStr(e.payload, "instructions");
-                minigameKey = safeStr(e.payload, "key");
-                minigameDisplayName = safeStr(e.payload, "displayName");
+                minigameInstructions = Json.requiredStr(e.payload, type, "instructions");
+                minigameKey = Json.requiredStr(e.payload, type, "key");
+                minigameDisplayName = Json.requiredStr(e.payload, type, "displayName");
                 minigameReadyRsns.clear();
                 minigameCountdownStarted = false;
                 minigameCountdownSkippedForClient = false;
@@ -2730,17 +2764,17 @@ public class RunePartyPlugin extends Plugin
                 }
                 break;
 
-            case "MINIGAME_PLAYER_READY":
+            case Events.MINIGAME_PLAYER_READY:
             {
                 // Real state, applied catch-up or not -- see isLocalPlayerAwaitingMinigameReady/
                 // isMinigamePlayable, which both need an accurate ready set regardless of whether
                 // this client watched it happen live.
-                String readyRsn = safeStr(e.payload, "player");
+                String readyRsn = Json.requiredStr(e.payload, type, "player");
                 if (readyRsn != null) minigameReadyRsns.add(readyRsn.toLowerCase(Locale.ROOT));
                 break;
             }
 
-            case "MINIGAME_COUNTDOWN_STARTED":
+            case Events.MINIGAME_COUNTDOWN_STARTED:
                 // Real state, applied catch-up or not -- see isMinigamePlayable, the reason this
                 // is split from the cosmetic-only banner timestamp below.
                 minigameCountdownStarted = true;
@@ -2790,7 +2824,7 @@ public class RunePartyPlugin extends Plugin
                 }
                 break;
 
-            case "MINIGAME_ENDED":
+            case Events.MINIGAME_ENDED:
                 minigameActive = false;
                 minigameInstructions = null;
                 minigameKey = null;
@@ -2836,19 +2870,19 @@ public class RunePartyPlugin extends Plugin
                 }
                 break;
 
-            case "COIN_RUSH_SPAWN":
+            case Events.COIN_RUSH_SPAWN:
             {
                 // Real state, applied catch-up or not: a coin genuinely exists on the board at
                 // this point the instant the server says so, regardless of whether this client
                 // watched it appear live -- see TileOverlay#updateCoinRushModels, which just
                 // mirrors coinRushSpawns's own current keys every frame.
-                Integer spawnId = safeInt(e.payload, "id");
-                WorldPoint point = safeWorldPoint(e.payload, "point");
+                Integer spawnId = Json.requiredInt(e.payload, type, "id");
+                WorldPoint point = Json.safeWorldPoint(e.payload, "point");
                 if (spawnId != null && point != null) coinRushSpawns.put(spawnId, point);
                 break;
             }
 
-            case "COIN_RUSH_COLLECTED":
+            case Events.COIN_RUSH_COLLECTED:
             {
                 // Real state, applied catch-up or not: the spawn is gone (whoever the server
                 // credited already claimed it) and the tally reflects it, regardless of whether
@@ -2859,13 +2893,13 @@ public class RunePartyPlugin extends Plugin
                 // player (see COINS_CHANGED's own "coin_rush" case) -- so the only thing worth
                 // showing live, right now, is a purely cosmetic "+2" flash (see enqueueCoinPopup's
                 // totalless=true), never a running total.
-                Integer spawnId = safeInt(e.payload, "id");
+                Integer spawnId = Json.requiredInt(e.payload, type, "id");
                 if (spawnId != null)
                 {
                     coinRushSpawns.remove(spawnId);
                     coinRushCollectSubmitted.remove(spawnId);
                 }
-                String collector = safeStr(e.payload, "player");
+                String collector = Json.requiredStr(e.payload, type, "player");
                 if (collector != null)
                 {
                     coinRushScores.merge(collector.toLowerCase(Locale.ROOT), 1, Integer::sum);
@@ -2878,7 +2912,7 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
-            case "TRUE_OR_FALSE_ROUND_STARTED":
+            case Events.TRUE_OR_FALSE_ROUND_STARTED:
             {
                 // Real state, applied catch-up or not: a fresh round genuinely started at this
                 // point regardless of whether this client watched it happen live -- a catching-up
@@ -2891,8 +2925,8 @@ public class RunePartyPlugin extends Plugin
                 // left alone here, same "let the timer/next reset clear it" idiom coinRushScores
                 // already uses -- renderTrueOrFalseReveal gates its own display on
                 // trueOrFalseRevealUntil, not on whether a new question already exists.
-                trueOrFalseQuestion = safeStr(e.payload, "question");
-                Integer roundNumber = safeInt(e.payload, "roundNumber");
+                trueOrFalseQuestion = Json.requiredStr(e.payload, type, "question");
+                Integer roundNumber = Json.requiredInt(e.payload, type, "roundNumber");
                 if (roundNumber != null) trueOrFalseRoundNumber = roundNumber;
                 trueOrFalseAnsweredRsns.clear();
                 trueOrFalseMyAnswer = null;
@@ -2904,12 +2938,12 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
-            case "TRUE_OR_FALSE_ANSWERED":
+            case Events.TRUE_OR_FALSE_ANSWERED:
             {
                 // Real state, applied catch-up or not -- see isLocalPlayerAwaitingTrueOrFalseAnswer/
                 // renderTrueOrFalseQuestion, both of which need an accurate answered-set regardless
                 // of whether this client watched each answer land live.
-                String answeredRsn = safeStr(e.payload, "player");
+                String answeredRsn = Json.requiredStr(e.payload, type, "player");
                 if (answeredRsn != null)
                 {
                     trueOrFalseAnsweredRsns.add(answeredRsn.toLowerCase(Locale.ROOT));
@@ -2923,13 +2957,13 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
-            case "TRUE_OR_FALSE_ROUND_ENDED":
+            case Events.TRUE_OR_FALSE_ROUND_ENDED:
             {
                 // Real state, applied catch-up or not: the correct answer is now public regardless
                 // of whether this client watched the round happen live.
                 JsonElement correctEl = e.payload.get("correctAnswer");
                 trueOrFalseLastCorrectAnswer = correctEl != null && !correctEl.isJsonNull() ? correctEl.getAsBoolean() : null;
-                trueOrFalseLastResults = safeTrueOrFalseResults(e.payload);
+                trueOrFalseLastResults = Json.safeTrueOrFalseResults(e.payload);
                 if (!catchingUp)
                 {
                     trueOrFalseRevealUntil = System.currentTimeMillis() + TRUE_OR_FALSE_REVEAL_DURATION_MS;
@@ -2989,93 +3023,6 @@ public class RunePartyPlugin extends Plugin
         if (client.getLocalPlayer() == null) return null;
         String name = client.getLocalPlayer().getName();
         return name != null ? Text.toJagexName(name) : null;
-    }
-
-    private static String safeStr(JsonObject o, String key)
-    {
-        return (o != null && o.has(key) && !o.get(key).isJsonNull()) ? o.get(key).getAsString() : null;
-    }
-
-    private static Integer safeInt(JsonObject o, String key)
-    {
-        try { return (o != null && o.has(key) && !o.get(key).isJsonNull()) ? o.get(key).getAsInt() : null; }
-        catch (Exception ignored) { return null; }
-    }
-
-    /** Reads a nested {@code {x, y, plane}} object -- see GOLDEN_GNOME_MOVED's oldPoint/newPoint,
-     * the only current callers. Null if the key's missing or any of the three fields is. */
-    private static WorldPoint safeWorldPoint(JsonObject o, String key)
-    {
-        if (o == null || !o.has(key) || !o.get(key).isJsonObject()) return null;
-        JsonObject p = o.getAsJsonObject(key);
-        Integer x = safeInt(p, "x");
-        Integer y = safeInt(p, "y");
-        Integer plane = safeInt(p, "plane");
-        if (x == null || y == null || plane == null) return null;
-        return new WorldPoint(x, y, plane);
-    }
-
-    /** Reads DICE_ROLLED's targetIndices -- plural since a fork can offer more than one candidate
-     * destination for a single roll (see TileOverlay#renderTargetArrow). Never null, only empty. */
-    private static List<Integer> safeIntList(JsonObject o, String key)
-    {
-        if (o == null || !o.has(key) || o.get(key).isJsonNull() || !o.get(key).isJsonArray()) return Collections.emptyList();
-        JsonArray arr = o.get(key).getAsJsonArray();
-        List<Integer> out = new ArrayList<>(arr.size());
-        for (int i = 0; i < arr.size(); i++)
-        {
-            try { out.add(arr.get(i).getAsInt()); }
-            catch (Exception ignored) { /* skip malformed entry */ }
-        }
-        return out;
-    }
-
-    /** Reads MINIGAME_ENDED's "payouts" list -- {@code [{"player": rsn, "coins": int}, ...]} --
-     * one entry per player a mini-game's own Minigame.resolve_rewards() decided to reward (see
-     * app.py); players who got nothing simply aren't in the list. Never null, only empty. */
-    private static List<MinigameReward> safeMinigameRewards(JsonObject o, String key)
-    {
-        if (o == null || !o.has(key) || o.get(key).isJsonNull() || !o.get(key).isJsonArray()) return Collections.emptyList();
-        JsonArray arr = o.get(key).getAsJsonArray();
-        List<MinigameReward> out = new ArrayList<>(arr.size());
-        for (int i = 0; i < arr.size(); i++)
-        {
-            try
-            {
-                JsonObject entry = arr.get(i).getAsJsonObject();
-                String rsn = safeStr(entry, "player");
-                Integer coins = safeInt(entry, "coins");
-                if (rsn != null && coins != null) out.add(new MinigameReward(rsn, coins));
-            }
-            catch (Exception ignored) { /* skip malformed entry */ }
-        }
-        return out;
-    }
-
-    /** Parses a TRUE_OR_FALSE_ROUND_ENDED payload's "results" list -- see TrueOrFalseResult's own
-     * doc and renderTrueOrFalseReveal, the only consumer. {@code answer} is nullable (missing/null
-     * JSON means the player never answered that round at all, not that they answered false). */
-    private static List<TrueOrFalseResult> safeTrueOrFalseResults(JsonObject o)
-    {
-        if (o == null || !o.has("results") || o.get("results").isJsonNull() || !o.get("results").isJsonArray()) return Collections.emptyList();
-        JsonArray arr = o.get("results").getAsJsonArray();
-        List<TrueOrFalseResult> out = new ArrayList<>(arr.size());
-        for (int i = 0; i < arr.size(); i++)
-        {
-            try
-            {
-                JsonObject entry = arr.get(i).getAsJsonObject();
-                String rsn = safeStr(entry, "player");
-                if (rsn == null) continue;
-                JsonElement answerEl = entry.get("answer");
-                Boolean answer = answerEl != null && !answerEl.isJsonNull() ? answerEl.getAsBoolean() : null;
-                JsonElement correctEl = entry.get("correct");
-                boolean correct = correctEl != null && !correctEl.isJsonNull() && correctEl.getAsBoolean();
-                out.add(new TrueOrFalseResult(rsn, answer, correct));
-            }
-            catch (Exception ignored) { /* skip malformed entry */ }
-        }
-        return out;
     }
 
     private void resetState()

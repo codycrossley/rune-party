@@ -1,6 +1,5 @@
 package gay.runescape.runeparty;
 
-import com.google.gson.JsonObject;
 import net.runelite.client.util.Text;
 
 import java.util.*;
@@ -190,9 +189,9 @@ public class RosterReducer
 
         switch (type)
         {
-            case "PLAYER_JOINED":
+            case Events.PLAYER_JOINED:
             {
-                String playerRaw = safeStr(e.payload, "player");
+                String playerRaw = Json.requiredStr(e.payload, type, "player");
                 if (playerRaw == null) return;
                 String key = canonicalKey(playerRaw);
                 if (key == null) return;
@@ -205,10 +204,10 @@ public class RosterReducer
                 itemsByPlayer.putIfAbsent(key, new ConcurrentHashMap<>());
                 break;
             }
-            case "ROLE_ASSIGNED":
+            case Events.ROLE_ASSIGNED:
             {
-                String playerRaw = safeStr(e.payload, "player");
-                String roleRaw = safeStr(e.payload, "role");
+                String playerRaw = Json.requiredStr(e.payload, type, "player");
+                String roleRaw = Json.requiredStr(e.payload, type, "role");
                 if (playerRaw == null || roleRaw == null) return;
                 String key = canonicalKey(playerRaw);
                 if (key == null) return;
@@ -222,7 +221,7 @@ public class RosterReducer
                 catch (IllegalArgumentException ignored) {}
                 break;
             }
-            case "PLAYER_LEFT":
+            case Events.PLAYER_LEFT:
             {
                 // Demoted to SPECTATOR, not deleted -- matches the server's own PLAYER_LEFT
                 // handling (see _apply_roster_event in app.py), which deliberately keeps the
@@ -232,7 +231,7 @@ public class RosterReducer
                 // back except a full syncFromRoster -- see that method's own doc. numberByPlayer
                 // is cleared since their old turn-order slot is now stale; colorNumberByPlayer is
                 // deliberately left alone since that's the whole point of preserving the row.
-                String playerRaw = safeStr(e.payload, "player");
+                String playerRaw = Json.requiredStr(e.payload, type, "player");
                 if (playerRaw == null) return;
                 String key = canonicalKey(playerRaw);
                 if (key == null) return;
@@ -241,30 +240,30 @@ public class RosterReducer
                 numberByPlayer.remove(key);
                 break;
             }
-            case "COINS_CHANGED":
+            case Events.COINS_CHANGED:
             {
-                String playerRaw = safeStr(e.payload, "player");
+                String playerRaw = Json.requiredStr(e.payload, type, "player");
                 if (playerRaw == null) return;
                 String key = canonicalKey(playerRaw);
                 if (key == null) return;
-                Integer coins = safeInt(e.payload, "coins");
+                Integer coins = Json.requiredInt(e.payload, type, "coins");
                 if (coins != null) coinsByPlayer.put(key, coins);
                 break;
             }
-            case "GOLDEN_GNOME_PURCHASED":
+            case Events.GOLDEN_GNOME_PURCHASED:
             {
-                String playerRaw = safeStr(e.payload, "player");
+                String playerRaw = Json.requiredStr(e.payload, type, "player");
                 if (playerRaw == null) return;
                 String key = canonicalKey(playerRaw);
                 if (key == null) return;
-                Integer count = safeInt(e.payload, "goldenGnomeCount");
+                Integer count = Json.requiredInt(e.payload, type, "goldenGnomeCount");
                 if (count != null) goldenGnomeCountByPlayer.put(key, count);
                 break;
             }
-            case "ITEM_GRANTED":
+            case Events.ITEM_GRANTED:
             {
-                String playerRaw = safeStr(e.payload, "player");
-                String itemKey = safeStr(e.payload, "itemKey");
+                String playerRaw = Json.requiredStr(e.payload, type, "player");
+                String itemKey = Json.requiredStr(e.payload, type, "itemKey");
                 if (playerRaw == null || itemKey == null) return;
                 String key = canonicalKey(playerRaw);
                 if (key == null) return;
@@ -272,10 +271,10 @@ public class RosterReducer
                 inventory.merge(itemKey, 1, Integer::sum);
                 break;
             }
-            case "ITEM_USED":
+            case Events.ITEM_USED:
             {
-                String playerRaw = safeStr(e.payload, "player");
-                String itemKey = safeStr(e.payload, "itemKey");
+                String playerRaw = Json.requiredStr(e.payload, type, "player");
+                String itemKey = Json.requiredStr(e.payload, type, "itemKey");
                 if (playerRaw == null || itemKey == null) return;
                 String key = canonicalKey(playerRaw);
                 if (key == null) return;
@@ -342,16 +341,4 @@ public class RosterReducer
         return (canon != null && !canon.isBlank()) ? canon : s.trim();
     }
 
-    private static String safeStr(JsonObject o, String key)
-    {
-        return (o != null && o.has(key) && !o.get(key).isJsonNull())
-            ? o.get(key).getAsString()
-            : null;
-    }
-
-    private static Integer safeInt(JsonObject o, String key)
-    {
-        try { return (o != null && o.has(key) && !o.get(key).isJsonNull()) ? o.get(key).getAsInt() : null; }
-        catch (Exception ignored) { return null; }
-    }
 }
