@@ -651,8 +651,9 @@ public class RunePartyPlugin extends Plugin
 
         eventSocket = new EventSocket(okHttpClient, gson, new EventListener()
         {
-            @Override public void onEvent(ApiClient.EventOut e) { handleEvent(e, false); }
+            @Override public void onEvent(ApiClient.EventOut e, boolean catchingUp) { handleEvent(e, catchingUp); }
             @Override public void onError(Exception e) { log.debug("EventSocket error", e); }
+            @Override public void onCaughtUp() { syncRosterSnapshot(); refreshPanel(); }
         });
     }
 
@@ -1853,13 +1854,15 @@ public class RunePartyPlugin extends Plugin
     // Server-pushed events
     // -------------------------------------------------------------------------
 
-    /** {@code catchingUp} is true only when this event is being silently replayed from
-     * connectEventStream's initial backlog fetch, false for every event that arrives live over the
-     * WebSocket. Real game state -- turn order, coins, board positions, tile markers, the
-     * minigame-active flag, roster sync -- always applies either way, via rosterReducer/tileReducer
-     * above and the unguarded field writes below. Anything purely cosmetic (a banner, a popup timer,
-     * a chat line announcing something happened) is gated behind {@code !catchingUp} so a player who
-     * joins mid-game only ever sees the game's *current* state, not a replay of how it got there. */
+    /** {@code catchingUp} is true both for connectEventStream's initial backlog fetch and for
+     * EventSocket's own replay burst after a reconnect (see EventSocket#onMessage/its CAUGHT_UP
+     * handling) -- false only for an event that arrives genuinely live over the WebSocket, before
+     * or after either kind of catch-up. Real game state -- turn order, coins, board positions, tile
+     * markers, the minigame-active flag, roster sync -- always applies either way, via
+     * rosterReducer/tileReducer above and the unguarded field writes below. Anything purely
+     * cosmetic (a banner, a popup timer, a chat line announcing something happened) is gated behind
+     * {@code !catchingUp} so a player who joins mid-game, or whose connection drops and reconnects
+     * mid-game, only ever sees the game's *current* state, not a replay of how it got there. */
     private void handleEvent(ApiClient.EventOut e, boolean catchingUp)
     {
         if (e == null || e.type == null) return;

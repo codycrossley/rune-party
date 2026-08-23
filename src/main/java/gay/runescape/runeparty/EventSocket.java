@@ -17,6 +17,15 @@ import java.util.concurrent.atomic.AtomicInteger;
  * restart drops every connected client's socket at once, and plain
  * exponential backoff would produce a synchronized reconnect wave from
  * every client at the same moment.
+ *
+ * Every (re)connect opens at {@code afterSeq=lastSeq}, so the server's first flush on that
+ * connection is always a replay of whatever committed after that point -- true live events only
+ * start once the server's own CAUGHT_UP sentinel arrives (see the server's game_events_ws). A
+ * client that drops for 30 seconds and reconnects would otherwise have that whole missed-history
+ * burst delivered indistinguishably from live traffic, firing every banner/dice-reveal/spotanim at
+ * once (see ARCHITECTURE_REVIEW.md's R3) -- {@link #caughtUp} tracks the boundary per connection so
+ * {@link EventListener#onEvent} can tell the two apart the same way connectEventStream's own
+ * initial backlog fetch already lets RunePartyPlugin#handleEvent do for the very first connect.
  */
 public class EventSocket
 {
@@ -43,6 +52,10 @@ public class EventSocket
     private volatile boolean running = false;
     private WebSocket webSocket;
     private ScheduledFuture<?> reconnectTask;
+    // False from the moment a new connection opens until its own CAUGHT_UP sentinel arrives -- see
+    // the class doc above and onMessage below, the only reader/writer besides connect() (which
+    // resets it for each fresh attempt).
+    private volatile boolean caughtUp = false;
 
     public EventSocket(OkHttpClient okHttpClient, Gson gson, EventListener listener)
     {
@@ -109,6 +122,7 @@ public class EventSocket
         final String gid = this.gameId;
         if (gid == null || gid.isBlank()) return;
 
+        caughtUp = false; // this connection's own first flush is a replay until its CAUGHT_UP sentinel arrives
         String url = wsUrl(gid, lastSeq.get(), playerRsn);
         Request req = new Request.Builder().url(url).build();
         webSocket = http.newWebSocket(req, new Listener());
@@ -162,6 +176,21 @@ public class EventSocket
                 ApiClient.EventOut e = gson.fromJson(text, ApiClient.EventOut.class);
                 if (e == null) return;
 
+                // Marks the end of this connection's own replay burst -- see the class doc and
+                // caughtUp's own field doc. Never itself forwarded to listener.onEvent.
+                if (Events.CAUGHT_UP.equals(e.type))
+                {
+                    caughtUp = true;
+                    listener.onCaughtUp();
+                    return;
+                }
+
+                // catchingUp is read once per message (not per unwrapped event below) since the
+                // server never mixes a replay-burst event and a genuinely live one in the same
+                // frame -- the CAUGHT_UP sentinel above always arrives as its own message between
+                // the two (see the server's game_events_ws).
+                boolean catchingUp = !caughtUp;
+
                 // The server coalesces a short burst of events for the same game into one
                 // wrapped message instead of one frame each --
                 // unwrap it back into individual onEvent calls, in order, so nothing downstream
@@ -174,13 +203,13 @@ public class EventSocket
                     {
                         if (inner == null) continue;
                         lastSeq.set(Math.max(lastSeq.get(), inner.seq));
-                        listener.onEvent(inner);
+                        listener.onEvent(inner, catchingUp);
                     }
                     return;
                 }
 
                 lastSeq.set(Math.max(lastSeq.get(), e.seq));
-                listener.onEvent(e);
+                listener.onEvent(e, catchingUp);
             }
             catch (Exception ex)
             {

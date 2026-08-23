@@ -13,6 +13,12 @@ public final class Events
      * not itself a game event, but the same class of literal-that-should-be-a-constant. */
     public static final String EVENTS_BATCH = "EVENTS_BATCH";
 
+    /** Transport-level sentinel the server sends once it's finished flushing a connection's own
+     * backlog burst (see the server's game_events_ws) -- marks the point EventSocket flips from
+     * replaying missed history to genuinely live events (see EventSocket#onMessage). Not itself a
+     * game event, same as EVENTS_BATCH above. */
+    public static final String CAUGHT_UP = "CAUGHT_UP";
+
     public static final String COIN_RUSH_COLLECTED = "COIN_RUSH_COLLECTED";
     public static final String COIN_RUSH_SPAWN = "COIN_RUSH_SPAWN";
     public static final String COIN_TRAP_TRIGGERED = "COIN_TRAP_TRIGGERED";
