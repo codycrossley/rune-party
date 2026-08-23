@@ -2628,9 +2628,10 @@ public class RunePartyPlugin extends Plugin
 
             case Events.TILE_EFFECT:
             {
-                // PATH is the only tile type with a real effect so far (see the COINS_CHANGED
-                // case below, which is what actually pays it out) -- every other type is still a
-                // no-op, but the event fires for all of them so this chat line is always accurate.
+                // PATH/PENALTY_TILE/ITEM_TILE are the tile types with a real effect so far (see
+                // the COINS_CHANGED/ITEM_GRANTED cases below, which actually pay/grant it) --
+                // START/EVENT_TILE are still no-ops, but this event fires for every type so this
+                // chat line is always accurate regardless.
                 if (!catchingUp)
                 {
                     addChatMessage(Json.requiredStr(e.payload, type, "player") + " landed on a " + Json.requiredStr(e.payload, type, "tileType") + " tile.");

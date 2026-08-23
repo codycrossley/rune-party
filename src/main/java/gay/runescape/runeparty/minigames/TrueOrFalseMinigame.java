@@ -9,8 +9,8 @@ import javax.swing.JComponent;
 import javax.swing.JPanel;
 import net.runelite.client.ui.FontManager;
 
-/** Client-side counterpart to the server's TrueOrFalseMinigame (see minigames/true_or_false.py,
- * once built) -- 5 rounds, 5 seconds each, one OSRS trivia question per round. An answer is a YES
+/** Client-side counterpart to the server's TrueOrFalseMinigame (see minigames/true_or_false.py)
+ * -- 5 rounds, 5 seconds each, one OSRS trivia question per round. An answer is a YES
  * ("True")/NO ("False") emote (see RunePartyPlugin#isLocalPlayerAwaitingTrueOrFalseAnswer/
  * answerTrueOrFalse), and the question, countdown, live "who's answered" tally, and per-round
  * reveal all render screen-centered in AnnouncementOverlay (see renderTrueOrFalseQuestion/

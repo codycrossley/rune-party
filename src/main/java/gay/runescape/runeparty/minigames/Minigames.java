@@ -14,11 +14,9 @@ import java.util.Map;
 public final class Minigames
 {
     // Registered 4 times under different keys, matching the server's own REGISTRY (see
-    // minigames/__init__.py), purely so the selection wheel/ready-check/etc. have more than one
-    // option to actually cycle through while real mini-games are still being built. Kept
-    // registered even now that CoinRushMinigame exists -- the live server still only ever sends
-    // one of these four keys (it has no idea "coin-rush" exists yet, see that class's own doc on
-    // why), so dropping any of them would silently break that server's actual rounds by falling
+    // minigames/__init__.py), alongside the two real mini-games (CoinRushMinigame,
+    // TrueOrFalseMinigame) so the selection wheel has more than three options to actually cycle
+    // through. Dropping any of them would silently break that server's actual rounds by falling
     // back to a mini-game with no matching UI for what the server thinks is happening.
     private static final String FALLBACK_KEY = "placeholder-1";
 
@@ -30,11 +28,6 @@ public final class Minigames
         register(new PlaceholderMinigame("placeholder-2", "Placeholder Mini-Game #2"));
         register(new PlaceholderMinigame("placeholder-3", "Placeholder Mini-Game #3"));
         register(new PlaceholderMinigame("placeholder-4", "Placeholder Mini-Game #4"));
-        // Not yet reachable in a live game -- the server has to start sending
-        // key: "coin-rush" (plus the COIN_RUSH_SPAWN/COIN_RUSH_COLLECTED events and the
-        // collect-coin-rush-coin endpoint the client now expects) before this ever actually gets
-        // selected. Registered anyway so the client is ready the moment that server-side work
-        // lands.
         register(new CoinRushMinigame());
         register(new TrueOrFalseMinigame());
     }

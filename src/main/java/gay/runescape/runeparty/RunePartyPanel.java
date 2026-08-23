@@ -498,7 +498,6 @@ public class RunePartyPanel extends PluginPanel
         String placementKey = plugin.getItemPlacementKey();
         if (placementKey != null)
         {
-            lastItemsKey = null; // next non-placement activation always rebuilds fresh
             itemsCard.setVisible(true);
             String key = "placing:" + placementKey;
             if (key.equals(lastItemsKey)) return;

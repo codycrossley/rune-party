@@ -104,18 +104,6 @@ public class TileReducer
         }
     }
 
-    public void loadAll(List<ApiClient.TileOut> tileList)
-    {
-        tiles.clear();
-        if (tileList == null) return;
-        for (ApiClient.TileOut t : tileList)
-        {
-            if (t == null || t.tileType == null) continue; // server always requires/validates a real tileType
-            tiles.put(key(t.x, t.y, t.plane, t.tileType),
-                new TileEntry(new WorldPoint(t.x, t.y, t.plane), t.tileType, t.color, t.orientation, t.pathIndex, t.nextIndices));
-        }
-    }
-
     public void reset()
     {
         tiles.clear();
@@ -124,23 +112,6 @@ public class TileReducer
     public List<TileEntry> snapshot()
     {
         return Collections.unmodifiableList(new ArrayList<>(tiles.values()));
-    }
-
-    public boolean hasMarker(WorldPoint wp, String tileType)
-    {
-        if (wp == null) return false;
-        return tiles.containsKey(key(wp.getX(), wp.getY(), wp.getPlane(), tileType));
-    }
-
-    public boolean hasAnyMarker(WorldPoint wp)
-    {
-        if (wp == null) return false;
-        String prefix = wp.getX() + ":" + wp.getY() + ":" + wp.getPlane() + ":";
-        for (String k : tiles.keySet())
-        {
-            if (k.startsWith(prefix)) return true;
-        }
-        return false;
     }
 
     /** The course tile at a given path position, or null if nothing is marked with that index
@@ -198,14 +169,6 @@ public class TileReducer
         int length = courseLength();
         if (length == 0) return new int[0];
         return new int[] { (entry.pathIndex + 1) % length };
-    }
-
-    /** Whether the host has marked out any course tiles at all -- mirrors Gnomeball's
-     * hasFieldBoundary() guard: without this, "no course marked" and "board complete" are both
-     * indistinguishable zero states to the turn engine. */
-    public boolean hasCourse()
-    {
-        return courseLength() > 0;
     }
 
     private static String key(int x, int y, int plane, String tileType)

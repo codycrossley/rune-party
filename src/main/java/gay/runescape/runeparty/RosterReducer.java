@@ -55,40 +55,16 @@ public class RosterReducer
         return roleByPlayer.get(canonicalRsn.toLowerCase(Locale.ROOT));
     }
 
-    public String getNumber(String canonicalRsn)
-    {
-        if (canonicalRsn == null) return "";
-        return numberByPlayer.getOrDefault(canonicalRsn.toLowerCase(Locale.ROOT), "");
-    }
-
     public String getColorNumber(String canonicalRsn)
     {
         if (canonicalRsn == null) return "";
         return colorNumberByPlayer.getOrDefault(canonicalRsn.toLowerCase(Locale.ROOT), "");
     }
 
-    public int getCoins(String canonicalRsn)
-    {
-        if (canonicalRsn == null) return 0;
-        return coinsByPlayer.getOrDefault(canonicalRsn.toLowerCase(Locale.ROOT), 0);
-    }
-
-    public int getGoldenGnomeCount(String canonicalRsn)
-    {
-        if (canonicalRsn == null) return 0;
-        return goldenGnomeCountByPlayer.getOrDefault(canonicalRsn.toLowerCase(Locale.ROOT), 0);
-    }
-
     public Map<String, Integer> getItems(String canonicalRsn)
     {
         if (canonicalRsn == null) return Collections.emptyMap();
         return itemsByPlayer.getOrDefault(canonicalRsn.toLowerCase(Locale.ROOT), Collections.emptyMap());
-    }
-
-    public boolean isOnline(String canonicalRsn)
-    {
-        if (canonicalRsn == null) return false;
-        return Boolean.TRUE.equals(onlineByPlayer.get(canonicalRsn.toLowerCase(Locale.ROOT)));
     }
 
     /** Authoritative resync against the server's own roster (unlike apply(), which only folds
@@ -123,12 +99,6 @@ public class RosterReducer
             goldenGnomeCountByPlayer.put(key, p.goldenGnomeCount);
             itemsByPlayer.put(key, p.items != null ? new HashMap<>(p.items) : new HashMap<>());
         }
-    }
-
-    public boolean hasJoined(String canonicalRsn)
-    {
-        if (canonicalRsn == null) return false;
-        return rosterPlayers.contains(canonicalRsn.toLowerCase(Locale.ROOT));
     }
 
     /** Every roster entry that's actually seated and playing right now -- role == PLAYER and

@@ -601,11 +601,10 @@ public class AnnouncementOverlay extends Overlay
      * to a stop, same overshoot-then-settle feel as the dice roll's die) and always lands exactly
      * on the segment matching that key, then holds for MINIGAME_SPINNER_HOLD_MS with the mini-game's
      * getDisplayName() revealed underneath -- the "landing announces the name" moment. Triggered
-     * from RunePartyPlugin#scheduleMinigameSpinner, chained behind the "MINIGAME!" banner. With
-     * only one mini-game registered the wheel is a single segment that always wins -- it'll read as
-     * a real spinner once more mini-games exist. The actual wheel drawing is shared with
-     * renderItemSpinner via drawWheel -- this method only works out the timing/easing/target
-     * segment, which differs per wheel "menu" (different underlying timestamps and entry lists). */
+     * from RunePartyPlugin#scheduleMinigameSpinner, chained behind the "MINIGAME!" banner. The
+     * actual wheel drawing is shared with renderItemSpinner via drawWheel -- this method only
+     * works out the timing/easing/target segment, which differs per wheel "menu" (different
+     * underlying timestamps and entry lists). */
     private void renderMinigameSpinner(Graphics2D g)
     {
         Float alpha = BannerAnim.fadeAlpha(plugin.getMinigameSpinnerUntil(), WHEEL_FADE_MS);

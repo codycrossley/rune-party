@@ -13,9 +13,8 @@ import java.util.concurrent.TimeUnit;
 
 public class ApiClient
 {
-    // No production server exists yet -- the companion server is still to be built (see the plan's
-    // "Server skeleton" step). Point this at wherever that ends up deployed once it does; until
-    // then this is the local-dev default.
+    // Local-dev default -- point this at wherever the companion server (see the PycharmProjects
+    // rune-party repo's app.py) ends up deployed for a real game.
     static final String BASE_URL = "http://localhost:8000/runeparty";
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
@@ -329,40 +328,8 @@ public class ApiClient
     // rather than an unordered zone/field set.
     // -------------------------------------------------------------------------
 
-    public void markTile(String gameId, String writeKey, int x, int y, int plane, String tileType, String color, Integer pathIndex) throws IOException
-    {
-        JsonObject body = new JsonObject();
-        body.addProperty("x", x);
-        body.addProperty("y", y);
-        body.addProperty("plane", plane);
-        body.addProperty("tileType", tileType);
-        if (color != null) body.addProperty("color", color);
-        if (pathIndex != null) body.addProperty("pathIndex", pathIndex);
-
-        try (Response resp = post("/v1/games/" + gameId + "/mark-tile", body, writeKey))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Mark tile failed (" + resp.code() + "): " + raw);
-        }
-    }
-
-    public void unmarkTile(String gameId, String writeKey, int x, int y, int plane, String tileType) throws IOException
-    {
-        JsonObject body = new JsonObject();
-        body.addProperty("x", x);
-        body.addProperty("y", y);
-        body.addProperty("plane", plane);
-        if (tileType != null) body.addProperty("tileType", tileType);
-
-        try (Response resp = post("/v1/games/" + gameId + "/unmark-tile", body, writeKey))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Unmark tile failed (" + resp.code() + "): " + raw);
-        }
-    }
-
-    /** Batch counterpart to markTile/unmarkTile -- one request for a whole course's worth of tiles
-     * instead of one request per tile, same reasoning as Gnomeball's markTiles/unmarkTiles. */
+    /** One request for a whole course's worth of tiles instead of one request per tile, same
+     * reasoning as Gnomeball's markTiles/unmarkTiles. */
     public void markTiles(String gameId, String writeKey, List<TileSpec> tiles) throws IOException
     {
         JsonArray arr = new JsonArray();
@@ -413,24 +380,6 @@ public class ApiClient
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Unmark tiles failed (" + resp.code() + "): " + raw);
-        }
-    }
-
-    public TilesResponse fetchTiles(String gameId) throws IOException
-    {
-        Request req = new Request.Builder()
-            .url(BASE_URL + "/v1/games/" + gameId + "/tiles")
-            .get()
-            .build();
-
-        try (Response resp = http.newCall(req).execute())
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Fetch tiles failed (" + resp.code() + "): " + raw);
-            TilesResponse parsed = gson.fromJson(raw, TilesResponse.class);
-            if (parsed == null) throw new IOException("Empty response from tiles endpoint");
-            if (parsed.tiles == null) parsed.tiles = Collections.emptyList();
-            return parsed;
         }
     }
 
@@ -628,7 +577,6 @@ public class ApiClient
         public String status;
         public String currentTurnRsn; // whose turn it currently is, null outside ACTIVE
         public Integer lastDiceRoll; // most recent server-resolved roll, for a client that just (re)connected
-        public String courseName;
         public List<RosterPlayerOut> players;
     }
 
@@ -659,24 +607,6 @@ public class ApiClient
         public boolean isModifier;
     }
 
-    public static class TilesResponse
-    {
-        public String gameId;
-        public List<TileOut> tiles;
-    }
-
-    public static class TileOut
-    {
-        public int x;
-        public int y;
-        public int plane;
-        public String tileType;
-        public String color;
-        public Integer orientation;
-        public Integer pathIndex;
-        public int[] nextIndices; // nullable -- absent/empty means the default (pathIndex + 1) % courseLength edge applies
-    }
-
     private static class CreateGameResponse
     {
         String gameId;
@@ -690,10 +620,5 @@ public class ApiClient
         String gameId;
         String host;
         String playerToken;
-    }
-
-    static boolean isBlank(String s)
-    {
-        return s == null || s.trim().isEmpty();
     }
 }

@@ -35,11 +35,6 @@ public final class CoursePreset
         return name;
     }
 
-    public boolean isEmpty()
-    {
-        return tiles == null || tiles.isEmpty();
-    }
-
     /**
      * Rotates and translates this course's tiles onto {@code center}, {@code rotationSteps}
      * quarter-turns clockwise (0-3: 0/90/180/270 degrees), via the standard clockwise transform

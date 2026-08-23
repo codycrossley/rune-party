@@ -46,9 +46,9 @@ public class EventSocket
 
     public EventSocket(OkHttpClient okHttpClient, Gson gson, EventListener listener)
     {
-        // Derived from ApiClient.BASE_URL rather than a second hardcoded
-        // constant, so flipping the commented-out localhost BASE_URL for
-        // local dev can't leave this pointed at production by mistake.
+        // Derived from ApiClient.BASE_URL rather than a second hardcoded constant, so repointing
+        // that one constant at a real deployment can't leave this socket still pointed at
+        // localhost by mistake.
         this(okHttpClient, gson, listener, ApiClient.BASE_URL.replaceFirst("^http", "ws"));
     }
 
@@ -94,11 +94,6 @@ public class EventSocket
             webSocket.close(1000, "client stopping");
             webSocket = null;
         }
-    }
-
-    public synchronized boolean isRunning()
-    {
-        return running;
     }
 
     public synchronized void shutdown()
