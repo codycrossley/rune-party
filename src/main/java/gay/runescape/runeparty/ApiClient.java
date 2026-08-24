@@ -574,9 +574,9 @@ public class ApiClient
     {
         public String gameId;
         public int latestSeq;
-        public String status;
-        public String currentTurnRsn; // whose turn it currently is, null outside ACTIVE
-        public Integer lastDiceRoll; // most recent server-resolved roll, for a client that just (re)connected
+        public String status; // LOBBY/ACTIVE/ENDED -- matches GamePhase's own names exactly, see RunePartyPlugin#syncRosterSnapshot
+        public String currentTurnRsn; // whose turn it currently is, null outside ACTIVE -- reconciled into RunePartyPlugin#currentTurnRsn on reconnect, see syncRosterSnapshot
+        public Integer lastDiceRoll; // most recent server-resolved roll -- reconciled into RunePartyPlugin#lastDiceRoll on reconnect, see syncRosterSnapshot
         public List<RosterPlayerOut> players;
     }
 

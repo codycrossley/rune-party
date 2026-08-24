@@ -3,7 +3,6 @@ package gay.runescape.runeparty;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Consumer;
 import java.util.function.Function;
 import net.runelite.api.Client;
 import net.runelite.api.Model;
@@ -36,14 +35,6 @@ final class SceneObjectSet<K>
 
     void sync(Set<K> desired, Function<K, WorldPoint> pointOf, Function<K, Model> modelIfNeeded)
     {
-        sync(desired, pointOf, modelIfNeeded, k -> { });
-    }
-
-    /** Same as {@link #sync(Set, Function, Function)}, plus {@code onActivated} fires the moment a
-     * key's object transitions from inactive to active (not on every call while it stays active) --
-     * only updateGoldenGnomeModels needs this, for its "RuneLiteObject activated at {}" debug log. */
-    void sync(Set<K> desired, Function<K, WorldPoint> pointOf, Function<K, Model> modelIfNeeded, Consumer<K> onActivated)
-    {
         objects.entrySet().removeIf(e ->
         {
             if (desired.contains(e.getKey())) return false;
@@ -70,11 +61,7 @@ final class SceneObjectSet<K>
             }
 
             obj.setLocation(lp, point.getPlane());
-            if (obj.getModel() != null && !obj.isActive())
-            {
-                obj.setActive(true);
-                onActivated.accept(key);
-            }
+            if (obj.getModel() != null && !obj.isActive()) obj.setActive(true);
         }
     }
 

@@ -173,7 +173,8 @@ public class RunePartyPlugin extends Plugin
      * via MINIGAME_ENDED regardless of what this says. */
     public static final long COIN_RUSH_DURATION_MS = 30000;
 
-    /** Coins a single Coin Rush pickup is worth -- must match the server's own COIN_RUSH_REWARD.
+    /** Coins a single Coin Rush pickup is worth -- must match the server's own REWARD_PER_COIN
+     * (minigames/coin_rush.py).
      * The server never actually credits this to the player's real balance until the round ends (a
      * single lump sum, see the "coin_rush" COINS_CHANGED case) -- this constant only exists so the
      * mid-round "+2" flash (see COIN_RUSH_COLLECTED handling) has a number to show immediately,
@@ -653,7 +654,7 @@ public class RunePartyPlugin extends Plugin
         {
             @Override public void onEvent(ApiClient.EventOut e, boolean catchingUp) { handleEvent(e, catchingUp); }
             @Override public void onError(Exception e) { log.debug("EventSocket error", e); }
-            @Override public void onCaughtUp() { syncRosterSnapshot(); refreshPanel(); }
+            @Override public void onCaughtUp() { syncRosterSnapshot(true); refreshPanel(); }
         });
     }
 
@@ -695,12 +696,10 @@ public class RunePartyPlugin extends Plugin
      * (Client#setCameraPitchRelaxerEnabled -- the exact mechanism RuneLite's own bundled Camera
      * plugin uses to let a player manually drag past that same cap) -- all three live-tested and
      * confirmed, see BOARD_VIEW_PITCH/YAW/ZOOM's own docs. Deliberately does NOT touch
-     * Client#setCameraMode or Client#setCameraFocalPointX/Y/Z -- an earlier attempt at using them
-     * to pin the view over the board's own center (rather than wherever the local player stands)
-     * was live-tested and produced a solid black screen, not merely "didn't detach" -- see
-     * VARC_CAMERA_ZOOM's neighboring comment. Reverted, not retried with a different guessed mode
-     * value. That means this pans/tilts to look straight down from wherever the local player
-     * already stands (the camera's normal focal point, left untouched) rather than pinning over
+     * Client#setCameraMode or Client#setCameraFocalPointX/Y/Z -- see the abandoned-camera-detach
+     * note next to VARC_CAMERA_ZOOM for why. That means this pans/tilts to look straight down from
+     * wherever the local player already stands (the camera's normal focal point, left untouched)
+     * rather than pinning over
      * the board's own true center regardless of player position -- close enough for a course
      * that's normally small and directly underfoot during a turn, but not literally "locked to the
      * board" if the player wanders off it.
@@ -1679,8 +1678,19 @@ public class RunePartyPlugin extends Plugin
 
     /** Pulls a fresh /roster snapshot and merges it into RosterReducer -- the only source for the
      * turn-order "number" every RunePartyColor lookup (roster panel, PlayerOverlay, TileOverlay's
-     * target arrow) depends on, since it never travels in the event stream itself. */
-    private void syncRosterSnapshot()
+     * target arrow) depends on, since it never travels in the event stream itself.
+     * <p>
+     * {@code reconcileGameState} additionally reconciles phase/currentTurnRsn/lastDiceRoll from
+     * this same snapshot's own status/currentTurnRsn/lastDiceRoll fields
+     * (ARCHITECTURE_REVIEW.md's X4) -- true only for the two genuine reconnect call sites
+     * (connectEventStream's initial backlog sync, EventSocket#onCaughtUp's automatic-reconnect
+     * sync), where a full event replay has (or should have) already brought these fields to the
+     * same place this snapshot independently confirms, so this is self-healing/defense-in-depth
+     * rather than the primary source of truth. False for the live PLAYER_JOINED/ROLE_ASSIGNED/
+     * PLAYER_LEFT resync in handleEvent, which only ever needs fresh turn-order numbers -- letting
+     * that one reconcile game state too would risk this call's own async fetch resolving after a
+     * newer TURN_STARTED already landed live, clobbering it with a stale snapshot. */
+    private void syncRosterSnapshot(boolean reconcileGameState)
     {
         final String gid = gameId;
         if (gid == null) return;
@@ -1691,6 +1701,13 @@ public class RunePartyPlugin extends Plugin
             {
                 ApiClient.RosterSnapshot snapshot = apiClient.fetchRoster(gid);
                 rosterReducer.syncFromRoster(snapshot.players);
+                if (reconcileGameState)
+                {
+                    try { phase = GamePhase.valueOf(snapshot.status); }
+                    catch (IllegalArgumentException | NullPointerException ignored) { }
+                    currentTurnRsn = snapshot.currentTurnRsn;
+                    lastDiceRoll = snapshot.lastDiceRoll;
+                }
             }
             catch (Exception ex)
             {
@@ -1850,7 +1867,7 @@ public class RunePartyPlugin extends Plugin
             {
                 handleEvent(event, true);
             }
-            syncRosterSnapshot(); // one fresh roster read covers every PLAYER_JOINED/ROLE_ASSIGNED/PLAYER_LEFT skipped above, instead of one REST call per historical event
+            syncRosterSnapshot(true); // one fresh roster read covers every PLAYER_JOINED/ROLE_ASSIGNED/PLAYER_LEFT skipped above, instead of one REST call per historical event
             refreshPanel();
             eventSocket.start(gameId, backlog.latestSeq, rsn);
         }
@@ -1928,7 +1945,7 @@ public class RunePartyPlugin extends Plugin
             case Events.PLAYER_LEFT:
                 if (!catchingUp)
                 {
-                    syncRosterSnapshot();
+                    syncRosterSnapshot(false);
                 }
                 break;
 
@@ -2087,6 +2104,7 @@ public class RunePartyPlugin extends Plugin
             case Events.MINIGAME_STARTED:
             case Events.MINIGAME_PLAYER_READY:
             case Events.MINIGAME_COUNTDOWN_STARTED:
+            case Events.MINIGAME_ROUND_BEGIN:
             case Events.COIN_RUSH_SPAWN:
             case Events.COIN_RUSH_COLLECTED:
             case Events.TRUE_OR_FALSE_ROUND_STARTED:

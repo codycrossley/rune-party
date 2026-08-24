@@ -90,9 +90,9 @@ final class MinigamePresentation
     // rsn -> coins collected so far), reset fresh on every MINIGAME_STARTED for COIN_RUSH_KEY --
     // read by StatsOverlay's live scoreboard, which replaces the normal roster view for exactly as
     // long as a Coin Rush round is playable. coinRushRoundStartAt is the wall-clock moment the
-    // round actually became playable (see COIN_RUSH_DURATION_MS/getCoinRushEndsAt), set once per
-    // round -- precisely for a live client (the same "BEGIN!" instant minigameCountdownBannerUntil
-    // gets armed at), best-effort ("now") for a client that only caught up on an already-underway
+    // round actually began (see COIN_RUSH_DURATION_MS/getCoinRushEndsAt), stamped from the
+    // server's own MINIGAME_ROUND_BEGIN -- precise for a live client (this event's own arrival is
+    // that moment), best-effort ("now") for a client that only caught up on an already-underway
     // round. ----
     private final Map<Integer, WorldPoint> coinRushSpawns = new ConcurrentHashMap<>();
     private final Map<String, Integer> coinRushScores = new ConcurrentHashMap<>();
@@ -162,7 +162,7 @@ final class MinigamePresentation
                 // coinRushRoundStartAt deliberately isn't set here -- MINIGAME_STARTED lands before
                 // the round is actually playable (the ready-check still has to run first), so
                 // stamping "now" at this point would undercount the round's remaining time; see the
-                // MINIGAME_COUNTDOWN_STARTED case below, the only writer.
+                // MINIGAME_ROUND_BEGIN case below, the only writer.
                 if (RunePartyPlugin.COIN_RUSH_KEY.equals(minigameKey))
                 {
                     coinRushSpawns.clear();
@@ -206,17 +206,6 @@ final class MinigamePresentation
                 // is split from the cosmetic-only banner timestamp below.
                 minigameCountdownStarted = true;
                 minigameCountdownSkippedForClient = catchingUp;
-                // Coin Rush's own round clock (see COIN_RUSH_DURATION_MS/getCoinRushEndsAt) starts
-                // ticking from here, not MINIGAME_STARTED -- this is the event that actually marks
-                // the round playable (once the countdown itself finishes, see isMinigamePlayable).
-                // A catching-up client has no live "BEGIN!" moment of its own to hang this off of
-                // (see minigameCountdownBannerUntil's own catch-up doc), so "now" is the closest
-                // available approximation; a live client gets the precise instant instead, stamped
-                // below once the countdown's own delay actually elapses.
-                if (catchingUp && RunePartyPlugin.COIN_RUSH_KEY.equals(minigameKey))
-                {
-                    coinRushRoundStartAt = System.currentTimeMillis();
-                }
                 if (!catchingUp)
                 {
                     // Arming minigameCountdownBannerUntil is itself delayed by
@@ -227,7 +216,6 @@ final class MinigamePresentation
                     {
                         minigameCountdownBannerUntil = System.currentTimeMillis() + RunePartyPlugin.MINIGAME_COUNTDOWN_DURATION_MS;
                         plugin.extendTurnEffectGate(minigameCountdownBannerUntil);
-                        if (RunePartyPlugin.COIN_RUSH_KEY.equals(minigameKey)) coinRushRoundStartAt = minigameCountdownBannerUntil;
                         // RunePartyPanel only re-checks isMinigamePlayable() reactively, when
                         // refreshPanel() runs -- unlike AnnouncementOverlay's per-frame render(),
                         // the panel has no ordinary reason to refresh again once the countdown
@@ -248,6 +236,22 @@ final class MinigamePresentation
                         // to actually run.
                         plugin.uiTimerExec.schedule(plugin::refreshPanel, RunePartyPlugin.MINIGAME_COUNTDOWN_DURATION_MS, TimeUnit.MILLISECONDS);
                     }, RunePartyPlugin.MINIGAME_COUNTDOWN_START_DELAY_MS, TimeUnit.MILLISECONDS);
+                }
+                break;
+
+            case Events.MINIGAME_ROUND_BEGIN:
+                // Real state, applied catch-up or not: the server's own signal that this round's
+                // real content actually started (see events.minigame_round_begin's own doc,
+                // ARCHITECTURE_REVIEW.md's X2(b)) -- Coin Rush's own round clock (see
+                // COIN_RUSH_DURATION_MS/getCoinRushEndsAt) starts ticking from here rather than a
+                // locally-guessed offset off MINIGAME_COUNTDOWN_STARTED. "now" is exact for a live
+                // client (this event's own arrival *is* the moment) and best-effort for a
+                // catching-up client, same as every other real-state field here. True or False
+                // doesn't need this -- trueOrFalseRoundStartedAt already anchors off its own
+                // TRUE_OR_FALSE_ROUND_STARTED -- so this only acts on Coin Rush.
+                if (RunePartyPlugin.COIN_RUSH_KEY.equals(minigameKey))
+                {
+                    coinRushRoundStartAt = System.currentTimeMillis();
                 }
                 break;
 

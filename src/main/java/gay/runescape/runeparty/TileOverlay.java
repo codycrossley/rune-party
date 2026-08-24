@@ -86,11 +86,6 @@ public class TileOverlay extends Overlay
     // this and coinTrapModels/coinRushModels below are just three differently-keyed instances of it.
     private final SceneObjectSet<WorldPoint> goldenGnomeModels;
 
-    // Debug aid while tracking down why GOLDEN_GNOME_MODEL_ID isn't rendering -- logs the outcome
-    // of each loadModel() attempt once per point instead of every frame, so the client log shows
-    // whether it's failing to load at all vs. loading but not showing up.
-    private final Set<WorldPoint> goldenGnomeModelLoadLogged = new HashSet<>();
-
     // Same shape as goldenGnomeModels, for Coin Trap tiles -- see updateCoinTrapModels/
     // clearCoinTrapModels.
     private final SceneObjectSet<WorldPoint> coinTrapModels;
@@ -223,24 +218,7 @@ public class TileOverlay extends Overlay
             current.remove(moveNew);
         }
 
-        goldenGnomeModels.sync(current, Function.identity(), point ->
-        {
-            Model model = client.loadModel(GOLDEN_GNOME_MODEL_ID);
-            if (model != null)
-            {
-                if (goldenGnomeModelLoadLogged.add(point))
-                {
-                    log.info("Golden Gnome model {} loaded at {}: vertexCount={} faceCount={}",
-                        GOLDEN_GNOME_MODEL_ID, point, model.getVerticesCount(), model.getFaceCount());
-                }
-            }
-            else if (goldenGnomeModelLoadLogged.add(point))
-            {
-                log.info("Golden Gnome model {} returned null from loadModel() at {} (will keep retrying every frame)",
-                    GOLDEN_GNOME_MODEL_ID, point);
-            }
-            return model;
-        }, point -> log.info("Golden Gnome RuneLiteObject activated at {}", point));
+        goldenGnomeModels.sync(current, Function.identity(), point -> client.loadModel(GOLDEN_GNOME_MODEL_ID));
     }
 
     /** Despawns and forgets every Golden Gnome RuneLiteObject -- called whenever this overlay

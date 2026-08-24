@@ -404,15 +404,17 @@ public class RunePartyMapDialog extends JDialog
         legend.setBorder(BorderFactory.createEmptyBorder(6, PADDING, 8, PADDING));
 
         // Non-modifier types come from the served catalog (see RunePartyPlugin#getTileTypeCatalog),
-        // in the server's own REGISTRY order -- the 2 modifiers stay hardcoded below since they
-        // render with their own bespoke marker glyph/color, not a tile-outline color.
+        // in the server's own REGISTRY order -- the 2 modifiers get their own bespoke marker
+        // glyph/color below rather than a tile-outline color, but still pull their reward numbers
+        // from the same served description (see modifierDescription) rather than hardcoding them
+        // a second time (ARCHITECTURE_REVIEW.md's X2(a)).
         for (ApiClient.TileTypeOut t : plugin.getTileTypeCatalog().values())
         {
             if (t.isModifier) continue;
             legend.add(legendRow(tileColor(t.key, null), t.description));
         }
-        legend.add(legendRow(GOLDEN_GNOME_MARKER, "Golden Gnome (▲ marker -- buy for 20 coins)"));
-        legend.add(legendRow(COIN_TRAP_MARKER, "Coin Trap (◆ marker -- steals up to 20 coins)"));
+        legend.add(legendRow(GOLDEN_GNOME_MARKER, "▲ " + modifierDescription("GOLDEN_GNOME_TILE", "Golden Gnome -- buy for 20 coins")));
+        legend.add(legendRow(COIN_TRAP_MARKER, "◆ " + modifierDescription("COIN_TRAP_TILE", "Coin Trap -- steals up to 20 coins")));
 
         JLabel hint = new JLabel("Hover a tile on the map above for details");
         hint.setForeground(EMPTY_TEXT);
@@ -422,6 +424,15 @@ public class RunePartyMapDialog extends JDialog
         legend.add(hint);
 
         return legend;
+    }
+
+    /** Pulls a modifier tile type's own served description (see buildLegend's own doc) -- falls
+     * back to {@code fallback} if the catalog fetch failed or hasn't landed yet, same defensive
+     * shape tileColor already uses for a missing catalog entry. */
+    private String modifierDescription(String tileType, String fallback)
+    {
+        ApiClient.TileTypeOut t = plugin.getTileTypeCatalog().get(tileType);
+        return t != null && t.description != null ? t.description : fallback;
     }
 
     private static JPanel legendRow(Color swatchColor, String label)
