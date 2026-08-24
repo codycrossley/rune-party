@@ -161,7 +161,7 @@ public class ConfettiOverlay extends Overlay
         for (Particle p : particles)
         {
             float alpha = Math.max(0f, Math.min(1f, p.life / FADE_TAIL_SECS));
-            g.setColor(withAlpha(p.color, alpha));
+            g.setColor(RunePartyRender.withAlpha(p.color, alpha));
             g.translate(p.x, p.y);
             g.rotate(p.rotation);
             if (p.rect)
@@ -170,11 +170,6 @@ public class ConfettiOverlay extends Overlay
                 g.fillRect((int) -p.size, -1, (int) (p.size * 2), 2);
             g.setTransform(base);
         }
-    }
-
-    private static Color withAlpha(Color c, float alpha)
-    {
-        return new Color(c.getRed(), c.getGreen(), c.getBlue(), (int) (255 * alpha));
     }
 
     private static final class Particle

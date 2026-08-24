@@ -131,7 +131,7 @@ public class PlayerOverlay extends Overlay
             int glowRadius = TOKEN_RADIUS + GLOW_RADIUS_PAD;
 
             g.setStroke(TOKEN_GLOW_STROKE);
-            g.setColor(withAlpha(color, glowAlpha));
+            g.setColor(RunePartyRender.withAlpha(color, glowAlpha));
             g.drawOval(cx - glowRadius, cy - glowRadius, glowRadius * 2, glowRadius * 2);
 
             g.setStroke(TOKEN_BORDER_ON_TURN);
@@ -176,10 +176,7 @@ public class PlayerOverlay extends Overlay
         if (loc == null) return;
 
         int a = Math.max(0, Math.min(255, (int) (alpha * 255)));
-        g.setColor(withAlpha(Color.BLACK, a));
-        g.drawString(text, loc.getX() + 1, loc.getY() + 1);
-        g.setColor(withAlpha(color, a));
-        g.drawString(text, loc.getX(), loc.getY());
+        RunePartyRender.drawShadowed(g, text, loc.getX(), loc.getY(), color, a);
     }
 
     /** Floats "+1 Golden Gnome" above a player's head after a purchase, then swaps to their new
@@ -209,14 +206,6 @@ public class PlayerOverlay extends Overlay
         if (loc == null) return;
 
         int a = Math.max(0, Math.min(255, (int) (alpha * 255)));
-        g.setColor(withAlpha(Color.BLACK, a));
-        g.drawString(text, loc.getX() + 1, loc.getY() + 1);
-        g.setColor(withAlpha(GOLDEN_GNOME_POPUP_COLOR, a));
-        g.drawString(text, loc.getX(), loc.getY());
-    }
-
-    private static Color withAlpha(Color c, int alpha)
-    {
-        return new Color(c.getRed(), c.getGreen(), c.getBlue(), alpha);
+        RunePartyRender.drawShadowed(g, text, loc.getX(), loc.getY(), GOLDEN_GNOME_POPUP_COLOR, a);
     }
 }

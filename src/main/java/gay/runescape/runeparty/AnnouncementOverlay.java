@@ -30,7 +30,6 @@ import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
-import net.runelite.client.util.Text;
 
 /** Big, brief, screen-centered instructional banners -- e.g "<player>'s Turn" **/
 
@@ -332,7 +331,7 @@ public class AnnouncementOverlay extends Overlay
     {
         float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), SPIN_HINT_PULSE_PERIOD_MS);
 
-        String self = localRsn();
+        String self = plugin.getLocalRsn();
         boolean hasItems = self != null && !plugin.isItemUsedThisTurn()
             && !plugin.getRosterReducer().getItems(self).isEmpty();
 
@@ -793,10 +792,10 @@ public class AnnouncementOverlay extends Overlay
         for (int i = 0; i < n; i++)
         {
             Color base = RAINBOW_LETTER_COLORS[i % RAINBOW_LETTER_COLORS.length];
-            drawWheelWedge(wheel, cx, cy, radius, i * segmentDeg, (i + 1) * segmentDeg, withAlpha(base, alpha * 0.85f));
+            drawWheelWedge(wheel, cx, cy, radius, i * segmentDeg, (i + 1) * segmentDeg, RunePartyRender.withAlpha(base, alpha * 0.85f));
         }
         wheel.setStroke(new BasicStroke(2f));
-        wheel.setColor(withAlpha(Color.WHITE, alpha));
+        wheel.setColor(RunePartyRender.withAlpha(Color.WHITE, alpha));
         wheel.drawOval(Math.round(cx - radius), Math.round(cy - radius), Math.round(radius * 2), Math.round(radius * 2));
         for (int i = 0; i < n; i++)
         {
@@ -823,7 +822,7 @@ public class AnnouncementOverlay extends Overlay
         pointer.addPoint(cx - 10, pointerTip - 16);
         pointer.addPoint(cx + 10, pointerTip - 16);
         pointer.addPoint(cx, pointerTip);
-        g.setColor(withAlpha(WHEEL_POINTER_COLOR, alpha));
+        g.setColor(RunePartyRender.withAlpha(WHEEL_POINTER_COLOR, alpha));
         g.fillPolygon(pointer);
 
         if (!spinning && revealText != null)
@@ -1408,9 +1407,9 @@ public class AnnouncementOverlay extends Overlay
      * with drawLeftAlignedRainbowText) can keep chaining off the end of the previous one. */
     private int drawLeftAlignedText(Graphics2D g, String text, int x, int y, Color color, float alpha)
     {
-        g.setColor(withAlpha(Color.BLACK, alpha * 0.7f));
+        g.setColor(RunePartyRender.withAlpha(Color.BLACK, alpha * 0.7f));
         g.drawString(text, x + 2, y + 2);
-        g.setColor(withAlpha(color, alpha));
+        g.setColor(RunePartyRender.withAlpha(color, alpha));
         g.drawString(text, x, y);
         return x + g.getFontMetrics().stringWidth(text);
     }
@@ -1430,9 +1429,9 @@ public class AnnouncementOverlay extends Overlay
             {
                 String s = String.valueOf(ch);
                 Color color = letterColors[colorIndex % letterColors.length];
-                g.setColor(withAlpha(Color.BLACK, alpha * 0.7f));
+                g.setColor(RunePartyRender.withAlpha(Color.BLACK, alpha * 0.7f));
                 g.drawString(s, x + 2, y + 2);
-                g.setColor(withAlpha(color, alpha));
+                g.setColor(RunePartyRender.withAlpha(color, alpha));
                 g.drawString(s, x, y);
                 colorIndex++;
             }
@@ -1541,18 +1540,18 @@ public class AnnouncementOverlay extends Overlay
         RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
         Color color = seatColor != null ? seatColor.awt : Color.WHITE;
 
-        g.setColor(withAlpha(Color.BLACK, alpha * 0.3f));
+        g.setColor(RunePartyRender.withAlpha(Color.BLACK, alpha * 0.3f));
         g.fillRoundRect(cx - half + 4, cy - half + 4, size, size, DIE_CORNER, DIE_CORNER);
 
-        g.setColor(withAlpha(color, alpha * DIE_FACE_OPACITY));
+        g.setColor(RunePartyRender.withAlpha(color, alpha * DIE_FACE_OPACITY));
         g.fillRoundRect(cx - half, cy - half, size, size, DIE_CORNER, DIE_CORNER);
         g.setStroke(new BasicStroke(DIE_BORDER_WIDTH));
-        g.setColor(withAlpha(DIE_BORDER, alpha));
+        g.setColor(RunePartyRender.withAlpha(DIE_BORDER, alpha));
         g.drawRoundRect(cx - half, cy - half, size, size, DIE_CORNER, DIE_CORNER);
 
         int pipPad = Math.max(10, size / 6);
         int pipR = 5;
-        g.setColor(withAlpha(DIE_PIP, alpha));
+        g.setColor(RunePartyRender.withAlpha(DIE_PIP, alpha));
         g.fillOval(cx - half + pipPad - pipR, cy - half + pipPad - pipR, pipR * 2, pipR * 2);
         g.fillOval(cx + half - pipPad - pipR, cy - half + pipPad - pipR, pipR * 2, pipR * 2);
         g.fillOval(cx - half + pipPad - pipR, cy + half - pipPad - pipR, pipR * 2, pipR * 2);
@@ -1563,9 +1562,9 @@ public class AnnouncementOverlay extends Overlay
         FontMetrics fm = g.getFontMetrics();
         int tx = cx - fm.stringWidth(text) / 2;
         int ty = cy + fm.getAscent() / 2 - 4;
-        g.setColor(withAlpha(Color.BLACK, alpha));
+        g.setColor(RunePartyRender.withAlpha(Color.BLACK, alpha));
         g.drawString(text, tx + 2, ty + 2);
-        g.setColor(withAlpha(Color.WHITE, alpha));
+        g.setColor(RunePartyRender.withAlpha(Color.WHITE, alpha));
         g.drawString(text, tx, ty);
 
         // "+N"/"-N" (then "+N = total"/"-N = total" once the flip starts) underneath the die --
@@ -1583,28 +1582,16 @@ public class AnnouncementOverlay extends Overlay
         }
     }
 
-    private String localRsn()
-    {
-        if (client.getLocalPlayer() == null) return null;
-        String name = client.getLocalPlayer().getName();
-        return name != null ? Text.toJagexName(name) : null;
-    }
-
-    /** Whether `rsn` is the local viewer -- collapses the `String localRsn = localRsn(); boolean
-     * isLocal = localRsn != null && localRsn.equalsIgnoreCase(rsn);` two-liner repeated at every
-     * "You…"/"&lt;rsn&gt;…" site (see ARCHITECTURE_REVIEW.md's C2 finding, part (c)). Deliberately
-     * only collapses the boolean, not the addressed text itself -- the actual phrasing differs in
-     * more than subject substitution across sites (verb conjugation: "You already have" vs.
-     * "&lt;rsn&gt; already has"), so a single templated format string doesn't fit every call site. */
+    /** Whether `rsn` is the local viewer -- collapses the `String localRsn = plugin.getLocalRsn();
+     * boolean isLocal = localRsn != null && localRsn.equalsIgnoreCase(rsn);` two-liner repeated at
+     * every "You…"/"&lt;rsn&gt;…" site (see ARCHITECTURE_REVIEW.md's C2 finding, part (c)).
+     * Deliberately only collapses the boolean, not the addressed text itself -- the actual
+     * phrasing differs in more than subject substitution across sites (verb conjugation: "You
+     * already have" vs. "&lt;rsn&gt; already has"), so a single templated format string doesn't
+     * fit every call site. */
     private boolean isLocal(String rsn)
     {
-        String local = localRsn();
+        String local = plugin.getLocalRsn();
         return rsn != null && local != null && local.equalsIgnoreCase(rsn);
-    }
-
-    private static Color withAlpha(Color c, float alpha)
-    {
-        int a = Math.max(0, Math.min(255, (int) (alpha * 255)));
-        return new Color(c.getRed(), c.getGreen(), c.getBlue(), a);
     }
 }

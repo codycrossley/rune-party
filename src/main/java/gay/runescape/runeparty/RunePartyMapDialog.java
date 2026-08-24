@@ -184,7 +184,7 @@ public class RunePartyMapDialog extends JDialog
                 Point topLeft = cellTopLeft(t.point, minX, maxY);
                 int s = CELL_SIZE - TILE_GAP;
                 Color color = tileColor(t.tileType, t.color);
-                g.setColor(withAlpha(color, 160));
+                g.setColor(RunePartyRender.withAlpha(color, 160));
                 g.fillRect(topLeft.x, topLeft.y, s, s);
                 g.setColor(color);
                 g.drawRect(topLeft.x, topLeft.y, s, s);
@@ -458,10 +458,5 @@ public class RunePartyMapDialog extends JDialog
         if (t == null || t.colorHex == null) return new Color(255, 255, 0);
         try { return Color.decode(t.colorHex); }
         catch (NumberFormatException e) { return new Color(255, 255, 0); }
-    }
-
-    private static Color withAlpha(Color c, int alpha)
-    {
-        return new Color(c.getRed(), c.getGreen(), c.getBlue(), alpha);
     }
 }

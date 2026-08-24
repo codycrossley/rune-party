@@ -18,11 +18,11 @@ import lombok.extern.slf4j.Slf4j;
 import java.awt.*;
 import java.awt.geom.Path2D;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 /** Renders the course: committed tiles from TileReducer, plus a live placement/removal preview
  * while the host is building. Unlike Gnomeball's TileOverlay -- whose FIELD/ZONE tiles are large
@@ -81,8 +81,10 @@ public class TileOverlay extends Overlay
     private final TileReducer tileReducer;
 
     // One RuneLiteObject per currently-marked Golden Gnome tile, keyed by its WorldPoint -- see
-    // updateGoldenGnomeModels/clearGoldenGnomeModels, the only things that touch this.
-    private final Map<WorldPoint, RuneLiteObject> goldenGnomeModels = new HashMap<>();
+    // updateGoldenGnomeModels/clearGoldenGnomeModels, the only things that touch this. The actual
+    // spawn/diff/despawn algorithm lives in SceneObjectSet (see ARCHITECTURE_REVIEW.md's C5) --
+    // this and coinTrapModels/coinRushModels below are just three differently-keyed instances of it.
+    private final SceneObjectSet<WorldPoint> goldenGnomeModels;
 
     // Debug aid while tracking down why GOLDEN_GNOME_MODEL_ID isn't rendering -- logs the outcome
     // of each loadModel() attempt once per point instead of every frame, so the client log shows
@@ -91,7 +93,7 @@ public class TileOverlay extends Overlay
 
     // Same shape as goldenGnomeModels, for Coin Trap tiles -- see updateCoinTrapModels/
     // clearCoinTrapModels.
-    private final Map<WorldPoint, RuneLiteObject> coinTrapModels = new HashMap<>();
+    private final SceneObjectSet<WorldPoint> coinTrapModels;
     // The one point (if any) currently mid-trigger-animation, so updateCoinTrapModels only calls
     // setAnimation once per trigger rather than re-arming it every single frame the force-persist
     // window (RunePartyPlugin#getCoinTrapTriggerUntil) stays open -- see that method's own doc.
@@ -112,7 +114,7 @@ public class TileOverlay extends Overlay
     // Trap tile, two Coin Rush spawns are never guaranteed distinct points by construction from this
     // overlay's own perspective (nothing here enforces it), so the id is the only stable key. See
     // updateCoinRushModels/clearCoinRushModels.
-    private final Map<Integer, RuneLiteObject> coinRushModels = new HashMap<>();
+    private final SceneObjectSet<Integer> coinRushModels;
 
     public TileOverlay(Client client, RunePartyConfig config, RunePartyPlugin plugin, TileReducer tileReducer)
     {
@@ -120,6 +122,10 @@ public class TileOverlay extends Overlay
         this.config = config;
         this.plugin = plugin;
         this.tileReducer = tileReducer;
+
+        this.goldenGnomeModels = new SceneObjectSet<>(client);
+        this.coinTrapModels = new SceneObjectSet<>(client);
+        this.coinRushModels = new SceneObjectSet<>(client);
 
         setPosition(OverlayPosition.DYNAMIC);
         setLayer(OverlayLayer.ABOVE_SCENE);
@@ -217,50 +223,24 @@ public class TileOverlay extends Overlay
             current.remove(moveNew);
         }
 
-        goldenGnomeModels.entrySet().removeIf(e ->
+        goldenGnomeModels.sync(current, Function.identity(), point ->
         {
-            if (current.contains(e.getKey())) return false;
-            e.getValue().setActive(false);
-            return true;
-        });
-
-        for (WorldPoint point : current)
-        {
-            RuneLiteObject obj = goldenGnomeModels.computeIfAbsent(point, p -> client.createRuneLiteObject());
-
-            if (obj.getModel() == null)
+            Model model = client.loadModel(GOLDEN_GNOME_MODEL_ID);
+            if (model != null)
             {
-                Model model = client.loadModel(GOLDEN_GNOME_MODEL_ID);
-                if (model != null)
+                if (goldenGnomeModelLoadLogged.add(point))
                 {
-                    obj.setModel(model);
-                    if (goldenGnomeModelLoadLogged.add(point))
-                    {
-                        log.info("Golden Gnome model {} loaded at {}: vertexCount={} faceCount={}",
-                            GOLDEN_GNOME_MODEL_ID, point, model.getVerticesCount(), model.getFaceCount());
-                    }
-                }
-                else if (goldenGnomeModelLoadLogged.add(point))
-                {
-                    log.info("Golden Gnome model {} returned null from loadModel() at {} (will keep retrying every frame)",
-                        GOLDEN_GNOME_MODEL_ID, point);
+                    log.info("Golden Gnome model {} loaded at {}: vertexCount={} faceCount={}",
+                        GOLDEN_GNOME_MODEL_ID, point, model.getVerticesCount(), model.getFaceCount());
                 }
             }
-
-            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), point);
-            if (lp == null)
+            else if (goldenGnomeModelLoadLogged.add(point))
             {
-                obj.setActive(false);
-                continue;
+                log.info("Golden Gnome model {} returned null from loadModel() at {} (will keep retrying every frame)",
+                    GOLDEN_GNOME_MODEL_ID, point);
             }
-
-            obj.setLocation(lp, point.getPlane());
-            if (obj.getModel() != null && !obj.isActive())
-            {
-                obj.setActive(true);
-                log.info("Golden Gnome RuneLiteObject activated at {}", point);
-            }
-        }
+            return model;
+        }, point -> log.info("Golden Gnome RuneLiteObject activated at {}", point));
     }
 
     /** Despawns and forgets every Golden Gnome RuneLiteObject -- called whenever this overlay
@@ -269,10 +249,6 @@ public class TileOverlay extends Overlay
      * independently of this overlay or even the plugin being active. */
     public void clearGoldenGnomeModels()
     {
-        for (RuneLiteObject obj : goldenGnomeModels.values())
-        {
-            obj.setActive(false);
-        }
         goldenGnomeModels.clear();
     }
 
@@ -304,42 +280,23 @@ public class TileOverlay extends Overlay
             coinTrapAnimatedTriggerPoint = null; // window closed -- a future trigger at the same point can animate again
         }
 
-        coinTrapModels.entrySet().removeIf(e ->
+        coinTrapModels.sync(current, Function.identity(), point ->
         {
-            if (current.contains(e.getKey())) return false;
-            e.getValue().setActive(false);
-            return true;
+            if (coinTrapGoldModel == null) buildCoinTrapGoldModel();
+            return coinTrapGoldModel != null ? coinTrapGoldModel : client.loadModel(COIN_TRAP_MODEL_ID);
         });
 
-        for (WorldPoint point : current)
+        if (triggerActive && !triggerPoint.equals(coinTrapAnimatedTriggerPoint))
         {
-            RuneLiteObject obj = coinTrapModels.computeIfAbsent(point, p -> client.createRuneLiteObject());
-
-            if (obj.getModel() == null)
-            {
-                if (coinTrapGoldModel == null) buildCoinTrapGoldModel();
-                Model model = coinTrapGoldModel != null ? coinTrapGoldModel : client.loadModel(COIN_TRAP_MODEL_ID);
-                if (model != null) obj.setModel(model);
-            }
-
-            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), point);
-            if (lp == null)
-            {
-                obj.setActive(false);
-                continue;
-            }
-
-            obj.setLocation(lp, point.getPlane());
-            if (obj.getModel() != null && !obj.isActive()) obj.setActive(true);
-
-            if (triggerActive && point.equals(triggerPoint) && !point.equals(coinTrapAnimatedTriggerPoint))
+            RuneLiteObject obj = coinTrapModels.get(triggerPoint);
+            if (obj != null)
             {
                 Animation anim = client.loadAnimation(COIN_TRAP_SPRING_ANIMATION_ID);
                 if (anim != null)
                 {
                     obj.setShouldLoop(false);
                     obj.setAnimation(anim);
-                    coinTrapAnimatedTriggerPoint = point;
+                    coinTrapAnimatedTriggerPoint = triggerPoint;
                 }
             }
         }
@@ -401,10 +358,6 @@ public class TileOverlay extends Overlay
      * clearGoldenGnomeModels. */
     public void clearCoinTrapModels()
     {
-        for (RuneLiteObject obj : coinTrapModels.values())
-        {
-            obj.setActive(false);
-        }
         coinTrapModels.clear();
     }
 
@@ -420,44 +373,13 @@ public class TileOverlay extends Overlay
     private void updateCoinRushModels()
     {
         Map<Integer, WorldPoint> current = plugin.getCoinRushSpawns();
-
-        coinRushModels.entrySet().removeIf(entry ->
-        {
-            if (current.containsKey(entry.getKey())) return false;
-            entry.getValue().setActive(false);
-            return true;
-        });
-
-        for (Map.Entry<Integer, WorldPoint> spawn : current.entrySet())
-        {
-            RuneLiteObject obj = coinRushModels.computeIfAbsent(spawn.getKey(), id -> client.createRuneLiteObject());
-
-            if (obj.getModel() == null)
-            {
-                Model model = client.loadModel(COIN_RUSH_MODEL_ID);
-                if (model != null) obj.setModel(model);
-            }
-
-            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), spawn.getValue());
-            if (lp == null)
-            {
-                obj.setActive(false);
-                continue;
-            }
-
-            obj.setLocation(lp, spawn.getValue().getPlane());
-            if (obj.getModel() != null && !obj.isActive()) obj.setActive(true);
-        }
+        coinRushModels.sync(current.keySet(), current::get, id -> client.loadModel(COIN_RUSH_MODEL_ID));
     }
 
     /** Despawns and forgets every Coin Rush RuneLiteObject -- same reasoning/call sites as
      * clearGoldenGnomeModels/clearCoinTrapModels. */
     public void clearCoinRushModels()
     {
-        for (RuneLiteObject obj : coinRushModels.values())
-        {
-            obj.setActive(false);
-        }
         coinRushModels.clear();
     }
 
@@ -574,19 +496,16 @@ public class TileOverlay extends Overlay
         arrow.addPoint(center.x + halfWidth, baseY);
 
         int alpha = (int) (pulse * 255);
-        g.setColor(withAlpha(color, alpha));
+        g.setColor(RunePartyRender.withAlpha(color, alpha));
         g.fillPolygon(arrow);
-        g.setColor(withAlpha(Color.BLACK, alpha));
+        g.setColor(RunePartyRender.withAlpha(Color.BLACK, alpha));
         g.setStroke(SOLID_STROKE);
         g.drawPolygon(arrow);
 
         FontMetrics fm = g.getFontMetrics();
         int textWidth = fm.stringWidth(label);
         int textY = baseY - 6;
-        g.setColor(withAlpha(Color.BLACK, alpha));
-        g.drawString(label, center.x - textWidth / 2 + 1, textY + 1);
-        g.setColor(withAlpha(color, alpha));
-        g.drawString(label, center.x - textWidth / 2, textY);
+        RunePartyRender.drawShadowed(g, label, center.x - textWidth / 2, textY, color, alpha);
     }
 
     /** Draws the pre-game "gather here" arrow over the START tile (always path index 0, see
@@ -634,9 +553,8 @@ public class TileOverlay extends Overlay
      * the only caller. */
     private boolean isLocalPlayer(String rsn)
     {
-        Player local = client.getLocalPlayer();
-        if (local == null || local.getName() == null) return false;
-        return rsn.equalsIgnoreCase(Text.toJagexName(local.getName()));
+        String local = plugin.getLocalRsn();
+        return local != null && local.equalsIgnoreCase(rsn);
     }
 
     /** Draws a line from each path tile to every tile it actually leads to (see
@@ -857,11 +775,6 @@ public class TileOverlay extends Overlay
         }
         path.closePath();
         return path;
-    }
-
-    private static Color withAlpha(Color c, int alpha)
-    {
-        return new Color(c.getRed(), c.getGreen(), c.getBlue(), alpha);
     }
 
     /** Looks up this tile type's color in the served catalog (see RunePartyPlugin#getTileTypeCatalog,
