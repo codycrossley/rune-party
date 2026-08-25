@@ -13,9 +13,8 @@ import java.util.concurrent.TimeUnit;
 
 public class ApiClient
 {
-    // Local-dev default -- point this at wherever the companion server (see the PycharmProjects
-    // rune-party repo's app.py) ends up deployed for a real game.
-    static final String BASE_URL = "http://localhost:8000/runeparty";
+    // static final String BASE_URL = "http://localhost:8000/runeparty";
+    static final String BASE_URL = "https://runeparty.shrunk.studio/runeparty";
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
