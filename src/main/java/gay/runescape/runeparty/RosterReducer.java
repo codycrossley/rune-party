@@ -235,7 +235,15 @@ public class RosterReducer
                 break;
             }
             case Events.GOLDEN_GNOME_PURCHASED:
+            case Events.GOLDEN_GNOME_LOST:
             {
+                // Both carry the exact same {player, goldenGnomeCount} shape -- a purchase's own
+                // +1 and a Jad smash penalty's own -1 (see app.py's golden_gnome_lost) both just
+                // overwrite with the new running total, identically. Without this case, a lost
+                // Golden Gnome would decrement the real server-side count (see
+                // GoldenGnomePresentation's own popup, which *does* handle both) while the
+                // roster/stats overlay kept showing the stale pre-loss total forever, since nothing
+                // else here ever re-applies GOLDEN_GNOME_LOST.
                 String playerRaw = Json.requiredStr(e.payload, type, "player");
                 if (playerRaw == null) return;
                 String key = canonicalKey(playerRaw);

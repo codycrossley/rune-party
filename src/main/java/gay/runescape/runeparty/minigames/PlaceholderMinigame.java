@@ -64,7 +64,12 @@ public class PlaceholderMinigame implements Minigame
         g.setFont(font);
         FontMetrics fm = g.getFontMetrics();
         String text = key.substring(key.length() - 1);
-        g.drawString(text, x - fm.stringWidth(text) / 2, y + fm.getAscent() / 2 - 2);
+        int textX = x - fm.stringWidth(text) / 2;
+        int textY = y + fm.getAscent() / 2 - 2;
+        g.setColor(new Color(0, 0, 0, a));
+        g.drawString(text, textX + 1, textY + 1);
+        g.setColor(new Color(255, 255, 255, a));
+        g.drawString(text, textX, textY);
     }
 
     @Override

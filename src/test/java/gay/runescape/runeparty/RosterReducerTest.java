@@ -80,6 +80,29 @@ public class RosterReducerTest
     }
 
     @Test
+    public void goldenGnomeLostDecrementsTheRosterCount()
+    {
+        // Regression test: RosterReducer used to only fold GOLDEN_GNOME_PURCHASED, so a Jad smash
+        // penalty (GOLDEN_GNOME_LOST -- same {player, goldenGnomeCount} shape, see events.py's
+        // golden_gnome_lost) correctly decremented the server's own count but the roster/stats
+        // overlay kept showing the stale pre-loss total forever, since nothing ever re-applied it.
+        RosterReducer reducer = new RosterReducer();
+        reducer.loadSnapshot(List.of(rosterPlayer("Zezima", "PLAYER", true, "1", "1")));
+
+        JsonObject purchased = new JsonObject();
+        purchased.addProperty("player", "Zezima");
+        purchased.addProperty("goldenGnomeCount", 2);
+        reducer.apply(event("GOLDEN_GNOME_PURCHASED", purchased));
+        assertEquals(2, find(reducer, "Zezima").goldenGnomeCount);
+
+        JsonObject lost = new JsonObject();
+        lost.addProperty("player", "Zezima");
+        lost.addProperty("goldenGnomeCount", 1);
+        reducer.apply(event("GOLDEN_GNOME_LOST", lost));
+        assertEquals("a Jad smash loss must decrement the roster's own count, not leave it stale", 1, find(reducer, "Zezima").goldenGnomeCount);
+    }
+
+    @Test
     public void syncFromRosterResurrectsARowApplyDeletedBefore()
     {
         // Simulates the exact drift C7 flagged: some other client folded a PLAYER_LEFT under the

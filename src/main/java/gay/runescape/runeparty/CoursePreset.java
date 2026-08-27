@@ -199,7 +199,9 @@ public final class CoursePreset
      * host-authored via sequential freehand placement (each click appends the next path index) and
      * saved as custom slots through {@link #fromTiles}, the same way Gnomeball hosts build/save
      * custom fields. Also exercises a Golden Gnome modifier end-to-end (see RelativeTile#decorative)
-     * two steps out from START, so it's reachable by almost any first roll.
+     * two steps out from START, so it's reachable by almost any first roll. Also carries a Jad
+     * Tile at list index 10 (see JadOverlay), swapped in the same "same dx/dy, new tileType" way
+     * as the Item Space below.
      */
     public static CoursePreset buildStandardLoop()
     {
@@ -229,6 +231,14 @@ public final class CoursePreset
         {
             RelativeTile itemTile = tiles.get(itemTileIndex);
             tiles.set(itemTileIndex, new RelativeTile(itemTile.dx, itemTile.dy, "ITEM_TILE", null, itemTile.nextIndices));
+        }
+
+        // Jad Tile, 10 steps out from START -- same swap-in-place idiom as the Item Space above.
+        int jadTileIndex = 10;
+        if (tiles.size() > jadTileIndex)
+        {
+            RelativeTile jadTile = tiles.get(jadTileIndex);
+            tiles.set(jadTileIndex, new RelativeTile(jadTile.dx, jadTile.dy, "JAD_TILE", null, jadTile.nextIndices));
         }
 
         // Decorative Golden Gnome modifier, stacked on the PATH tile two steps out from START (see

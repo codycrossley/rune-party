@@ -79,17 +79,30 @@ final class GoldenGnomePresentation
                 offerRsn = null; // always clear, catch-up or not -- real state
                 awaitingYesFinish = false;
                 awaitingNoFinish = false;
-                // "declined" gets no banner/chat of its own -- the offer simply disappears, same
-                // silence a declined confirm-start or an un-rolled turn would get. "purchased"'s
-                // own announcement comes from the GOLDEN_GNOME_PURCHASED case below instead (it
-                // carries the new total, which this event doesn't), so only "cant_afford" actually
-                // needs to arm anything here.
-                if (!catchingUp && "cant_afford".equals(Json.requiredStr(e.payload, type, "outcome")))
+                // "purchased"'s own announcement comes from the GOLDEN_GNOME_PURCHASED case below
+                // instead (it carries the new total, which this event doesn't) -- "cant_afford" and
+                // "declined" both get their own announcement here, since this is the only event
+                // carrying either outcome. Armed via plugin.armBanner (scheduleAfterTurnEffects
+                // underneath) rather than set directly -- see that method's own doc: without it,
+                // this banner would show immediately even if some earlier effect (a Coin Trap
+                // animation, another Golden Gnome outcome, now a Jad encounter reveal) was still
+                // playing, stomping over it instead of queuing politely behind it.
+                if (!catchingUp)
                 {
-                    outcome.payload = new OutcomePayload("cant_afford", Json.requiredStr(e.payload, type, "player"));
-                    outcome.until = System.currentTimeMillis() + RunePartyPlugin.GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
-                    plugin.extendTurnEffectGate(outcome.until);
-                    plugin.addChatMessage("Can't afford the Golden Gnome!");
+                    String resolvedOutcome = Json.requiredStr(e.payload, type, "outcome");
+                    String resolvedRsn = Json.requiredStr(e.payload, type, "player");
+                    if ("cant_afford".equals(resolvedOutcome))
+                    {
+                        plugin.armBanner(outcome, RunePartyPlugin.GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS,
+                            () -> new OutcomePayload("cant_afford", resolvedRsn), true);
+                        plugin.addChatMessage("Can't afford the Golden Gnome!");
+                    }
+                    else if ("declined".equals(resolvedOutcome))
+                    {
+                        plugin.armBanner(outcome, RunePartyPlugin.GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS,
+                            () -> new OutcomePayload("declined", resolvedRsn), true);
+                        plugin.addChatMessage(resolvedRsn + " declined the Golden Gnome!");
+                    }
                 }
                 break;
             }
@@ -99,23 +112,47 @@ final class GoldenGnomePresentation
                 // The running total itself lives in rosterReducer (updated unconditionally by
                 // RunePartyPlugin.handleEvent's preamble, catch-up or not) -- everything here is
                 // purely cosmetic: the "You got a Golden Gnome!" announcement (outcome, reusing the
-                // same banner renderGoldenGnomeOutcome uses for "cant_afford") plus the "+1 Golden
-                // Gnome" popup, both fired from this one event since it's the only one carrying the
-                // new total the popup needs.
+                // same banner renderGoldenGnomeOutcome uses for "cant_afford"/"declined") plus the
+                // "+1 Golden Gnome" popup, both fired from this one event since it's the only one
+                // carrying the new total the popup needs. The popup keeps its own existing
+                // immediate/self-queuing behavior (see enqueueCoinPopup's own queue-chaining
+                // reasoning) -- only the outcome banner needs plugin.armBanner's queuing, since
+                // that's the one drawn in the same big-banner screen position everything else
+                // gated behind scheduleAfterTurnEffects uses.
                 if (!catchingUp)
                 {
                     String rsn = Json.requiredStr(e.payload, type, "player");
                     Integer total = Json.requiredInt(e.payload, type, "goldenGnomeCount");
-                    popup.payload = new PopupPayload(rsn, total != null ? total : 0);
+                    popup.payload = new PopupPayload(rsn, total != null ? total : 0, 1);
                     popup.start = System.currentTimeMillis();
                     popup.until = popup.start + RunePartyPlugin.COIN_POPUP_DURATION_MS;
                     plugin.extendTurnEffectGate(popup.until);
 
-                    outcome.payload = new OutcomePayload("purchased", rsn); // same event, same player
-                    outcome.until = System.currentTimeMillis() + RunePartyPlugin.GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
-                    plugin.extendTurnEffectGate(outcome.until);
+                    plugin.armBanner(outcome, RunePartyPlugin.GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS,
+                        () -> new OutcomePayload("purchased", rsn), true); // same event, same player
 
                     plugin.addChatMessage(rsn + " got a Golden Gnome!");
+                }
+                break;
+            }
+
+            case Events.GOLDEN_GNOME_LOST:
+            {
+                // Jad's smash penalty, taken instead of coins when the player holds one (see
+                // app.py's _run_jad_encounter) -- same "+1"/running-total popup shape as a purchase,
+                // just a -1 delta and no outcome banner of its own (JadOverlay/JadPresentation's own
+                // JAD_DISMISSED handling closes out the encounter; this is scoped to the popup and
+                // chat message only, matching Coin Trap's own restraint for its coin-loss branch).
+                if (!catchingUp)
+                {
+                    String rsn = Json.requiredStr(e.payload, type, "player");
+                    Integer total = Json.requiredInt(e.payload, type, "goldenGnomeCount");
+                    popup.payload = new PopupPayload(rsn, total != null ? total : 0, -1);
+                    popup.start = System.currentTimeMillis();
+                    popup.until = popup.start + RunePartyPlugin.COIN_POPUP_DURATION_MS;
+                    plugin.extendTurnEffectGate(popup.until);
+
+                    plugin.addChatMessage("Jad smashes " + rsn + "! They lost their Golden Gnome!");
                 }
                 break;
             }
@@ -188,6 +225,7 @@ final class GoldenGnomePresentation
     long getOutcomeBannerUntil() { return outcome.until; }
     String getPopupRsn() { return popup.payload != null ? popup.payload.rsn : null; }
     int getPopupNewTotal() { return popup.payload != null ? popup.payload.newTotal : 0; }
+    int getPopupDelta() { return popup.payload != null ? popup.payload.delta : 1; }
     long getPopupStart() { return popup.start; }
     long getPopupUntil() { return popup.until; }
     WorldPoint getMoveOldPoint() { return moveOldPoint; }
@@ -209,16 +247,22 @@ final class GoldenGnomePresentation
         }
     }
 
-    /** Payload for the Golden Gnome count "+1" popup -- see the GOLDEN_GNOME_PURCHASED handler above. */
+    /** Payload for the Golden Gnome count popup -- "+1" on a purchase (see the
+     * GOLDEN_GNOME_PURCHASED handler above) or "-1" on a Jad smash (see the GOLDEN_GNOME_LOST
+     * handler above); delta is always exactly +-1 in practice (a purchase/loss is always exactly
+     * one gnome), but carried as a real signed value rather than hardcoded so PlayerOverlay's
+     * rendering doesn't need to guess which case it's in. */
     private static final class PopupPayload
     {
         final String rsn;
         final int newTotal;
+        final int delta;
 
-        PopupPayload(String rsn, int newTotal)
+        PopupPayload(String rsn, int newTotal, int delta)
         {
             this.rsn = rsn;
             this.newTotal = newTotal;
+            this.delta = delta;
         }
     }
 }

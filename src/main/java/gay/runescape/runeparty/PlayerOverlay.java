@@ -179,14 +179,17 @@ public class PlayerOverlay extends Overlay
         RunePartyRender.drawShadowed(g, text, loc.getX(), loc.getY(), color, a);
     }
 
-    /** Floats "+1 Golden Gnome" above a player's head after a purchase, then swaps to their new
-     * running total ("N Golden Gnomes", or "1 Golden Gnome" singular) for the rest of the popup's
-     * life -- same shape and timing as drawCoinPopup (reuses RunePartyPlugin's
+    /** Floats "+1 Golden Gnome" above a player's head after a purchase (or "-1 Golden Gnome" after
+     * a Jad smash penalty -- see GoldenGnomePresentation's own GOLDEN_GNOME_LOST handling), then
+     * swaps to their new running total ("N Golden Gnomes", or "1 Golden Gnome" singular) for the
+     * rest of the popup's life -- same shape and timing as drawCoinPopup (reuses RunePartyPlugin's
      * COIN_POPUP_DELTA_PHASE_MS/FADE_MS directly rather than duplicating them, per how the feature
-     * was asked for: "similar to how the coins popup works"), just always the gain color since a
-     * purchase is never a loss here -- the coin cost has its own separate feedback (the outcome
-     * banner), not this popup. Sits higher above the head than the coin popup (see
-     * GOLDEN_GNOME_POPUP_CLEARANCE) so the two never overlap when both are showing at once. */
+     * was asked for: "similar to how the coins popup works"). Always the gain color regardless of
+     * sign -- unlike the coin popup, a loss here doesn't get its own separate feedback elsewhere
+     * (see the Jad smash chat message, not a whole outcome banner), so tinting it as a loss would
+     * make it the only signal of what happened rather than reinforcing one. Sits higher above the
+     * head than the coin popup (see GOLDEN_GNOME_POPUP_CLEARANCE) so the two never overlap when
+     * both are showing at once. */
     private void drawGoldenGnomePopup(Graphics2D g, Player p)
     {
         long now = System.currentTimeMillis();
@@ -196,7 +199,9 @@ public class PlayerOverlay extends Overlay
         long elapsed = now - plugin.getGoldenGnomePopupStart();
         boolean showTotal = elapsed >= RunePartyPlugin.COIN_POPUP_DELTA_PHASE_MS;
         int total = plugin.getGoldenGnomePopupNewTotal();
-        String text = showTotal ? (total + " Golden " + (total == 1 ? "Gnome" : "Gnomes")) : "+1 Golden Gnome";
+        int delta = plugin.getGoldenGnomePopupDelta();
+        String text = showTotal ? (total + " Golden " + (total == 1 ? "Gnome" : "Gnomes"))
+            : ((delta >= 0 ? "+" : "") + delta + " Golden " + (Math.abs(delta) == 1 ? "Gnome" : "Gnomes"));
 
         int rise = (int) Math.min(GOLDEN_GNOME_POPUP_MAX_RISE, elapsed / 50);
 

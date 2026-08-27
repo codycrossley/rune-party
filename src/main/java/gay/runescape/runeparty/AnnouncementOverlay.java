@@ -209,6 +209,21 @@ public class AnnouncementOverlay extends Overlay
     private static final long GOLDEN_GNOME_OUTCOME_FADE_MS = DEFAULT_FADE_MS;
     private static final float GOLDEN_GNOME_OUTCOME_SIZE = 32f;
 
+    // "Bow down to me!! Or else!!" -- bigger than GOLDEN_GNOME_OFFER_SUBTITLE_SIZE (its own font
+    // otherwise) since a taunt needs to read as a real threat, not a small aside.
+    private static final float JAD_TAUNT_SIZE = 26f;
+    // How long after JadPresentation#getAwakenedAt to hold the cosmetic countdown number back
+    // entirely -- gives the taunt line above a beat to actually be read before a number starts
+    // dropping underneath it, same reading-grace idea (and same 3000ms) TRUE_OR_FALSE_READING_
+    // DURATION_MS gives that mini-game's own countdown. Purely a client-side display delay, same
+    // as the countdown itself (see renderJadEncounter's own doc) -- doesn't touch the real,
+    // server-enforced bow window.
+    private static final long JAD_COUNTDOWN_DELAY_MS = 3000;
+    // Mario Party Hudson font, same treatment as MINIGAME_COUNTDOWN_SIZE/TRUE_OR_FALSE_COUNTDOWN_
+    // SIZE -- previously drawn in whatever plain font/size renderJadEncounter last set (the
+    // taunt's own), since no font was ever set for it specifically.
+    private static final float JAD_COUNTDOWN_SIZE = 40f;
+
     // See RunePartyFonts's own doc -- shared with CoinRushTimerOverlay, the only other consumer.
     private static final Font MARIO_PARTY_FONT = RunePartyFonts.MARIO_PARTY;
 
@@ -245,6 +260,8 @@ public class AnnouncementOverlay extends Overlay
         renderSpinHint(g);
         renderGoldenGnomeOffer(g);
         renderGoldenGnomeOutcome(g);
+        renderJadEncounter(g);
+        renderJadOutcome(g);
         renderItemSpinner(g);
         renderItemCapBlocked(g);
         renderItemUsedAnnouncement(g);
@@ -457,6 +474,98 @@ public class AnnouncementOverlay extends Overlay
         }
     }
 
+    /** Draws the Jad encounter -- "You have awakened Jad!" / "&lt;rsn&gt; has awakened Jad!" (same
+     * per-viewer addressing split as renderGoldenGnomeOffer), Jad's own "Bow down to me!! Or
+     * else!!" taunt (same for everyone), a countdown (purely cosmetic -- the server's own clock in
+     * app.py's _run_jad_encounter is what actually enforces the window), then either the real BOW
+     * emote instruction (see drawEmoteInstruction, reusing the exact same rainbow-letter treatment
+     * as Golden Gnome's own YES/NO) or a "waiting on them" line, depending on who's looking.
+     * Broadcast to everyone, not local-only, same reasoning renderGoldenGnomeOffer's own doc gives:
+     * a shared moment everyone's watching. Duration-less, pulses instead of fading for the same
+     * "needs to stay noticeable" reason.
+     * <p>
+     * Stops rendering entirely the instant the bow window closes (isJadSmashTriggered) -- bowing
+     * then would just 409, and at that same instant JadPresentation arms the outcome banner (see
+     * renderJadOutcome) with "&lt;rsn&gt; chose not to bow to Jad!", so this banner and that one
+     * would otherwise occupy the same screen real estate simultaneously for the ~JAD_SMASH_ANIMATION_
+     * SECONDS the stomp/penalty takes to actually land. Handing off cleanly here is also what makes
+     * the outcome banner show *before* the stomp animation and coin/Golden Gnome penalty, not after
+     * both are already done -- see JadPresentation's JAD_SMASH_TRIGGERED handling for where that
+     * ordering is actually decided.
+     * <p>
+     * Waits for plugin.getJadRevealAt() to pass before drawing anything at all -- without this, a
+     * Jad Tile landed on in the very same request as a Golden Gnome offer resolving (the roll's
+     * path can cross both) would awaken instantly, stomping directly over whatever the Golden Gnome
+     * outcome banner was still showing (see GoldenGnomePresentation's own plugin.armBanner calls).
+     * revealAt is a fixed timestamp JadPresentation computes once, right when JAD_AWAKENED lands
+     * (the later of "now" or the turn-effect gate at that instant) -- deliberately NOT a live
+     * re-check of the gate on every frame: an earlier version did exactly that, plus kept nudging
+     * the gate forward every frame it drew, which fed back on itself (this method's own extension
+     * made the very next frame's live gate-check see "something's still blocking me" and skip
+     * drawing -- and skip re-extending -- so it flashed on for one frame, off for several, forever).
+     * The countdown itself is deliberately NOT delayed by revealAt -- awakenedAt is stamped the
+     * instant JAD_AWAKENED actually lands (see JadPresentation), so if the wait for revealAt ate
+     * into the real 5-second window, the countdown correctly shows whatever's genuinely left once
+     * it finally appears, rather than restarting from 5 and quietly lying about how much time
+     * remains. */
+    private void renderJadEncounter(Graphics2D g)
+    {
+        String encounterRsn = plugin.getJadEncounterRsn();
+        if (encounterRsn == null) return;
+        if (plugin.isJadSmashTriggered()) return; // renderJadOutcome takes over -- see this method's own doc
+        if (System.currentTimeMillis() < plugin.getJadRevealAt()) return;
+
+        float alpha = GOLDEN_GNOME_OFFER_MIN_ALPHA + (1f - GOLDEN_GNOME_OFFER_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS);
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 3;
+
+        boolean isLocal = isLocal(encounterRsn);
+
+        String title = isLocal ? "You have awakened Jad!" : encounterRsn + " has awakened Jad!";
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_TITLE_SIZE));
+        drawCenteredText(g, title, centerX, y, Color.WHITE, alpha);
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(JAD_TAUNT_SIZE));
+        drawCenteredText(g, "Bow down to me!! Or else!!", centerX, y + 32, new Color(214, 9, 65), alpha);
+
+        // Cosmetic-only countdown -- 0 for a client that only caught up on an already-open
+        // encounter (see JadPresentation#getAwakenedAt's own doc), which just skips rendering it
+        // rather than guessing how much real time is left. Held back an extra JAD_COUNTDOWN_DELAY_MS
+        // past revealAt (not awakenedAt) -- revealAt is the moment the taunt line above actually
+        // starts drawing (see the guard at the top of this method), so this reads as "3 seconds
+        // after the taunt appears" even on the rarer path where revealAt lands after awakenedAt
+        // (queued behind another still-showing effect, e.g. a Golden Gnome outcome banner -- see
+        // this method's own doc). remainingMs still counts down off awakenedAt itself, the real
+        // anchor for the actual 5-second bow window, so the number shown once it does appear keeps
+        // being genuinely accurate rather than always restarting from a full 5.
+        long awakenedAt = plugin.getJadAwakenedAt();
+        if (awakenedAt != 0)
+        {
+            long countdownStartsAt = plugin.getJadRevealAt() + JAD_COUNTDOWN_DELAY_MS;
+            long now = System.currentTimeMillis();
+            if (now >= countdownStartsAt)
+            {
+                long remainingMs = RunePartyPlugin.JAD_BOW_WINDOW_MS - (now - awakenedAt);
+                int secondsLeft = (int) Math.max(0, Math.ceil(remainingMs / 1000.0));
+                g.setFont(MARIO_PARTY_FONT.deriveFont(JAD_COUNTDOWN_SIZE));
+                drawCenteredText(g, String.valueOf(secondsLeft), centerX, y + 68, Color.WHITE, alpha);
+            }
+        }
+
+        if (isLocal)
+        {
+            Font emoteFont = FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
+            Font emoteWordFont = MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
+            drawEmoteInstruction(g, "BOW", " emote: bow to Jad!", emoteFont, emoteWordFont, centerX, y + 96, alpha);
+        }
+        else
+        {
+            g.setFont(FontManager.getRunescapeSmallFont());
+            drawCenteredText(g, "Waiting for " + encounterRsn + " to bow...", centerX, y + 96, Color.LIGHT_GRAY, alpha);
+        }
+    }
+
     /** Draws one Golden Gnome emote instruction line -- {@code '<word>' emote: <suffix>} -- with
      * the quoted emote name in the Mario Party rainbow font and the rest in plain bold, all
      * centered as one line the same way renderGoldenGnomeOffer's own title stitches segments
@@ -531,15 +640,17 @@ public class AnnouncementOverlay extends Overlay
         }
     }
 
-    /** Draws the Golden Gnome offer's follow-up -- "You got a Golden Gnome!" on a purchase, or
-     * "You can't afford this!" if they accepted without enough coins (a decline gets no banner at
-     * all, see RunePartyPlugin's GOLDEN_GNOME_OFFER_RESOLVED handling) -- fires immediately rather
-     * than waiting on scheduleAfterTurnEffects, same as the coin/dice popups; it's the *next* turn's
-     * own announcement that waits for this one via extendTurnEffectGate instead. Addressed to
-     * whoever the outcome actually belongs to (goldenGnomeOutcomeRsn) the same way
-     * renderTurnAnnouncement/renderGoldenGnomeOffer already are -- "You..." for that player, "
-     * &lt;rsn&gt;..." for everyone else watching, rather than every client showing "You..." for an
-     * outcome that may well belong to someone else. */
+    /** Draws the Golden Gnome offer's follow-up -- "You got a Golden Gnome!" on a purchase, "You
+     * can't afford this!" if they accepted without enough coins, or "You declined!" if they
+     * declined outright (see GoldenGnomePresentation's GOLDEN_GNOME_OFFER_RESOLVED/
+     * GOLDEN_GNOME_PURCHASED handling, both of which arm this via plugin.armBanner rather than
+     * setting it directly -- so this banner queues politely behind whatever earlier effect, e.g. a
+     * Coin Trap animation or another Golden Gnome outcome, was already playing instead of stomping
+     * over it; it's *also* the reason a Jad encounter's own reveal (renderJadEncounter) waits its
+     * turn before showing). Addressed to whoever the outcome actually belongs to
+     * (goldenGnomeOutcomeRsn) the same way renderTurnAnnouncement/renderGoldenGnomeOffer already
+     * are -- "You..." for that player, "&lt;rsn&gt;..." for everyone else watching, rather than
+     * every client showing "You..." for an outcome that may well belong to someone else. */
     private void renderGoldenGnomeOutcome(Graphics2D g)
     {
         Float alpha = BannerAnim.fadeAlpha(plugin.getGoldenGnomeOutcomeBannerUntil(), GOLDEN_GNOME_OUTCOME_FADE_MS);
@@ -558,6 +669,10 @@ public class AnnouncementOverlay extends Overlay
         {
             text = isLocal ? "You can't afford this!" : rsn != null ? rsn + " can't afford this!" : null;
         }
+        else if ("declined".equals(outcome))
+        {
+            text = isLocal ? "You declined!" : rsn != null ? rsn + " declined!" : null;
+        }
         else
         {
             text = null;
@@ -568,6 +683,41 @@ public class AnnouncementOverlay extends Overlay
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OUTCOME_SIZE));
         drawCenteredText(g, text, client.getCanvasWidth() / 2, client.getCanvasHeight() / 3, color, alpha);
+    }
+
+    /** Draws the Jad encounter's own follow-up -- "You chose to bow to Jad!" or "You chose not to
+     * bow to Jad!" -- once JAD_DISMISSED settles things either way (see JadPresentation's
+     * outcome TimedBanner, armed via plugin.armBanner the identical way renderGoldenGnomeOutcome's
+     * own banner is, so this queues behind whatever's still showing rather than colliding with it).
+     * Neither outcome is framed as clearly good or bad the way Golden Gnome's purchase is (no gold
+     * text here), since "not bowing" already has its own separate penalty messaging (chat + the
+     * coin/Golden Gnome popup) -- this banner is just stating what happened, not judging it. */
+    private void renderJadOutcome(Graphics2D g)
+    {
+        Float alpha = BannerAnim.fadeAlpha(plugin.getJadOutcomeBannerUntil(), GOLDEN_GNOME_OUTCOME_FADE_MS);
+        if (alpha == null) return;
+
+        String outcome = plugin.getJadOutcome();
+        String rsn = plugin.getJadOutcomeRsn();
+        boolean isLocal = isLocal(rsn);
+
+        String text;
+        if ("bowed".equals(outcome))
+        {
+            text = isLocal ? "You chose to bow to Jad!" : rsn != null ? rsn + " chose to bow to Jad!" : null;
+        }
+        else if ("smashed".equals(outcome))
+        {
+            text = isLocal ? "You chose not to bow to Jad!" : rsn != null ? rsn + " chose not to bow to Jad!" : null;
+        }
+        else
+        {
+            text = null;
+        }
+        if (text == null) return;
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OUTCOME_SIZE));
+        drawCenteredText(g, text, client.getCanvasWidth() / 2, client.getCanvasHeight() / 3, Color.WHITE, alpha);
     }
 
     /** Draws the "MINIGAME!" banner on a MINIGAME_STARTED event -- server-driven, so every client

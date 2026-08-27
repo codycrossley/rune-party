@@ -245,6 +245,45 @@ public class RunePartyPlugin extends Plugin
      * count popup, and the underlying tile's own coin popup to all finish settling. */
     public static final long GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS = 2600;
 
+    /** How long AnnouncementOverlay's Jad encounter countdown counts down from -- purely cosmetic,
+     * loosely paired with the server's own JAD_BOW_WINDOW_SECONDS (app.py) the same "close enough,
+     * not protocol-coupled" way every other client/server cosmetic-vs-real timing pair in this
+     * codebase already is (see ARCHITECTURE_REVIEW.md's X2(b)) -- the server's own clock is what
+     * actually enforces the window, this is just what the countdown number displays. */
+    public static final long JAD_BOW_WINDOW_MS = 5000;
+
+    // "lordmagmus_smash" -- played once on the Jad model when JAD_SMASH_TRIGGERED lands (see
+    // JadOverlay#playSmash), same one-shot idiom TileOverlay's own COIN_TRAP_SPRING_ANIMATION_ID
+    // already uses. JAD_SMASH_ANIMATION_HOLD_MS is a first estimate of how long it plays for (not
+    // measured, same caveat JAD_SMASH_ANIMATION_SECONDS's own doc carries), after which Jad
+    // returns to JAD_IDLE_ANIMATION_ID for whatever's left of the real encounter window before
+    // JAD_DISMISSED despawns it.
+    public static final int JAD_SMASH_ANIMATION_ID = 2652;
+    public static final long JAD_SMASH_ANIMATION_HOLD_MS = 1800;
+
+    // Looped for as long as Jad's standing there waiting on a response (from the moment the model
+    // reveals until playSmash() takes over, see JadOverlay's own render()) -- an idle/taunt stance
+    // rather than the smash's own one-shot animation.
+    public static final int JAD_IDLE_ANIMATION_ID = 2650;
+
+    // Played once on the Jad model the instant the "You chose to bow to Jad!" outcome banner arms
+    // (see JadPresentation's JAD_DISMISSED "bowed" branch and JadOverlay#playBowThenClear) -- a
+    // one-shot reaction to being bowed to, same idiom as JAD_SMASH_ANIMATION_ID but for the
+    // opposite outcome. Purely client-side timing throughout (no server timer backs any of this,
+    // unlike the smash/penalty sequence -- bowing already closed the encounter server-side the
+    // instant it landed): JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS is a first estimate of how long
+    // 2655 itself plays for (not measured, same caveat JAD_SMASH_ANIMATION_SECONDS's own doc
+    // carries), after which Jad returns to JAD_IDLE_ANIMATION_ID for
+    // JAD_BOW_ACKNOWLEDGE_IDLE_HOLD_MS before actually despawning.
+    public static final int JAD_BOW_ACKNOWLEDGE_ANIMATION_ID = 2655;
+    public static final long JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS = 1000;
+    public static final long JAD_BOW_ACKNOWLEDGE_IDLE_HOLD_MS = 3000;
+
+    /** How long AnnouncementOverlay's Jad outcome banner ("You chose to/not to bow to Jad!") stays
+     * up -- fires on JAD_DISMISSED, same duration/queuing shape as
+     * GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS (see JadPresentation's own armBanner call). */
+    public static final long JAD_OUTCOME_BANNER_DURATION_MS = GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
+
     /** How long AnnouncementOverlay's "GAME OVER!" title card stays up -- the first step of the
      * end-game ceremony (see triggerGameOverSequence), gated behind scheduleAfterTurnEffects so it
      * waits out whatever round-complete/rewards recap the final MINIGAME_ENDED just queued --
@@ -381,6 +420,7 @@ public class RunePartyPlugin extends Plugin
     private PlayerOverlay playerOverlay;
     private AnnouncementOverlay announcementOverlay;
     private ConfettiOverlay confettiOverlay;
+    private JadOverlay jadOverlay;
     private RosterReducer rosterReducer;
     ApiClient apiClient; // package-private: presenters (MinigamePresentation) issue their own requests
     private EventSocket eventSocket;
@@ -393,6 +433,7 @@ public class RunePartyPlugin extends Plugin
     private CeremonyPresentation ceremonyPresentation;
     private ItemPresentation itemPresentation;
     private MinigamePresentation minigamePresentation;
+    private JadPresentation jadPresentation;
     private RunePartyPanel panel;
     private NavigationButton navButton;
     private RunePartyMapDialog mapDialog; // lazily created on the first "Show Map" click, see showMap()
@@ -622,6 +663,7 @@ public class RunePartyPlugin extends Plugin
         ceremonyPresentation = new CeremonyPresentation(this);
         itemPresentation = new ItemPresentation(this);
         minigamePresentation = new MinigamePresentation(this);
+        jadPresentation = new JadPresentation(this);
 
         tileOverlay = new TileOverlay(client, config, this, tileReducer);
         overlayManager.add(tileOverlay);
@@ -640,6 +682,9 @@ public class RunePartyPlugin extends Plugin
 
         confettiOverlay = new ConfettiOverlay(client, this);
         overlayManager.add(confettiOverlay);
+
+        jadOverlay = new JadOverlay(client, clientThread, this);
+        overlayManager.add(jadOverlay);
 
         panel = new RunePartyPanel(this);
         navButton = NavigationButton.builder()
@@ -671,6 +716,7 @@ public class RunePartyPlugin extends Plugin
         if (playerOverlay != null) overlayManager.remove(playerOverlay);
         if (announcementOverlay != null) overlayManager.remove(announcementOverlay);
         if (confettiOverlay != null) overlayManager.remove(confettiOverlay);
+        if (jadOverlay != null) { jadOverlay.clear(); overlayManager.remove(jadOverlay); }
         if (navButton != null) clientToolbar.removeNavigation(navButton);
         if (mapDialog != null) { mapDialog.dispose(); mapDialog = null; }
         resetState();
@@ -995,6 +1041,24 @@ public class RunePartyPlugin extends Plugin
 
         submitAction("Respond to Golden Gnome offer", () -> apiClient.respondGoldenGnomeOffer(gid, self, token, accept),
             e -> addChatMessage("Failed to respond to the Golden Gnome offer: " + e.getMessage()));
+    }
+
+    /** Reports the local player's BOW emote during a pending Jad encounter -- called from
+     * onAnimationChanged once the emote finishes, same finish-gated pattern as
+     * respondGoldenGnomeOffer. The server resolves the outcome and reports it back via
+     * JAD_DISMISSED -- this call itself is fire-and-forget, same as every other player-action
+     * method here. A 409 here (the bow window already closed, see JadPresentation#isSmashTriggered)
+     * just means this lost the race against the server's own timeout -- the smash/penalty plays out
+     * regardless. */
+    private void bowToJad()
+    {
+        String self = localRsn();
+        final String gid = gameId;
+        final String token = playerToken;
+        if (self == null || gid == null || token == null) return;
+
+        submitAction("Bow to Jad", () -> apiClient.bowToJad(gid, self, token),
+            e -> addChatMessage("Failed to bow to Jad: " + e.getMessage()));
     }
 
     /** Reports the local player's YES emote during the mini-game ready-check -- see
@@ -1439,6 +1503,13 @@ public class RunePartyPlugin extends Plugin
             return;
         }
 
+        if (anim == AnimationID.EMOTE_BOW)
+        {
+            if (!isLocalPlayerAwaitingJadBow()) return;
+            jadPresentation.armAwaitingBowFinish();
+            return;
+        }
+
         if (anim == AnimationID.EMOTE_YES)
         {
             if (isLocalPlayerAwaitingGoldenGnomeResponse())
@@ -1473,6 +1544,11 @@ public class RunePartyPlugin extends Plugin
         {
             awaitingSpinFinish = false;
             rollDice();
+        }
+        else if (jadPresentation.isAwaitingBowFinish())
+        {
+            jadPresentation.clearAwaitingBowFinish();
+            bowToJad();
         }
         else if (goldenGnomePresentation.isAwaitingYesFinish())
         {
@@ -1561,6 +1637,20 @@ public class RunePartyPlugin extends Plugin
         if (phase != GamePhase.ACTIVE || offerRsn == null) return false;
         String self = localRsn();
         return self != null && self.equalsIgnoreCase(offerRsn);
+    }
+
+    /** Whether the local player has a Jad encounter awaiting their own BOW response -- mirrors
+     * isLocalPlayerAwaitingGoldenGnomeResponse's role for that offer's YES/NO emotes. False once
+     * the bow window has already closed server-side (see JadPresentation#isSmashTriggered) --
+     * bowing at that point would just 409, same as the server's own guard in jad_bow. See
+     * onAnimationChanged (gates the real response) and AnnouncementOverlay#renderJadEncounter
+     * (gates the BOW instruction on the exact same thing). */
+    public boolean isLocalPlayerAwaitingJadBow()
+    {
+        String encounterRsn = jadPresentation.getEncounterRsn();
+        if (phase != GamePhase.ACTIVE || encounterRsn == null || jadPresentation.isSmashTriggered()) return false;
+        String self = localRsn();
+        return self != null && self.equalsIgnoreCase(encounterRsn);
     }
 
     /** Whether the local player still needs to YES-emote ready for the current mini-game --
@@ -1727,6 +1817,15 @@ public class RunePartyPlugin extends Plugin
     void extendTurnEffectGate(long untilTimestamp)
     {
         turnEffectGateUntil = Math.max(turnEffectGateUntil, untilTimestamp);
+    }
+
+    /** Read by AnnouncementOverlay#renderJadEncounter, which -- unlike every other banner here --
+     * doesn't fit the fixed-duration TimedBanner/armBanner shape (it needs to keep rendering for as
+     * long as a Jad encounter's genuinely pending, not one preset window), so it checks this
+     * directly every frame instead of going through scheduleAfterTurnEffects. */
+    long getTurnEffectGateUntil()
+    {
+        return turnEffectGateUntil;
     }
 
     /** Appends a new CoinPopup to {@code rsn}'s own queue (see coinPopups's own doc for why this
@@ -1964,6 +2063,11 @@ public class RunePartyPlugin extends Plugin
                 // turn other than the one it was armed on, regardless of how this turn actually
                 // ended.
                 itemPlacementKey = null;
+                // A Jad spawned by the previous player's landing shouldn't linger into the next
+                // turn -- see JadOverlay's own doc on its spawn/requestClear lifecycle (a request,
+                // not an immediate despawn -- a solo game reaches this in the very same request the
+                // landing itself resolved in, otherwise).
+                jadOverlay.requestClear();
                 if (!catchingUp)
                 {
                     scheduleTurnAnnouncement(currentTurnRsn);
@@ -2014,8 +2118,53 @@ public class RunePartyPlugin extends Plugin
             case Events.GOLDEN_GNOME_OFFERED:
             case Events.GOLDEN_GNOME_OFFER_RESOLVED:
             case Events.GOLDEN_GNOME_PURCHASED:
+            case Events.GOLDEN_GNOME_LOST:
             {
                 goldenGnomePresentation.apply(e, catchingUp);
+                break;
+            }
+
+            case Events.JAD_AWAKENED:
+            {
+                jadPresentation.apply(e, catchingUp);
+                break;
+            }
+
+            case Events.JAD_SMASH_TRIGGERED:
+            {
+                jadPresentation.apply(e, catchingUp);
+                // Cosmetic-only trigger for the actual animation playback -- a catching-up client
+                // has already missed the moment this would have looked right, same gate every
+                // other "reveal a moment that's either happening live or already resolved" cosmetic
+                // in this file uses.
+                if (!catchingUp)
+                {
+                    jadOverlay.playSmash();
+                }
+                break;
+            }
+
+            case Events.JAD_DISMISSED:
+            {
+                jadPresentation.apply(e, catchingUp);
+                // "bowed" gets its own one-shot reaction (JAD_BOW_ACKNOWLEDGE_ANIMATION_ID, then
+                // back to JAD_IDLE_ANIMATION_ID -- see JadOverlay#playBowThenClear) timed off the
+                // same moment the "You chose to bow to Jad!" outcome banner arms (jadPresentation's
+                // own JAD_DISMISSED handling, called just above). Every other case (smashed, or a
+                // catching-up client with nothing to animate) despawns immediately, not
+                // requestClear() -- by the time this fires on the smashed path, the whole encounter
+                // (including the smash animation) has already played out on its own server-timed
+                // schedule, so there's no "vanishes before it's drawn" risk left to guard against
+                // (see JadOverlay's own class doc). A no-op if nothing's spawned, e.g. a catching-up
+                // client that never saw the TILE_EFFECT-driven spawn in the first place.
+                if (!catchingUp && "bowed".equals(Json.safeStr(e.payload, "outcome")))
+                {
+                    jadOverlay.playBowThenClear();
+                }
+                else
+                {
+                    jadOverlay.clear();
+                }
                 break;
             }
 
@@ -2045,13 +2194,29 @@ public class RunePartyPlugin extends Plugin
 
             case Events.TILE_EFFECT:
             {
-                // PATH/PENALTY_TILE/ITEM_TILE are the tile types with a real effect so far (see
-                // the COINS_CHANGED/ITEM_GRANTED cases below, which actually pay/grant it) --
-                // START/EVENT_TILE are still no-ops, but this event fires for every type so this
-                // chat line is always accurate regardless.
+                // PATH/PENALTY_TILE/ITEM_TILE are the tile types with a real (coins/item) effect so
+                // far (see the COINS_CHANGED/ITEM_GRANTED cases below, which actually pay/grant it)
+                // -- START/EVENT_TILE are still no-ops, but this event fires for every type so this
+                // chat line is always accurate regardless. JAD_TILE has no coins/item effect of its
+                // own either (see tiles/jad_tile.py's own on_land), but does trigger a purely
+                // client-side cosmetic reaction below -- spawning Jad's own model.
+                String tileEffectPlayer = Json.requiredStr(e.payload, type, "player");
+                String tileEffectType = Json.requiredStr(e.payload, type, "tileType");
                 if (!catchingUp)
                 {
-                    addChatMessage(Json.requiredStr(e.payload, type, "player") + " landed on a " + Json.requiredStr(e.payload, type, "tileType") + " tile.");
+                    addChatMessage(tileEffectPlayer + " landed on a " + tileEffectType + " tile.");
+                }
+                // Gated on !catchingUp same as every other "reveal a moment that either just
+                // happened live or already resolved" cosmetic elsewhere in this file (gameStartBanner,
+                // ceremonyPresentation's triggers, minigameSpinner, ...) -- a reconnecting client
+                // simply doesn't see a replay of a Jad appearance that's already come and gone.
+                if ("JAD_TILE".equals(tileEffectType) && !catchingUp && tileEffectPlayer != null)
+                {
+                    TileReducer.TileEntry landed = tileReducer.tileAtIndex(getPlayerPosition(tileEffectPlayer));
+                    if (landed != null)
+                    {
+                        jadOverlay.spawn(landed.point.dy(3), landed.point);
+                    }
                 }
                 break;
             }
@@ -2086,7 +2251,7 @@ public class RunePartyPlugin extends Plugin
                 String coinsChangedReason = Json.requiredStr(e.payload, type, "reason");
                 if (!catchingUp && ("standard_tile".equals(coinsChangedReason) || "item".equals(coinsChangedReason)
                     || "coin_trap".equals(coinsChangedReason) || "coin_rush".equals(coinsChangedReason)
-                    || "true_or_false".equals(coinsChangedReason)))
+                    || "true_or_false".equals(coinsChangedReason) || "jad_smash".equals(coinsChangedReason)))
                 {
                     String coinsChangedRsn = Json.requiredStr(e.payload, type, "player");
                     Integer delta = Json.requiredInt(e.payload, type, "delta");
@@ -2096,6 +2261,14 @@ public class RunePartyPlugin extends Plugin
                     {
                         enqueueCoinPopup(coinsChangedRsn, delta != null ? delta : 0, total != null ? total : 0,
                             COIN_POPUP_DURATION_MS, false);
+                        // Jad has no Golden Gnome to take here (see JadPresentation's own
+                        // GOLDEN_GNOME_LOST handling for that branch's own chat message) -- this is
+                        // the only feedback the coin-loss branch gets, matching Coin Trap's own
+                        // restraint (popup + chat, no dedicated banner).
+                        if ("jad_smash".equals(coinsChangedReason))
+                        {
+                            addChatMessage("Jad smashes " + coinsChangedRsn + "! They lost " + Math.abs(delta != null ? delta : 0) + " coins!");
+                        }
                     }
                 }
                 break;
@@ -2111,6 +2284,13 @@ public class RunePartyPlugin extends Plugin
             case Events.TRUE_OR_FALSE_ANSWERED:
             case Events.TRUE_OR_FALSE_ROUND_ENDED:
             {
+                // MINIGAME_STARTED fires instead of TURN_STARTED for the last roller of a round
+                // (see _advance_turn_or_start_minigame) -- without this, a Jad spawned by that
+                // final landing would never get the TURN_STARTED-driven requestClear() and would
+                // still be standing there once the mini-game itself starts. JadOverlay is
+                // plugin-level presentation state, not minigame-round state, so this is handled
+                // directly here rather than threaded through MinigamePresentation.
+                if (Events.MINIGAME_STARTED.equals(type)) jadOverlay.requestClear();
                 minigamePresentation.apply(e, catchingUp);
                 break;
             }
@@ -2209,6 +2389,7 @@ public class RunePartyPlugin extends Plugin
         gameStartBanner.reset();
         ceremonyPresentation.reset();
         goldenGnomePresentation.reset();
+        jadPresentation.reset();
         coinPopups.clear();
         diceRollRsn = null; diceRollValue = 0; diceRollBonus = 0; diceRollStart = 0; diceRollUntil = 0;
         if (rosterReducer != null) rosterReducer.reset();
@@ -2376,10 +2557,19 @@ public class RunePartyPlugin extends Plugin
     public long getGoldenGnomeOutcomeBannerUntil() { return goldenGnomePresentation.getOutcomeBannerUntil(); }
     public String getGoldenGnomePopupRsn() { return goldenGnomePresentation.getPopupRsn(); }
     public int getGoldenGnomePopupNewTotal() { return goldenGnomePresentation.getPopupNewTotal(); }
+    public int getGoldenGnomePopupDelta() { return goldenGnomePresentation.getPopupDelta(); }
     public long getGoldenGnomePopupStart() { return goldenGnomePresentation.getPopupStart(); }
     public long getGoldenGnomePopupUntil() { return goldenGnomePresentation.getPopupUntil(); }
     public WorldPoint getGoldenGnomeMoveOldPoint() { return goldenGnomePresentation.getMoveOldPoint(); }
     public long getGoldenGnomeMoveHideOldAt() { return goldenGnomePresentation.getMoveHideOldAt(); }
     public WorldPoint getGoldenGnomeMoveNewPoint() { return goldenGnomePresentation.getMoveNewPoint(); }
     public long getGoldenGnomeMoveShowNewAt() { return goldenGnomePresentation.getMoveShowNewAt(); }
+
+    public String getJadEncounterRsn() { return jadPresentation.getEncounterRsn(); }
+    public long getJadAwakenedAt() { return jadPresentation.getAwakenedAt(); }
+    public long getJadRevealAt() { return jadPresentation.getRevealAt(); }
+    public boolean isJadSmashTriggered() { return jadPresentation.isSmashTriggered(); }
+    public String getJadOutcome() { return jadPresentation.getOutcome(); }
+    public String getJadOutcomeRsn() { return jadPresentation.getOutcomeRsn(); }
+    public long getJadOutcomeBannerUntil() { return jadPresentation.getOutcomeBannerUntil(); }
 }

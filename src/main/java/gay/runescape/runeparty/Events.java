@@ -26,6 +26,7 @@ public final class Events
     public static final String DICE_ROLLED = "DICE_ROLLED";
     public static final String GAME_ENDED = "GAME_ENDED";
     public static final String GAME_STARTED = "GAME_STARTED";
+    public static final String GOLDEN_GNOME_LOST = "GOLDEN_GNOME_LOST";
     public static final String GOLDEN_GNOME_MOVED = "GOLDEN_GNOME_MOVED";
     public static final String GOLDEN_GNOME_OFFERED = "GOLDEN_GNOME_OFFERED";
     public static final String GOLDEN_GNOME_OFFER_RESOLVED = "GOLDEN_GNOME_OFFER_RESOLVED";
@@ -33,6 +34,9 @@ public final class Events
     public static final String ITEM_CAP_BLOCKED = "ITEM_CAP_BLOCKED";
     public static final String ITEM_GRANTED = "ITEM_GRANTED";
     public static final String ITEM_USED = "ITEM_USED";
+    public static final String JAD_AWAKENED = "JAD_AWAKENED";
+    public static final String JAD_DISMISSED = "JAD_DISMISSED";
+    public static final String JAD_SMASH_TRIGGERED = "JAD_SMASH_TRIGGERED";
     public static final String MINIGAME_COUNTDOWN_STARTED = "MINIGAME_COUNTDOWN_STARTED";
     public static final String MINIGAME_ENDED = "MINIGAME_ENDED";
     public static final String MINIGAME_PLAYER_READY = "MINIGAME_PLAYER_READY";

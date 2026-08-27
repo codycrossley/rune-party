@@ -13,8 +13,8 @@ import java.util.concurrent.TimeUnit;
 
 public class ApiClient
 {
-    // static final String BASE_URL = "http://localhost:8000/runeparty";
-    static final String BASE_URL = "https://runeparty.shrunk.studio/runeparty";
+    static final String BASE_URL = "http://localhost:8000/runeparty";
+    // static final String BASE_URL = "https://runeparty.shrunk.studio/runeparty";
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
@@ -206,6 +206,21 @@ public class ApiClient
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Respond to Golden Gnome offer failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** Reports the local player's BOW emote during a pending Jad encounter -- same
+     * report-then-server-decides shape as respondGoldenGnomeOffer. 409s if the encounter isn't
+     * pending for this player, or if it already smashed (the bow window expired first). */
+    public void bowToJad(String gameId, String playerRsn, String playerToken) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/jad-bow", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Bow to Jad failed (" + resp.code() + "): " + raw);
         }
     }
 

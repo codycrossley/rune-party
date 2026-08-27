@@ -55,13 +55,21 @@ public class TrueOrFalseMinigame implements Minigame
         g.setFont(font);
         FontMetrics fm = g.getFontMetrics();
 
+        int glyphY = y + fm.getAscent() / 2 - 2;
+
         String t = "T";
+        int tX = x - half + size / 6;
+        g.setColor(new Color(0, 0, 0, a));
+        g.drawString(t, tX + 1, glyphY + 1);
         g.setColor(new Color(TRUE_COLOR.getRed(), TRUE_COLOR.getGreen(), TRUE_COLOR.getBlue(), a));
-        g.drawString(t, x - half + size / 6, y + fm.getAscent() / 2 - 2);
+        g.drawString(t, tX, glyphY);
 
         String f = "F";
+        int fX = x + half - size / 6 - fm.stringWidth(f);
+        g.setColor(new Color(0, 0, 0, a));
+        g.drawString(f, fX + 1, glyphY + 1);
         g.setColor(new Color(FALSE_COLOR.getRed(), FALSE_COLOR.getGreen(), FALSE_COLOR.getBlue(), a));
-        g.drawString(f, x + half - size / 6 - fm.stringWidth(f), y + fm.getAscent() / 2 - 2);
+        g.drawString(f, fX, glyphY);
     }
 
     /** Entirely screen-driven -- the question, countdown, and "who's answered" tally all render
