@@ -2337,8 +2337,9 @@ public class RunePartyPlugin extends Plugin
 
             case Events.COINS_CHANGED:
             {
-                // The standard-tile reward, an item's own coin effect, and a Coin Trap steal all
-                // get the popup treatment -- a Golden Gnome purchase or a mini-game's own
+                // The standard-tile reward, the Start tile's own reward, an item's own coin
+                // effect, and a Coin Trap steal all get the popup treatment -- a Golden Gnome
+                // purchase or a mini-game's own
                 // end-of-round payout already has its own feedback (the roster/stats panels
                 // update, and submitMinigameResult's caller sees the MINIGAME_ENDED chat line), so
                 // this stays scoped to the cases that otherwise had no visible feedback at all.
@@ -2359,10 +2360,11 @@ public class RunePartyPlugin extends Plugin
                 // gets the same treatment as any other unattended coin change, so a dev-forced
                 // adjustment shows the same live confirmation a real one would.
                 String coinsChangedReason = Json.requiredStr(e.payload, type, "reason");
-                if (!catchingUp && ("standard_tile".equals(coinsChangedReason) || "item".equals(coinsChangedReason)
-                    || "coin_trap".equals(coinsChangedReason) || "coin_rush".equals(coinsChangedReason)
-                    || "true_or_false".equals(coinsChangedReason) || "jad_smash".equals(coinsChangedReason)
-                    || "jad_bow".equals(coinsChangedReason) || "dev_adjust".equals(coinsChangedReason)))
+                if (!catchingUp && ("standard_tile".equals(coinsChangedReason) || "start_tile".equals(coinsChangedReason)
+                    || "item".equals(coinsChangedReason) || "coin_trap".equals(coinsChangedReason)
+                    || "coin_rush".equals(coinsChangedReason) || "true_or_false".equals(coinsChangedReason)
+                    || "jad_smash".equals(coinsChangedReason) || "jad_bow".equals(coinsChangedReason)
+                    || "dev_adjust".equals(coinsChangedReason)))
                 {
                     String coinsChangedRsn = Json.requiredStr(e.payload, type, "player");
                     Integer delta = Json.requiredInt(e.payload, type, "delta");
