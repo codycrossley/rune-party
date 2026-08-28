@@ -1,13 +1,11 @@
 package gay.runescape.runeparty;
 
-import net.runelite.api.Animation;
+import gay.runescape.runeparty.models.CoinRushModel;
+import gay.runescape.runeparty.models.CoinTrapModel;
+import gay.runescape.runeparty.models.GoldenGnomeModel;
 import net.runelite.api.Client;
-import net.runelite.api.JagexColor;
-import net.runelite.api.Model;
-import net.runelite.api.ModelData;
 import net.runelite.api.Perspective;
 import net.runelite.api.Player;
-import net.runelite.api.RuneLiteObject;
 import net.runelite.api.Tile;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
@@ -18,11 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.awt.*;
 import java.awt.geom.Path2D;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.function.Function;
 
 /** Renders the course: committed tiles from TileReducer, plus a live placement/removal preview
  * while the host is building. Unlike Gnomeball's TileOverlay -- whose FIELD/ZONE tiles are large
@@ -51,65 +45,20 @@ public class TileOverlay extends Overlay
     private static final Stroke PREVIEW_STROKE = new BasicStroke(3.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 10f, new float[]{7f, 5f}, 0f);
     private static final Stroke ROUTE_STROKE   = new BasicStroke(2f);
 
-    // A committed Golden Gnome tile renders as this model, spawned as a RuneLiteObject in the
-    // scene, instead of a color fill -- see updateGoldenGnomeModels.
-    private static final int GOLDEN_GNOME_MODEL_ID = 32303;
-
-    // A committed Coin Trap tile renders the same way, as object 8972's own model ("Net trap") --
-    // see updateCoinTrapModels -- but fully recolored gold rather than left in its own natural
-    // rope/wood palette, per how the item was asked for ("color the model to be the yellow coin
-    // color"); see buildCoinTrapGoldModel for how that recolored model actually gets built.
-    private static final int COIN_TRAP_MODEL_ID = 19934;
-    // "Gold" web color -- a plain, unambiguous coin-yellow reference rather than sampling any
-    // specific in-game sprite. JagexColor#rgbToHSL's own brightnessFactor parameter (1.0 = no
-    // adjustment) converts it into the packed-HSL space every model color is actually stored in.
-    private static final int COIN_TRAP_GOLD_RGB = 0xFFD700;
-    // Object 8972's own animationID -- played once (not looped) the moment a trap actually
-    // triggers (see updateCoinTrapModels/RunePartyPlugin's COIN_TRAP_TRIGGERED handling), not while
-    // it's just sitting armed.
-    private static final int COIN_TRAP_SPRING_ANIMATION_ID = 5268;
     private static final Color COLOR_PLACEMENT_ARROW = new Color(255, 140, 0);
-
-    // A live Coin Rush spawn renders as object 29165's own model ("Mounted Coins") -- left in its
-    // own natural gold palette, unlike the Coin Trap's recolor, since this object is already gold
-    // by design. See updateCoinRushModels.
-    private static final int COIN_RUSH_MODEL_ID = 32153;
 
     private final Client client;
     private final RunePartyConfig config;
     private final RunePartyPlugin plugin;
     private final TileReducer tileReducer;
 
-    // One RuneLiteObject per currently-marked Golden Gnome tile, keyed by its WorldPoint -- see
-    // updateGoldenGnomeModels/clearGoldenGnomeModels, the only things that touch this. The actual
-    // spawn/diff/despawn algorithm lives in SceneObjectSet (see ARCHITECTURE_REVIEW.md's C5) --
-    // this and coinTrapModels/coinRushModels below are just three differently-keyed instances of it.
-    private final SceneObjectSet<WorldPoint> goldenGnomeModels;
-
-    // Same shape as goldenGnomeModels, for Coin Trap tiles -- see updateCoinTrapModels/
-    // clearCoinTrapModels.
-    private final SceneObjectSet<WorldPoint> coinTrapModels;
-    // The one point (if any) currently mid-trigger-animation, so updateCoinTrapModels only calls
-    // setAnimation once per trigger rather than re-arming it every single frame the force-persist
-    // window (RunePartyPlugin#getCoinTrapTriggerUntil) stays open -- see that method's own doc.
-    private WorldPoint coinTrapAnimatedTriggerPoint = null;
-
-    // Built once, lazily, the first time COIN_TRAP_MODEL_ID's raw ModelData successfully loads --
-    // see buildCoinTrapGoldModel, the only writer. Every currently-spawned Coin Trap RuneLiteObject
-    // shares this exact same recolored Model instance (same "build once, every instance points at
-    // the shared result" relationship updateGoldenGnomeModels doesn't need since it uses the
-    // object's own natural palette). Null until the load succeeds (and forever, if it never does),
-    // in which case updateCoinTrapModels falls back to the model's own natural palette rather than
-    // never spawning anything at all.
-    private Model coinTrapGoldModel;
-    private boolean coinTrapGoldModelLoadFailed;
-
-    // One RuneLiteObject per currently-live Coin Rush spawn, keyed by the server's own spawn id
-    // (RunePartyPlugin#getCoinRushSpawns) rather than by WorldPoint -- unlike a Golden Gnome/Coin
-    // Trap tile, two Coin Rush spawns are never guaranteed distinct points by construction from this
-    // overlay's own perspective (nothing here enforces it), so the id is the only stable key. See
-    // updateCoinRushModels/clearCoinRushModels.
-    private final SceneObjectSet<Integer> coinRushModels;
+    // The three tile-decoration 3D models -- Golden Gnome, Coin Trap, Coin Rush -- each own their
+    // own SceneObjectSet-backed diff/spawn (see ARCHITECTURE_REVIEW.md's C5) under models/, split
+    // out of this class since more of these are planned; this overlay just owns one instance of
+    // each and calls update()/clear() at the right moments below.
+    private final GoldenGnomeModel goldenGnomeModel;
+    private final CoinTrapModel coinTrapModel;
+    private final CoinRushModel coinRushModel;
 
     public TileOverlay(Client client, RunePartyConfig config, RunePartyPlugin plugin, TileReducer tileReducer)
     {
@@ -118,9 +67,9 @@ public class TileOverlay extends Overlay
         this.plugin = plugin;
         this.tileReducer = tileReducer;
 
-        this.goldenGnomeModels = new SceneObjectSet<>(client);
-        this.coinTrapModels = new SceneObjectSet<>(client);
-        this.coinRushModels = new SceneObjectSet<>(client);
+        this.goldenGnomeModel = new GoldenGnomeModel(client, plugin);
+        this.coinTrapModel = new CoinTrapModel(client, plugin);
+        this.coinRushModel = new CoinRushModel(client, plugin);
 
         setPosition(OverlayPosition.DYNAMIC);
         setLayer(OverlayLayer.ABOVE_SCENE);
@@ -148,7 +97,7 @@ public class TileOverlay extends Overlay
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
         renderCommittedCourse(g);
-        updateCoinRushModels();
+        coinRushModel.update();
 
         if (plugin.isCoursePlacementMode())
         {
@@ -169,56 +118,15 @@ public class TileOverlay extends Overlay
 
         for (TileReducer.TileEntry entry : entries)
         {
-            if ("GOLDEN_GNOME_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see updateGoldenGnomeModels below
-            if ("COIN_TRAP_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see updateCoinTrapModels below
+            if ("GOLDEN_GNOME_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see models/GoldenGnomeModel
+            if ("COIN_TRAP_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see models/CoinTrapModel
             Color base = resolveColor(entry.color, entry.tileType);
             renderOutlinedTile(g, entry.point, base, SOLID_STROKE);
         }
 
-        updateGoldenGnomeModels(entries);
-        updateCoinTrapModels(entries);
+        goldenGnomeModel.update(entries);
+        coinTrapModel.update(entries);
         renderRouteLines(g, entries);
-    }
-
-    /** Keeps one RuneLiteObject (model GOLDEN_GNOME_MODEL_ID) spawned in the scene for every
-     * currently-marked Golden Gnome tile, diffed each frame against TileReducer's live snapshot --
-     * same "the reducer is the one source of truth" pattern every other tile visual here already
-     * follows. A RuneLiteObject is registered directly with the client, not the OverlayManager, so
-     * it doesn't get cleaned up just because this overlay stops rendering -- see
-     * clearGoldenGnomeModels for the other half of that. loadModel can return null for a couple of
-     * frames right after the client starts while the model's still loading from cache, so this
-     * keeps retrying every frame until it succeeds rather than giving up after one null.
-     * <p>
-     * TileReducer is real state, updated the instant TILE_UNMARKED/TILE_MARKED land regardless of
-     * how this overlay wants to present it -- but a Golden Gnome relocating is choreographed
-     * against two spotanims (see RunePartyPlugin's GOLDEN_GNOME_MOVED handling), so the model
-     * shouldn't just teleport the moment those events arrive. RunePartyPlugin#
-     * getGoldenGnomeMoveOldPoint/getGoldenGnomeMoveNewPoint (with their matching hide/show
-     * timestamps) are what let this method override the raw diff for exactly as long as that
-     * choreography needs: force-persisting the old spot a beat after TileReducer already dropped
-     * it, and force-suppressing the new spot a beat before TileReducer's already-added entry
-     * actually shows. */
-    private void updateGoldenGnomeModels(List<TileReducer.TileEntry> entries)
-    {
-        Set<WorldPoint> current = new HashSet<>();
-        for (TileReducer.TileEntry entry : entries)
-        {
-            if ("GOLDEN_GNOME_TILE".equals(entry.tileType)) current.add(entry.point);
-        }
-
-        long now = System.currentTimeMillis();
-        WorldPoint moveOld = plugin.getGoldenGnomeMoveOldPoint();
-        if (moveOld != null && now < plugin.getGoldenGnomeMoveHideOldAt())
-        {
-            current.add(moveOld);
-        }
-        WorldPoint moveNew = plugin.getGoldenGnomeMoveNewPoint();
-        if (moveNew != null && now < plugin.getGoldenGnomeMoveShowNewAt())
-        {
-            current.remove(moveNew);
-        }
-
-        goldenGnomeModels.sync(current, Function.identity(), point -> client.loadModel(GOLDEN_GNOME_MODEL_ID));
     }
 
     /** Despawns and forgets every Golden Gnome RuneLiteObject -- called whenever this overlay
@@ -227,138 +135,21 @@ public class TileOverlay extends Overlay
      * independently of this overlay or even the plugin being active. */
     public void clearGoldenGnomeModels()
     {
-        goldenGnomeModels.clear();
-    }
-
-    /** Same "diff the live set against currently-spawned RuneLiteObjects" shape as
-     * updateGoldenGnomeModels, for Coin Trap tiles -- except a Coin Trap never relocates, it just
-     * disappears for good once triggered (see the server's own TILE_UNMARKED right after
-     * COIN_TRAP_TRIGGERED), so there's only one force-persist window to honor here (via
-     * RunePartyPlugin#getCoinTrapTriggerPoint/Until), not the two-sided old/new choreography a
-     * Golden Gnome relocation needs. That same window is also when the object's own spring
-     * animation (COIN_TRAP_SPRING_ANIMATION_ID) actually plays -- fired once per trigger, guarded
-     * by coinTrapAnimatedTriggerPoint so it doesn't re-arm every frame the window stays open. */
-    private void updateCoinTrapModels(List<TileReducer.TileEntry> entries)
-    {
-        Set<WorldPoint> current = new HashSet<>();
-        for (TileReducer.TileEntry entry : entries)
-        {
-            if ("COIN_TRAP_TILE".equals(entry.tileType)) current.add(entry.point);
-        }
-
-        long now = System.currentTimeMillis();
-        WorldPoint triggerPoint = plugin.getCoinTrapTriggerPoint();
-        boolean triggerActive = triggerPoint != null && now < plugin.getCoinTrapTriggerUntil();
-        if (triggerActive)
-        {
-            current.add(triggerPoint);
-        }
-        else
-        {
-            coinTrapAnimatedTriggerPoint = null; // window closed -- a future trigger at the same point can animate again
-        }
-
-        coinTrapModels.sync(current, Function.identity(), point ->
-        {
-            if (coinTrapGoldModel == null) buildCoinTrapGoldModel();
-            return coinTrapGoldModel != null ? coinTrapGoldModel : client.loadModel(COIN_TRAP_MODEL_ID);
-        });
-
-        if (triggerActive && !triggerPoint.equals(coinTrapAnimatedTriggerPoint))
-        {
-            RuneLiteObject obj = coinTrapModels.get(triggerPoint);
-            if (obj != null)
-            {
-                Animation anim = client.loadAnimation(COIN_TRAP_SPRING_ANIMATION_ID);
-                if (anim != null)
-                {
-                    obj.setShouldLoop(false);
-                    obj.setAnimation(anim);
-                    coinTrapAnimatedTriggerPoint = triggerPoint;
-                }
-            }
-        }
-    }
-
-    /** Builds coinTrapGoldModel the first time it's needed -- a no-op once already built (or once
-     * a load attempt has already failed, see coinTrapGoldModelLoadFailed). Same technique
-     * Gnomeball's CheerleaderRenderer#buildHueShiftedModel/hueShift uses to recolor the
-     * Cheerleader NPC per-team, and for the same underlying reason: {@code Client#loadModel(id,
-     * recolorFind, recolorReplace)}'s own recolor args only match colors against a swap slot the
-     * model's own cache definition explicitly declared ({@code recolorToFind}/{@code
-     * recolorToReplace}) -- object 8972 declares exactly one such slot (see this class's own
-     * history/the object's cache JSON), nowhere near enough to recolor "as much of the model as
-     * possible" the way this was asked for. Operating on the model's raw, pre-lit {@link
-     * ModelData} instead (via {@code Client#loadModelData}) exposes literally every face color the
-     * mesh has, with no swap-slot limit -- {@code ModelData#recolor(short, short)} rewrites any of
-     * them directly, and {@code ModelData#light()} is what actually bakes the now-recolored mesh
-     * into a final renderable {@link Model} afterward. Every distinct color found gets mapped to a
-     * golden HSL sharing that color's own luminance (see JagexColor#unpackLuminance/packHSL) --
-     * preserving whatever shading the model's real palette had (a lit top face reads as bright
-     * gold, a shadowed underside as darker gold) rather than flattening the whole model into one
-     * indistinguishable color, same reasoning CheerleaderRenderer's hueShift documents for keeping
-     * saturation/luminance and only overriding hue -- this goes one step further and overrides
-     * saturation too (not just hue), since the goal here is everything reading as unambiguously
-     * gold rather than each part keeping its own natural vibrancy. Retried on the next
-     * updateCoinTrapModels call if the raw load itself returns null (same brief just-after-startup
-     * window updateGoldenGnomeModels' own loadModel retry documents), but only ever actually builds
-     * the model once. */
-    private void buildCoinTrapGoldModel()
-    {
-        if (coinTrapGoldModel != null || coinTrapGoldModelLoadFailed) return;
-
-        ModelData raw = client.loadModelData(COIN_TRAP_MODEL_ID);
-        if (raw == null) return; // not loaded yet -- retried next call
-
-        short[] faceColors = raw.getFaceColors();
-        if (faceColors == null || faceColors.length == 0)
-        {
-            coinTrapGoldModelLoadFailed = true;
-            return;
-        }
-
-        Set<Short> distinct = new HashSet<>();
-        for (short c : faceColors) distinct.add(c);
-
-        int goldHue = JagexColor.unpackHue(JagexColor.rgbToHSL(COIN_TRAP_GOLD_RGB, 1.0));
-        int goldSaturation = JagexColor.unpackSaturation(JagexColor.rgbToHSL(COIN_TRAP_GOLD_RGB, 1.0));
-
-        ModelData result = raw;
-        for (short original : distinct)
-        {
-            short recolored = JagexColor.packHSL(goldHue, goldSaturation, JagexColor.unpackLuminance(original));
-            result = result.recolor(original, recolored);
-        }
-        coinTrapGoldModel = result.light();
+        goldenGnomeModel.clear();
     }
 
     /** Despawns and forgets every Coin Trap RuneLiteObject -- same reasoning/call sites as
      * clearGoldenGnomeModels. */
     public void clearCoinTrapModels()
     {
-        coinTrapModels.clear();
-    }
-
-    /** Same "diff the live set against currently-spawned RuneLiteObjects" shape as
-     * updateGoldenGnomeModels/updateCoinTrapModels, for Coin Rush spawns -- except keyed by the
-     * server's own spawn id (RunePartyPlugin#getCoinRushSpawns) rather than WorldPoint, and with no
-     * force-persist/animation window of its own: a Coin Rush spawn just disappears the instant
-     * COIN_RUSH_COLLECTED removes it from that map, no lingering trigger visual the way a sprung
-     * Coin Trap gets. No course-tile dependency either (unlike the other two, which read from
-     * TileReducer's own snapshot) -- a Coin Rush spawn can land anywhere the server picks, not just
-     * on the walked course -- so this reads straight from the plugin rather than taking an
-     * {@code entries} list. */
-    private void updateCoinRushModels()
-    {
-        Map<Integer, WorldPoint> current = plugin.getCoinRushSpawns();
-        coinRushModels.sync(current.keySet(), current::get, id -> client.loadModel(COIN_RUSH_MODEL_ID));
+        coinTrapModel.clear();
     }
 
     /** Despawns and forgets every Coin Rush RuneLiteObject -- same reasoning/call sites as
      * clearGoldenGnomeModels/clearCoinTrapModels. */
     public void clearCoinRushModels()
     {
-        coinRushModels.clear();
+        coinRushModel.clear();
     }
 
     /** Draws a bouncing, pulsing arrow -- in the mover's own RunePartyColor (see

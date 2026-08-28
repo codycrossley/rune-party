@@ -1,5 +1,8 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.models;
 
+import gay.runescape.runeparty.GamePhase;
+import gay.runescape.runeparty.RunePartyPlugin;
+import gay.runescape.runeparty.RunePartyRender;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.util.concurrent.TimeUnit;
@@ -16,34 +19,23 @@ import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 
-/** Spawns a real 3D model of TzTok-Jad (NPC {@link #JAD_NPC_ID}) -- not a 2D overlay -- when a
- * player's turn resolves onto a Jad Tile (see RunePartyPlugin's TILE_EFFECT handling, the only
- * caller of {@link #spawn}), facing back at whoever landed there. First real Jad Tile behavior;
- * more (an animation trigger, presumably some kind of encounter) is coming later.
+/** Spawns a real 3D model of TzTok-Jad (NPC {@link #JAD_NPC_ID}) -- not a 2D overlay -- for the
+ * full Jad Tile encounter (awaken -> idle loop while awaiting a response -> either a bow
+ * acknowledgement or a smash penalty -> despawn), facing back at whoever landed there. Spawned by
+ * TILE_EFFECT (see RunePartyPlugin, the only caller of {@link #spawn}); the encounter itself is
+ * server-driven (see app.py's _run_jad_encounter), so every despawn here (JAD_DISMISSED, either
+ * directly via {@link #clear} on the smashed path or via {@link #playBowThenClear} on the bowed
+ * one) is reacting to something the server has already decided, never guessing at it.
  * <p>
- * Same "RuneLiteObject registered directly with the client's scene graph" approach TileOverlay's
- * Golden Gnome/Coin Trap/Coin Rush models already use, and same reasoning for re-asserting
- * LocalPoint every frame rather than caching it (a RuneLiteObject's LocalPoint goes stale across
- * region/scene reloads). Unlike those three, this isn't a diff against a live, ongoing set (see
- * SceneObjectSet) -- there's only ever at most one Jad active at a time, spawned by one specific
- * event and cleared by two others (see RunePartyPlugin's TURN_STARTED/MINIGAME_STARTED handling),
- * so it's simpler to just track that one instance directly.
- * <p>
- * {@link #requestClear} (what those two events call) doesn't despawn immediately -- a solo game
- * (or the last-to-act player in any game) advances straight to the next TURN_STARTED/
- * MINIGAME_STARTED in the very same request the landing itself resolved in, so an immediate clear
- * would make Jad despawn before it was ever actually drawn a single frame. render() instead holds
- * it up for at least {@link #MIN_VISIBLE_MS} from its own spawn() time before honoring a pending
- * clear request -- see spawnedAt/clearRequested. {@link #clear} (the immediate, non-deferred form)
- * stays for shutDown()/the phase-based safety net below, where waiting doesn't make sense (nothing
- * will call render() again to enforce it once the plugin's actually stopped). */
-class JadOverlay extends Overlay
+ * Same "RuneLiteObject registered directly with the client's scene graph" approach the models/
+ * package's own GoldenGnomeModel/CoinTrapModel/CoinRushModel use for their own tile decorations.
+ * Unlike those three, this isn't a diff against a live, ongoing set (see SceneObjectSet) -- there's
+ * only ever at most one Jad active at a time, so it's simpler to just track that one instance
+ * directly; this is also why this class, alone in models/, needs RunePartyPlugin#scheduleDelayed
+ * for its own animation-hold timers rather than a plain per-frame diff. */
+public class JadEncounter extends Overlay
 {
     private static final int JAD_NPC_ID = 3127; // TzTok-Jad, per the RuneMonk entity-viewer link this was asked from
-
-    // How long Jad stays up once spawned, regardless of how quickly the game logic that triggered
-    // it (TURN_STARTED/MINIGAME_STARTED) wants to move on -- see the class doc above.
-    private static final long MIN_VISIBLE_MS = 5000;
 
     // Fallback if NPCComposition.getSize() isn't available yet the first frame render() runs --
     // same 5-tile-wide assumption resolveRadius() computes properly once the composition loads.
@@ -60,7 +52,7 @@ class JadOverlay extends Overlay
     private RuneLiteObject jadObject;
     private Model jadModel;
 
-    // volatile: spawn()/requestClear()/playSmash()/clear() are all called from RunePartyPlugin's
+    // volatile: spawn()/playSmash()/playBowThenClear()/clear() are all called from RunePartyPlugin's
     // handleEvent, which runs on EventSocket's own OkHttp WebSocket callback thread (see
     // EventSocket#onMessage -- there's no clientThread.invoke anywhere in that class), not
     // RuneLite's client thread -- while render() reads every one of these fields from the client
@@ -76,13 +68,6 @@ class JadOverlay extends Overlay
     private volatile WorldPoint jadCenter;
     private volatile WorldPoint facing;
 
-    // See the class doc's note on requestClear -- spawnedAt is stamped fresh by every spawn() call
-    // (so a second Jad landing before the first one's own window elapsed gets its own full
-    // MIN_VISIBLE_MS), and clearRequested just records that TURN_STARTED/MINIGAME_STARTED already
-    // asked to despawn, for render() to actually honor once that window's up.
-    private volatile long spawnedAt;
-    private volatile boolean clearRequested;
-
     // When the object is actually allowed to start showing -- the later of "now" or
     // plugin.getTurnEffectGateUntil(), computed ONCE inside spawn(), not re-checked every frame.
     // See JadPresentation#revealAt's own doc for why this must be a fixed timestamp decided once:
@@ -92,27 +77,15 @@ class JadOverlay extends Overlay
 
     // Set by playSmash() (see JAD_SMASH_TRIGGERED handling), consumed the next frame render() finds
     // both a live jadObject and the animation resource actually loaded -- same "retry every frame
-    // until it's ready, then fire once" idiom TileOverlay's own updateCoinTrapModels uses for
+    // until it's ready, then fire once" idiom CoinTrapModel's own update() uses for
     // COIN_TRAP_SPRING_ANIMATION_ID.
     private volatile boolean smashPending;
 
     // Set by playBowThenClear() (see JAD_DISMISSED's "bowed" branch in RunePartyPlugin), consumed
     // the same "retry every frame until the animation resource is ready, then fire once" way
     // smashPending is. Once applied, render() schedules the return to idle and the actual despawn
-    // itself (see bowSequenceActive below) rather than waiting on requestClear()/MIN_VISIBLE_MS --
-    // this is a purely client-timed sequence with no server event marking either step as "done".
+    // itself, purely client-timed -- there's no server event marking either step as "done".
     private volatile boolean bowAcknowledgePending;
-
-    // True from the moment playBowThenClear() is called until the scheduled clear() it arms
-    // actually runs -- suppresses render()'s own clearRequested/MIN_VISIBLE_MS auto-despawn for
-    // that whole window. Without this, TURN_STARTED/MINIGAME_STARTED (which always follows
-    // JAD_DISMISSED in the very same event batch on the bowed path -- jad_bow's own
-    // _advance_turn_or_start_minigame call) would call requestClear() before the acknowledge
-    // animation ever gets a chance to play: spawnedAt is from whenever Jad originally appeared,
-    // already well past MIN_VISIBLE_MS by the time bowing happens, so the very next render() frame
-    // would despawn Jad immediately via the ordinary clearRequested path instead of playing the
-    // animation at all.
-    private volatile boolean bowSequenceActive;
 
     // Whether the idle loop (JAD_IDLE_ANIMATION_ID) has already been set on the current jadObject --
     // an object flag rather than "is jadObject.getAnimationController() non-null", since checking
@@ -121,7 +94,7 @@ class JadOverlay extends Overlay
     // starts idling fresh.
     private volatile boolean idleApplied;
 
-    JadOverlay(Client client, ClientThread clientThread, RunePartyPlugin plugin)
+    public JadEncounter(Client client, ClientThread clientThread, RunePartyPlugin plugin)
     {
         this.client = client;
         this.clientThread = clientThread;
@@ -141,16 +114,6 @@ class JadOverlay extends Overlay
         }
         if (jadCenter == null) return null;
         if (System.currentTimeMillis() < revealAt) return null;
-
-        // bowSequenceActive suppresses this while a bow-acknowledge sequence is in flight -- see
-        // that field's own doc. Without it, TURN_STARTED/MINIGAME_STARTED's own requestClear()
-        // (which always follows a bowed JAD_DISMISSED in the same event batch) would despawn Jad
-        // here before the acknowledge animation ever got a chance to play.
-        if (clearRequested && !bowSequenceActive && System.currentTimeMillis() - spawnedAt >= MIN_VISIBLE_MS)
-        {
-            clear();
-            return null;
-        }
 
         if (jadModel == null)
         {
@@ -184,9 +147,8 @@ class JadOverlay extends Overlay
                 // last frame until JAD_DISMISSED despawns it. Unlike playBowThenClear's own tail,
                 // no separate "and then clear" follow-up is scheduled here -- JAD_DISMISSED already
                 // despawns this immediately on its own server-timed schedule (see RunePartyPlugin's
-                // own JAD_DISMISSED handling), so there's nothing for bowSequenceActive's own
-                // suppression trick to guard against on this path.
-                plugin.uiTimerExec.schedule(() -> idleApplied = false, RunePartyPlugin.JAD_SMASH_ANIMATION_HOLD_MS, TimeUnit.MILLISECONDS);
+                // own JAD_DISMISSED handling).
+                plugin.scheduleDelayed(() -> idleApplied = false, RunePartyPlugin.JAD_SMASH_ANIMATION_HOLD_MS);
             }
         }
         else if (bowAcknowledgePending)
@@ -208,11 +170,9 @@ class JadOverlay extends Overlay
                 // (and the idleApplied write) are safe to run from this executor thread directly --
                 // clear() hops to the client thread itself for the actual RuneLiteObject mutation,
                 // see its own doc, and idleApplied is just a volatile field write.
-                plugin.uiTimerExec.schedule(() -> idleApplied = false,
-                    RunePartyPlugin.JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS, TimeUnit.MILLISECONDS);
-                plugin.uiTimerExec.schedule(this::clear,
-                    RunePartyPlugin.JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS + RunePartyPlugin.JAD_BOW_ACKNOWLEDGE_IDLE_HOLD_MS,
-                    TimeUnit.MILLISECONDS);
+                plugin.scheduleDelayed(() -> idleApplied = false, RunePartyPlugin.JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS);
+                plugin.scheduleDelayed(this::clear,
+                    RunePartyPlugin.JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS + RunePartyPlugin.JAD_BOW_ACKNOWLEDGE_IDLE_HOLD_MS);
             }
         }
         else if (!idleApplied)
@@ -243,28 +203,25 @@ class JadOverlay extends Overlay
         return null;
     }
 
-    /** Spawns (or relocates, if one's already up) Jad at {@code center}, facing {@code facing},
-     * guaranteed to stay up for at least MIN_VISIBLE_MS regardless of any requestClear() that
-     * follows (see the class doc). The actual RuneLiteObject is created/positioned lazily inside
-     * render(), same "retry every frame until the model's loaded" idiom TileOverlay's own
-     * updateGoldenGnomeModels uses -- held back until revealAt (see that field's own doc) even once
-     * the model's ready, so the object doesn't pop into the world while some earlier effect (e.g. a
-     * Golden Gnome outcome banner from the same roll) is still showing. */
-    void spawn(WorldPoint center, WorldPoint facing)
+    /** Spawns (or relocates, if one's already up) Jad at {@code center}, facing {@code facing}.
+     * The actual RuneLiteObject is created/positioned lazily inside render(), same "retry every
+     * frame until the model's loaded" idiom GoldenGnomeModel's own update() uses -- held back
+     * until revealAt (see that field's own doc) even once the model's ready, so the object doesn't
+     * pop into the world while some earlier effect (e.g. a Golden Gnome outcome banner from the
+     * same roll) is still showing. */
+    public void spawn(WorldPoint center, WorldPoint facing)
     {
         this.jadCenter = center;
         this.facing = facing;
         long now = System.currentTimeMillis();
-        this.spawnedAt = now;
         this.revealAt = Math.max(now, plugin.getTurnEffectGateUntil());
-        this.clearRequested = false;
     }
 
     /** Plays the smash animation (lordmagmus_smash, RunePartyPlugin.JAD_SMASH_ANIMATION_ID) once,
      * fired by JAD_SMASH_TRIGGERED -- the bow window closed without a bow. Actually applied lazily
      * inside render() (see smashPending), same "retry until the resource's loaded" reasoning every
      * other lazy animation/model load in this codebase already follows. */
-    void playSmash()
+    public void playSmash()
     {
         smashPending = true;
     }
@@ -273,44 +230,30 @@ class JadOverlay extends Overlay
      * fired by JAD_DISMISSED's "bowed" branch -- the player bowed in time. Actually applied lazily
      * inside render() (see bowAcknowledgePending), same idiom playSmash() itself follows; once
      * applied, render() itself schedules the return to JAD_IDLE_ANIMATION_ID and the real despawn
-     * after it (JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS then JAD_BOW_ACKNOWLEDGE_IDLE_HOLD_MS later --
-     * see bowSequenceActive's own doc for why the ordinary requestClear()/MIN_VISIBLE_MS despawn
-     * path is suppressed for that whole window instead). */
-    void playBowThenClear()
+     * after it (JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS then JAD_BOW_ACKNOWLEDGE_IDLE_HOLD_MS later). */
+    public void playBowThenClear()
     {
         bowAcknowledgePending = true;
-        bowSequenceActive = true;
     }
 
-    /** Asks Jad to despawn once it's been up for at least MIN_VISIBLE_MS -- called on the next
-     * TURN_STARTED or MINIGAME_STARTED (whichever fires first) by RunePartyPlugin. Safe to call
-     * when nothing's spawned (render() never looks at clearRequested in that case). Not immediate
-     * -- see the class doc; for an immediate despawn use {@link #clear}. */
-    void requestClear()
-    {
-        clearRequested = true;
-    }
-
-    /** Despawns Jad immediately, if one's currently up, with no regard for MIN_VISIBLE_MS -- for
-     * shutDown(), RunePartyPlugin's own JAD_DISMISSED handling, and render()'s own phase-based
-     * safety net (leaving/disconnecting shouldn't strand this the way TileOverlay's own models
-     * can't either), where nothing will call render() again later to honor a deferred clear anyway.
-     * Safe to call when nothing's spawned.
+    /** Despawns Jad immediately, if one's currently up -- for shutDown(), RunePartyPlugin's own
+     * JAD_DISMISSED handling (directly on the smashed path; scheduled after the bow-acknowledge
+     * sequence on the bowed one, see {@link #playBowThenClear}), and render()'s own phase-based
+     * safety net (leaving/disconnecting shouldn't strand this the way the models/ package's own
+     * tile decorations can't either). Safe to call when nothing's spawned.
      * <p>
      * Callers include RunePartyPlugin#handleEvent (EventSocket's own WebSocket callback thread --
-     * see the field docs above), plugin.uiTimerExec's own scheduled thread (see playBowThenClear),
-     * as well as render() itself (already on the client thread) -- RuneLiteObject#setActive()
-     * asserts client-thread ownership the same way camera setters do (see
-     * RunePartyPlugin#resetState's identical reasoning), so this dispatches there itself rather
-     * than trust the caller's thread, same as Gnomeball's own CheerleaderRenderer#clear. */
-    void clear()
+     * see the field docs above), plugin.scheduleDelayed's own scheduled thread (see
+     * playBowThenClear), as well as render() itself (already on the client thread) --
+     * RuneLiteObject#setActive() asserts client-thread ownership the same way camera setters do
+     * (see RunePartyPlugin#resetState's identical reasoning), so this dispatches there itself
+     * rather than trust the caller's thread, same as Gnomeball's own CheerleaderRenderer#clear. */
+    public void clear()
     {
         jadCenter = null;
         facing = null;
-        clearRequested = false;
         smashPending = false;
         bowAcknowledgePending = false;
-        bowSequenceActive = false;
         idleApplied = false;
         revealAt = 0;
         RuneLiteObject obj = jadObject;

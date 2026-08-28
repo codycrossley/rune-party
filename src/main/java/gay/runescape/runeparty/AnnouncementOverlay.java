@@ -123,6 +123,12 @@ public class AnnouncementOverlay extends Overlay
     // breathing-alpha treatment to stay noticeable without a fade to draw the eye.
     private static final long MINIGAME_READY_CHECK_PULSE_PERIOD_MS = DEFAULT_PULSE_PERIOD_MS;
     private static final float MINIGAME_READY_CHECK_MIN_ALPHA = 0.6f;
+    // Own size/line-height rather than reusing ROUND_COMPLETE_LINE_SIZE (shared by
+    // renderTrueOrFalseQuestion/renderRoundCompleteBanner) -- bumped up from that shared 18f on its
+    // own since this "<player>   Ready!/Waiting..." list was reported hard to read, without
+    // resizing the other two screens along with it.
+    private static final float MINIGAME_READY_CHECK_LINE_SIZE = 22f;
+    private static final int MINIGAME_READY_CHECK_LINE_HEIGHT = 28;
 
     // Mini-game countdown ("3... 2... 1... BEGIN!") -- see renderMinigameCountdown. The numbers
     // are a plain solid color (yellow, matching RAINBOW_YELLOW's tone) rather than rainbow -- only
@@ -212,13 +218,6 @@ public class AnnouncementOverlay extends Overlay
     // "Bow down to me!! Or else!!" -- bigger than GOLDEN_GNOME_OFFER_SUBTITLE_SIZE (its own font
     // otherwise) since a taunt needs to read as a real threat, not a small aside.
     private static final float JAD_TAUNT_SIZE = 26f;
-    // How long after JadPresentation#getAwakenedAt to hold the cosmetic countdown number back
-    // entirely -- gives the taunt line above a beat to actually be read before a number starts
-    // dropping underneath it, same reading-grace idea (and same 3000ms) TRUE_OR_FALSE_READING_
-    // DURATION_MS gives that mini-game's own countdown. Purely a client-side display delay, same
-    // as the countdown itself (see renderJadEncounter's own doc) -- doesn't touch the real,
-    // server-enforced bow window.
-    private static final long JAD_COUNTDOWN_DELAY_MS = 3000;
     // Mario Party Hudson font, same treatment as MINIGAME_COUNTDOWN_SIZE/TRUE_OR_FALSE_COUNTDOWN_
     // SIZE -- previously drawn in whatever plain font/size renderJadEncounter last set (the
     // taunt's own), since no font was ever set for it specifically.
@@ -503,11 +502,15 @@ public class AnnouncementOverlay extends Overlay
      * the gate forward every frame it drew, which fed back on itself (this method's own extension
      * made the very next frame's live gate-check see "something's still blocking me" and skip
      * drawing -- and skip re-extending -- so it flashed on for one frame, off for several, forever).
-     * The countdown itself is deliberately NOT delayed by revealAt -- awakenedAt is stamped the
-     * instant JAD_AWAKENED actually lands (see JadPresentation), so if the wait for revealAt ate
-     * into the real 5-second window, the countdown correctly shows whatever's genuinely left once
-     * it finally appears, rather than restarting from 5 and quietly lying about how much time
-     * remains. */
+     * The countdown deliberately reads off awakenedAt, which JadPresentation sets equal to revealAt
+     * (not to the moment JAD_AWAKENED actually landed) -- so it always shows a fresh "5" the instant
+     * it's first drawn here, never a number that's already partway elapsed. Don't add a separate
+     * client-only delay before showing the number (a "give the taunt a beat to be read" version of
+     * this once existed) without also pushing the real server-side bow window out to match --
+     * otherwise the number keeps counting down honestly from a *different* start than the one the
+     * server's actually enforcing, and either pops in already low (delay > 0, no matching server
+     * change) or gets cut off by the smash while still showing several seconds left (the reverse).
+     * See JadPresentation's own revealAt doc for the full reasoning and the trade this accepts. */
     private void renderJadEncounter(Graphics2D g)
     {
         String encounterRsn = plugin.getJadEncounterRsn();
@@ -531,26 +534,16 @@ public class AnnouncementOverlay extends Overlay
 
         // Cosmetic-only countdown -- 0 for a client that only caught up on an already-open
         // encounter (see JadPresentation#getAwakenedAt's own doc), which just skips rendering it
-        // rather than guessing how much real time is left. Held back an extra JAD_COUNTDOWN_DELAY_MS
-        // past revealAt (not awakenedAt) -- revealAt is the moment the taunt line above actually
-        // starts drawing (see the guard at the top of this method), so this reads as "3 seconds
-        // after the taunt appears" even on the rarer path where revealAt lands after awakenedAt
-        // (queued behind another still-showing effect, e.g. a Golden Gnome outcome banner -- see
-        // this method's own doc). remainingMs still counts down off awakenedAt itself, the real
-        // anchor for the actual 5-second bow window, so the number shown once it does appear keeps
-        // being genuinely accurate rather than always restarting from a full 5.
+        // rather than guessing how much real time is left. Drawn alongside the taunt above, not
+        // held back by any separate delay -- see this method's own class doc for why a countdown
+        // delay independent of the real server clock is a trap, not a polish opportunity.
         long awakenedAt = plugin.getJadAwakenedAt();
         if (awakenedAt != 0)
         {
-            long countdownStartsAt = plugin.getJadRevealAt() + JAD_COUNTDOWN_DELAY_MS;
-            long now = System.currentTimeMillis();
-            if (now >= countdownStartsAt)
-            {
-                long remainingMs = RunePartyPlugin.JAD_BOW_WINDOW_MS - (now - awakenedAt);
-                int secondsLeft = (int) Math.max(0, Math.ceil(remainingMs / 1000.0));
-                g.setFont(MARIO_PARTY_FONT.deriveFont(JAD_COUNTDOWN_SIZE));
-                drawCenteredText(g, String.valueOf(secondsLeft), centerX, y + 68, Color.WHITE, alpha);
-            }
+            long remainingMs = RunePartyPlugin.JAD_BOW_WINDOW_MS - (System.currentTimeMillis() - awakenedAt);
+            int secondsLeft = (int) Math.max(0, Math.ceil(remainingMs / 1000.0));
+            g.setFont(MARIO_PARTY_FONT.deriveFont(JAD_COUNTDOWN_SIZE));
+            drawCenteredText(g, String.valueOf(secondsLeft), centerX, y + 68, Color.WHITE, alpha);
         }
 
         if (isLocal)
@@ -1104,12 +1097,12 @@ public class AnnouncementOverlay extends Overlay
         List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
         players.sort(Comparator.comparing((RosterReducer.RosterEntry e) -> e.number));
 
-        Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
-        Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
+        Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(MINIGAME_READY_CHECK_LINE_SIZE);
+        Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(MINIGAME_READY_CHECK_LINE_SIZE);
         drawPlayerRows(g, players, nameFont, statsFont, (entry, i) -> "",
             entry -> ready.contains(entry.rsn.toLowerCase()) ? "   Ready!" : "   Waiting...",
             entry -> ready.contains(entry.rsn.toLowerCase()) ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR,
-            centerX, afterInstructionsY + 70, ROUND_COMPLETE_LINE_HEIGHT, alpha);
+            centerX, afterInstructionsY + 70, MINIGAME_READY_CHECK_LINE_HEIGHT, alpha);
     }
 
     /** Draws the "3... 2... 1... BEGIN!" countdown once every seated PLAYER's YES-emoted ready and

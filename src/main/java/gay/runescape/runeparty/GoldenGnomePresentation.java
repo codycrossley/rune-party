@@ -140,7 +140,7 @@ final class GoldenGnomePresentation
             {
                 // Jad's smash penalty, taken instead of coins when the player holds one (see
                 // app.py's _run_jad_encounter) -- same "+1"/running-total popup shape as a purchase,
-                // just a -1 delta and no outcome banner of its own (JadOverlay/JadPresentation's own
+                // just a -1 delta and no outcome banner of its own (JadEncounter/JadPresentation's own
                 // JAD_DISMISSED handling closes out the encounter; this is scoped to the popup and
                 // chat message only, matching Coin Trap's own restraint for its coin-loss branch).
                 if (!catchingUp)

@@ -3,6 +3,7 @@ package gay.runescape.runeparty;
 import com.google.gson.Gson;
 import com.google.inject.Provides;
 import gay.runescape.runeparty.items.Items;
+import gay.runescape.runeparty.models.JadEncounter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
@@ -253,7 +254,7 @@ public class RunePartyPlugin extends Plugin
     public static final long JAD_BOW_WINDOW_MS = 5000;
 
     // "lordmagmus_smash" -- played once on the Jad model when JAD_SMASH_TRIGGERED lands (see
-    // JadOverlay#playSmash), same one-shot idiom TileOverlay's own COIN_TRAP_SPRING_ANIMATION_ID
+    // JadEncounter#playSmash), same one-shot idiom TileOverlay's own COIN_TRAP_SPRING_ANIMATION_ID
     // already uses. JAD_SMASH_ANIMATION_HOLD_MS is a first estimate of how long it plays for (not
     // measured, same caveat JAD_SMASH_ANIMATION_SECONDS's own doc carries), after which Jad
     // returns to JAD_IDLE_ANIMATION_ID for whatever's left of the real encounter window before
@@ -262,12 +263,12 @@ public class RunePartyPlugin extends Plugin
     public static final long JAD_SMASH_ANIMATION_HOLD_MS = 1800;
 
     // Looped for as long as Jad's standing there waiting on a response (from the moment the model
-    // reveals until playSmash() takes over, see JadOverlay's own render()) -- an idle/taunt stance
+    // reveals until playSmash() takes over, see JadEncounter's own render()) -- an idle/taunt stance
     // rather than the smash's own one-shot animation.
     public static final int JAD_IDLE_ANIMATION_ID = 2650;
 
     // Played once on the Jad model the instant the "You chose to bow to Jad!" outcome banner arms
-    // (see JadPresentation's JAD_DISMISSED "bowed" branch and JadOverlay#playBowThenClear) -- a
+    // (see JadPresentation's JAD_DISMISSED "bowed" branch and JadEncounter#playBowThenClear) -- a
     // one-shot reaction to being bowed to, same idiom as JAD_SMASH_ANIMATION_ID but for the
     // opposite outcome. Purely client-side timing throughout (no server timer backs any of this,
     // unlike the smash/penalty sequence -- bowing already closed the encounter server-side the
@@ -420,7 +421,7 @@ public class RunePartyPlugin extends Plugin
     private PlayerOverlay playerOverlay;
     private AnnouncementOverlay announcementOverlay;
     private ConfettiOverlay confettiOverlay;
-    private JadOverlay jadOverlay;
+    private JadEncounter jadEncounter;
     private RosterReducer rosterReducer;
     ApiClient apiClient; // package-private: presenters (MinigamePresentation) issue their own requests
     private EventSocket eventSocket;
@@ -456,7 +457,9 @@ public class RunePartyPlugin extends Plugin
     // network call.
     // Package-private: presenters (GoldenGnomePresentation's GOLDEN_GNOME_MOVED handling,
     // MinigamePresentation's MINIGAME_COUNTDOWN_STARTED handling) schedule their own raw nested
-    // delayed callbacks against this, not just through scheduleAfterTurnEffects/armBanner.
+    // delayed callbacks against this, not just through scheduleAfterTurnEffects/armBanner. A
+    // caller outside this package (e.g. models/JadEncounter) can't reach this field directly --
+    // see scheduleDelayed for that path instead.
     final ScheduledExecutorService uiTimerExec = Executors.newSingleThreadScheduledExecutor(r ->
     {
         Thread t = new Thread(r, "runeparty-ui-timer");
@@ -683,8 +686,8 @@ public class RunePartyPlugin extends Plugin
         confettiOverlay = new ConfettiOverlay(client, this);
         overlayManager.add(confettiOverlay);
 
-        jadOverlay = new JadOverlay(client, clientThread, this);
-        overlayManager.add(jadOverlay);
+        jadEncounter = new JadEncounter(client, clientThread, this);
+        overlayManager.add(jadEncounter);
 
         panel = new RunePartyPanel(this);
         navButton = NavigationButton.builder()
@@ -716,7 +719,7 @@ public class RunePartyPlugin extends Plugin
         if (playerOverlay != null) overlayManager.remove(playerOverlay);
         if (announcementOverlay != null) overlayManager.remove(announcementOverlay);
         if (confettiOverlay != null) overlayManager.remove(confettiOverlay);
-        if (jadOverlay != null) { jadOverlay.clear(); overlayManager.remove(jadOverlay); }
+        if (jadEncounter != null) { jadEncounter.clear(); overlayManager.remove(jadEncounter); }
         if (navButton != null) clientToolbar.removeNavigation(navButton);
         if (mapDialog != null) { mapDialog.dispose(); mapDialog = null; }
         resetState();
@@ -1822,8 +1825,9 @@ public class RunePartyPlugin extends Plugin
     /** Read by AnnouncementOverlay#renderJadEncounter, which -- unlike every other banner here --
      * doesn't fit the fixed-duration TimedBanner/armBanner shape (it needs to keep rendering for as
      * long as a Jad encounter's genuinely pending, not one preset window), so it checks this
-     * directly every frame instead of going through scheduleAfterTurnEffects. */
-    long getTurnEffectGateUntil()
+     * directly every frame instead of going through scheduleAfterTurnEffects. Also read by
+     * models/JadEncounter#spawn for the same reason, one package over. */
+    public long getTurnEffectGateUntil()
     {
         return turnEffectGateUntil;
     }
@@ -1897,6 +1901,16 @@ public class RunePartyPlugin extends Plugin
         uiTimerExec.schedule(this::refreshPanel, delay + durationMs, TimeUnit.MILLISECONDS);
 
         return uiTimerExec.schedule(action, delay, TimeUnit.MILLISECONDS);
+    }
+
+    /** Plain fixed-delay scheduling against uiTimerExec, with no turn-effect gating of its own --
+     * unlike scheduleAfterTurnEffects, {@code action} just runs {@code delayMs} from now. Public
+     * (unlike uiTimerExec itself, deliberately package-private -- see that field's own doc) so a
+     * caller outside this package, e.g. models/JadEncounter's own bow-acknowledge/idle-reapply
+     * timers, can still schedule a plain callback without reaching into the raw executor. */
+    public ScheduledFuture<?> scheduleDelayed(Runnable action, long delayMs)
+    {
+        return uiTimerExec.schedule(action, delayMs, TimeUnit.MILLISECONDS);
     }
 
     /** Arms `banner` behind whatever turn-effect visual is already showing (see
@@ -2063,11 +2077,6 @@ public class RunePartyPlugin extends Plugin
                 // turn other than the one it was armed on, regardless of how this turn actually
                 // ended.
                 itemPlacementKey = null;
-                // A Jad spawned by the previous player's landing shouldn't linger into the next
-                // turn -- see JadOverlay's own doc on its spawn/requestClear lifecycle (a request,
-                // not an immediate despawn -- a solo game reaches this in the very same request the
-                // landing itself resolved in, otherwise).
-                jadOverlay.requestClear();
                 if (!catchingUp)
                 {
                     scheduleTurnAnnouncement(currentTurnRsn);
@@ -2139,7 +2148,7 @@ public class RunePartyPlugin extends Plugin
                 // in this file uses.
                 if (!catchingUp)
                 {
-                    jadOverlay.playSmash();
+                    jadEncounter.playSmash();
                 }
                 break;
             }
@@ -2148,22 +2157,22 @@ public class RunePartyPlugin extends Plugin
             {
                 jadPresentation.apply(e, catchingUp);
                 // "bowed" gets its own one-shot reaction (JAD_BOW_ACKNOWLEDGE_ANIMATION_ID, then
-                // back to JAD_IDLE_ANIMATION_ID -- see JadOverlay#playBowThenClear) timed off the
+                // back to JAD_IDLE_ANIMATION_ID -- see JadEncounter#playBowThenClear) timed off the
                 // same moment the "You chose to bow to Jad!" outcome banner arms (jadPresentation's
                 // own JAD_DISMISSED handling, called just above). Every other case (smashed, or a
-                // catching-up client with nothing to animate) despawns immediately, not
-                // requestClear() -- by the time this fires on the smashed path, the whole encounter
-                // (including the smash animation) has already played out on its own server-timed
-                // schedule, so there's no "vanishes before it's drawn" risk left to guard against
-                // (see JadOverlay's own class doc). A no-op if nothing's spawned, e.g. a catching-up
-                // client that never saw the TILE_EFFECT-driven spawn in the first place.
+                // catching-up client with nothing to animate) despawns immediately instead -- by
+                // the time this fires on the smashed path, the whole encounter (including the
+                // smash animation) has already played out on its own server-timed schedule, so
+                // there's no "vanishes before it's drawn" risk left to guard against. A no-op if
+                // nothing's spawned, e.g. a catching-up client that never saw the TILE_EFFECT-driven
+                // spawn in the first place.
                 if (!catchingUp && "bowed".equals(Json.safeStr(e.payload, "outcome")))
                 {
-                    jadOverlay.playBowThenClear();
+                    jadEncounter.playBowThenClear();
                 }
                 else
                 {
-                    jadOverlay.clear();
+                    jadEncounter.clear();
                 }
                 break;
             }
@@ -2215,7 +2224,7 @@ public class RunePartyPlugin extends Plugin
                     TileReducer.TileEntry landed = tileReducer.tileAtIndex(getPlayerPosition(tileEffectPlayer));
                     if (landed != null)
                     {
-                        jadOverlay.spawn(landed.point.dy(3), landed.point);
+                        jadEncounter.spawn(landed.point.dy(3), landed.point);
                     }
                 }
                 break;
@@ -2284,13 +2293,6 @@ public class RunePartyPlugin extends Plugin
             case Events.TRUE_OR_FALSE_ANSWERED:
             case Events.TRUE_OR_FALSE_ROUND_ENDED:
             {
-                // MINIGAME_STARTED fires instead of TURN_STARTED for the last roller of a round
-                // (see _advance_turn_or_start_minigame) -- without this, a Jad spawned by that
-                // final landing would never get the TURN_STARTED-driven requestClear() and would
-                // still be standing there once the mini-game itself starts. JadOverlay is
-                // plugin-level presentation state, not minigame-round state, so this is handled
-                // directly here rather than threaded through MinigamePresentation.
-                if (Events.MINIGAME_STARTED.equals(type)) jadOverlay.requestClear();
                 minigamePresentation.apply(e, catchingUp);
                 break;
             }

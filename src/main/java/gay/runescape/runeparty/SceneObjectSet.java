@@ -11,29 +11,32 @@ import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 
 /** Keeps one {@link RuneLiteObject} spawned per key in a caller-supplied "desired" set, diffing it
- * every call against whatever's already spawned -- the sync algorithm TileOverlay's
- * updateGoldenGnomeModels/updateCoinTrapModels/updateCoinRushModels each independently reimplemented
- * (see ARCHITECTURE_REVIEW.md's C5): entrySet().removeIf deactivating anything no longer wanted,
- * computeIfAbsent spawning anything newly wanted, lazily loading the model (retrying every call
- * until it succeeds, since {@code Client#loadModel} can return null for a few frames right after the
- * client starts), bailing (deactivating) on a null {@link LocalPoint} for a point not currently
- * loaded into the scene, then setLocation and setActive(true) once a model's actually attached.
+ * every call against whatever's already spawned -- the sync algorithm GoldenGnomeModel/
+ * CoinTrapModel/CoinRushModel (see the models/ package) each used to independently reimplement
+ * before being split out of TileOverlay (see ARCHITECTURE_REVIEW.md's C5): entrySet().removeIf
+ * deactivating anything no longer wanted, computeIfAbsent spawning anything newly wanted, lazily
+ * loading the model (retrying every call until it succeeds, since {@code Client#loadModel} can
+ * return null for a few frames right after the client starts), bailing (deactivating) on a null
+ * {@link LocalPoint} for a point not currently loaded into the scene, then setLocation and
+ * setActive(true) once a model's actually attached.
  * <p>
- * Deliberately doesn't try to own the three callers' real differences -- the force-persist/suppress
+ * Deliberately doesn't try to own its callers' real differences -- the force-persist/suppress
  * windows (Golden Gnome relocation, Coin Trap's post-trigger linger) are just extra entries the
  * caller adds to/removes from {@code desired} before calling {@link #sync}, and Coin Trap's one-shot
- * spring animation is applied by the caller afterward via {@link #get}, not folded in here. */
-final class SceneObjectSet<K>
+ * spring animation is applied by the caller afterward via {@link #get}, not folded in here. Public
+ * (unlike most of this package's classes) since every current caller lives under models/, a
+ * different package. */
+public final class SceneObjectSet<K>
 {
     private final Client client;
     private final Map<K, RuneLiteObject> objects = new HashMap<>();
 
-    SceneObjectSet(Client client)
+    public SceneObjectSet(Client client)
     {
         this.client = client;
     }
 
-    void sync(Set<K> desired, Function<K, WorldPoint> pointOf, Function<K, Model> modelIfNeeded)
+    public void sync(Set<K> desired, Function<K, WorldPoint> pointOf, Function<K, Model> modelIfNeeded)
     {
         objects.entrySet().removeIf(e ->
         {
@@ -65,12 +68,12 @@ final class SceneObjectSet<K>
         }
     }
 
-    RuneLiteObject get(K key)
+    public RuneLiteObject get(K key)
     {
         return objects.get(key);
     }
 
-    void clear()
+    public void clear()
     {
         for (RuneLiteObject obj : objects.values())
         {

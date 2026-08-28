@@ -14,10 +14,13 @@ import net.runelite.api.coords.WorldPoint;
  * helper would be a fine judgment call (see RunePartyMapDialog's own small independent copies of
  * this kind of thing elsewhere); five was worth collapsing.
  * <p>
- * {@code loadNpcModel}/{@code orientationFacing} were added for JadOverlay (the Jad Tile's
+ * {@code loadNpcModel}/{@code orientationFacing} were added for JadEncounter (the Jad Tile's
  * spawned-model effect) but don't belong to Jad specifically -- both are generic enough for any
- * future NPC-model-based tile effect to reuse without re-deriving them. */
-final class RunePartyRender
+ * future NPC-model-based tile effect to reuse without re-deriving them, which is also why both are
+ * {@code public} while the rest of this class stays package-private -- JadEncounter lives under
+ * models/, a different package, and is the one existing caller that actually needs them from
+ * outside. */
+public final class RunePartyRender
 {
     private RunePartyRender()
     {
@@ -32,7 +35,7 @@ final class RunePartyRender
      * lazy-model-load site in this codebase (see TileOverlay's own docs on this) -- callers should
      * keep calling this every frame until it succeeds, then cache the result themselves rather
      * than re-merging every frame. */
-    static Model loadNpcModel(Client client, int npcId)
+    public static Model loadNpcModel(Client client, int npcId)
     {
         NPCComposition comp = client.getNpcDefinition(npcId);
         if (comp == null) return null;
@@ -56,7 +59,7 @@ final class RunePartyRender
      * from} needs to face {@code to} -- see {@link net.runelite.api.coords.Angle}'s own javadoc for
      * the reference mapping this is derived from (0 = South, 512 = West, 1024 = North, 1536 =
      * East). Plane is ignored -- facing is a purely horizontal rotation. */
-    static int orientationFacing(WorldPoint from, WorldPoint to)
+    public static int orientationFacing(WorldPoint from, WorldPoint to)
     {
         double dx = to.getX() - from.getX();
         double dy = to.getY() - from.getY();

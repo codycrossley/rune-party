@@ -200,7 +200,7 @@ public final class CoursePreset
      * saved as custom slots through {@link #fromTiles}, the same way Gnomeball hosts build/save
      * custom fields. Also exercises a Golden Gnome modifier end-to-end (see RelativeTile#decorative)
      * two steps out from START, so it's reachable by almost any first roll. Also carries a Jad
-     * Tile at list index 10 (see JadOverlay), swapped in the same "same dx/dy, new tileType" way
+     * Tile at list index 10 (see JadEncounter), swapped in the same "same dx/dy, new tileType" way
      * as the Item Space below.
      */
     public static CoursePreset buildStandardLoop()

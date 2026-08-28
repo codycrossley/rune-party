@@ -25,7 +25,7 @@ final class JadPresentation
     // so it just doesn't render the countdown for whatever's left of it -- same shortcut every
     // other short-lived cosmetic reveal in this codebase already takes on reconnect.
     private volatile long awakenedAt = 0;
-    // When the encounter reveal (banner + Jad's own 3D model, see JadOverlay) is actually allowed
+    // When the encounter reveal (banner + Jad's own 3D model, see JadEncounter) is actually allowed
     // to start showing -- the later of "when the server's real bow window itself starts" (now plus
     // settleMs, see below) or plugin.getTurnEffectGateUntil(), computed ONCE right here when
     // JAD_AWAKENED lands, not re-checked every frame. Computing it once and storing a fixed
