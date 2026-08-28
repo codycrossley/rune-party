@@ -20,6 +20,7 @@ public final class Items
     {
         REGISTRY.register(new EnergyPotionItem("energy-potion", "Energy Potion"));
         REGISTRY.register(new CoinTrapItem("coin-trap", "Coin Trap"));
+        REGISTRY.register(new TeleBlockItem("tele-block", "Tele Block"));
         REGISTRY.register(new PlaceholderItem("placeholder-item-1", "Placeholder Item #1"));
         REGISTRY.register(new PlaceholderItem("placeholder-item-2", "Placeholder Item #2"));
         REGISTRY.register(new PlaceholderItem("placeholder-item-3", "Placeholder Item #3"));

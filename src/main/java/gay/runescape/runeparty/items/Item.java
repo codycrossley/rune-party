@@ -46,4 +46,17 @@ public interface Item extends WheelEntry
     {
         return false;
     }
+
+    /** True for an item spent on another player rather than the user themselves (see
+     * TeleBlockItem) -- RunePartyPanel's "Use" button routes one of these to
+     * RunePartyPlugin#beginItemTargeting instead of #useItem, since the server never even sees a
+     * use-item call for it (see the server's own Item.requires_target, which use_item checks
+     * before ever reaching apply_effect). Armed targeting is confirmed by right-clicking another
+     * seated player's in-world model (see RunePartyPlugin#onMenuEntryAdded's "Follow" hook, the
+     * same idiom addToGameMenuEntry already uses to inject an entry onto a player's own context
+     * menu), not a tile the way requiresPlacement's own placement flow is. False by default. */
+    default boolean requiresTarget()
+    {
+        return false;
+    }
 }

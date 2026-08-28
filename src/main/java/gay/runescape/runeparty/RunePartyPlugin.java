@@ -348,6 +348,20 @@ public class RunePartyPlugin extends Plugin
      * "gone, then reappeared elsewhere." */
     public static final long GOLDEN_GNOME_MOVE_SPOTANIM_GAP_MS = 600;
 
+    /** Spotanim played directly on the target's own actor the instant a Tele Block lands on them
+     * (see TELE_BLOCK_APPLIED handling) -- the real spell's own impact graphic (SpotanimID's own
+     * doc groups it right next to TELEPORT_OTHER_IMPACT/CASTING, same "cast at another player"
+     * family), not a generic placeholder. Played via Actor#createSpotAnim (see
+     * triggerSpotAnimOnPlayer), unlike GOLDEN_GNOME_MOVE_SPOTANIM_ID's own fixed-world-point
+     * projectile trick, since this needs to follow the target's actor, not sit at one tile. */
+    public static final int TELE_BLOCK_IMPACT_SPOTANIM_ID = SpotanimID.TELE_BLOCK_IMPACT;
+
+    /** Height offset (in the same units Actor#createSpotAnim itself takes) for
+     * TELE_BLOCK_IMPACT_SPOTANIM_ID -- a first estimate for "roughly chest height," not measured
+     * against the real spell in-client, same caveat every other un-measured animation-hold/effect
+     * constant in this codebase already carries (see e.g. JAD_SMASH_ANIMATION_HOLD_MS's own doc). */
+    public static final int TELE_BLOCK_IMPACT_SPOTANIM_HEIGHT = 100;
+
     /** How long after the "vanish" spotanim starts before the model actually disappears from its
      * old spot -- see TileOverlay#updateGoldenGnomeModels, which force-persists the old point past
      * when TileReducer already removed it (that removal is real state, applied the instant the
@@ -564,6 +578,12 @@ public class RunePartyPlugin extends Plugin
     // there's no "used but not yet placed" state to reconcile if the player backs out. See
     // getItemPlacementCandidates for the two tiles this arms "Place <item>" on.
     private volatile String itemPlacementKey = null;
+    // Non-null while a requires_target item (see Item#requiresTarget) is armed -- set by
+    // beginItemTargeting, cleared by cancelItemTargeting or a successful confirmItemTargetOn.
+    // Same client-local-only shape as itemPlacementKey (see that field's own doc), just confirmed
+    // by right-clicking another player's in-world model instead of a candidate tile -- see
+    // addItemTargetMenuEntry.
+    private volatile String itemTargetKey = null;
     // Recomputed once per game tick from onGameTick (the client thread) -- see
     // isStandingOnTrackedPosition, whose Player#getWorldLocation() call asserts it's never invoked
     // off the client thread. isLocalPlayerReadyToRoll() reads this cached copy instead of calling
@@ -604,6 +624,14 @@ public class RunePartyPlugin extends Plugin
 
     // ---- instructional overlays (client-side timers, not server state -- see AnnouncementOverlay) ----
     private final TimedBanner<String> turnAnnounce = new TimedBanner<>(); // payload: rsn
+    // Stands in for turnAnnounce on a player whose turn was skipped by a Tele Block (see
+    // TURN_SKIPPED handling below) -- arms instead of, never alongside, turnAnnounce for that
+    // player, since a skipped player never actually gets a turn to announce.
+    private final TimedBanner<String> turnSkippedAnnounce = new TimedBanner<>(); // payload: rsn
+    // "You/<caster> cast teleblock on <target>!" -- fired on TELE_BLOCK_APPLIED. Not routed through
+    // Item#hasUseAnnouncement/ItemPresentation's own itemUsedAnnounce (see TeleBlockItem's own
+    // doc for why): that mechanism's payload has no target field, and this banner's title needs one.
+    private final TimedBanner<TeleBlockCastPayload> teleBlockCastAnnounce = new TimedBanner<>();
 
     // ---- welcome title card (client-side, local-player-only -- see triggerWelcomeBanner) ----
     private final TimedBanner<Void> welcomeBanner = new TimedBanner<>();
@@ -676,6 +704,21 @@ public class RunePartyPlugin extends Plugin
             this.start = start;
             this.until = until;
             this.totalless = totalless;
+        }
+    }
+
+    /** Payload for the "You/&lt;caster&gt; cast teleblock on &lt;target&gt;!" banner -- see
+     * teleBlockCastAnnounce's own doc for why this isn't just ItemPresentation's own
+     * ItemUsedAnnouncePayload (no target field there). */
+    private static final class TeleBlockCastPayload
+    {
+        final String casterRsn;
+        final String targetRsn;
+
+        TeleBlockCastPayload(String casterRsn, String targetRsn)
+        {
+            this.casterRsn = casterRsn;
+            this.targetRsn = targetRsn;
         }
     }
 
@@ -994,14 +1037,16 @@ public class RunePartyPlugin extends Plugin
         if (self == null || gid == null || token == null) return;
         if (!self.equalsIgnoreCase(currentTurnRsn) || pendingRoll || rollRequestSubmitted) return;
 
-        // Rolling abandons any still-armed item placement (see beginItemPlacement/
-        // cancelItemPlacement) -- the player chose to move instead of finishing it, so it goes
-        // back to unused (the server never heard about it either, see cancelItemPlacement's own
-        // doc) rather than staying stuck armed past the turn it was armed on. TURN_STARTED clears
-        // this too, as a backstop for any other path off this turn that isn't a roll.
-        if (itemPlacementKey != null)
+        // Rolling abandons any still-armed item placement/targeting (see beginItemPlacement/
+        // cancelItemPlacement and beginItemTargeting/cancelItemTargeting) -- the player chose to
+        // move instead of finishing it, so it goes back to unused (the server never heard about it
+        // either, see cancelItemPlacement's own doc) rather than staying stuck armed past the turn
+        // it was armed on. TURN_STARTED clears both too, as a backstop for any other path off this
+        // turn that isn't a roll.
+        if (itemPlacementKey != null || itemTargetKey != null)
         {
             itemPlacementKey = null;
+            itemTargetKey = null;
             refreshPanel();
         }
 
@@ -1204,6 +1249,47 @@ public class RunePartyPlugin extends Plugin
 
         submitAction("Place Coin Trap", () -> apiClient.placeCoinTrap(gid, self, token, point.getX(), point.getY(), point.getPlane()),
             e -> addChatMessage("Failed to place Coin Trap: " + e.getMessage()));
+    }
+
+    /** Arms a requires_target item (see Item#requiresTarget) -- called from RunePartyPanel's item
+     * buttons instead of useItem() for one of these, mirroring beginItemPlacement exactly (see
+     * that method's own doc) just for the right-click-a-player confirm step instead of
+     * right-click-a-tile (see addItemTargetMenuEntry/confirmItemTargetOn). */
+    public void beginItemTargeting(String itemKey)
+    {
+        if (itemKey == null || !isLocalPlayerReadyToRoll() || isItemUsedThisTurn()) return;
+        if (!Items.get(itemKey).requiresTarget()) return;
+        itemTargetKey = itemKey;
+        refreshPanel();
+    }
+
+    /** Backs out of an armed targeting -- called from RunePartyPanel's Cancel button and the
+     * in-world "Cancel" menu entry (see addItemTargetMenuEntry). Purely client-local, same as
+     * cancelItemPlacement: the server never heard about the item being "used" in the first place,
+     * so there's nothing to undo server-side. */
+    public void cancelItemTargeting()
+    {
+        itemTargetKey = null;
+        refreshPanel();
+    }
+
+    /** Spends the armed requires_target item on {@code targetRsn} -- called from the in-world
+     * "Tele Block &lt;name&gt;"-style menu entry (see addItemTargetMenuEntry), which only ever
+     * offers this on an actual seated PLAYER other than the local player themselves. Clears
+     * targeting mode optimistically before the call even goes out, same restraint every other
+     * fire-and-forget action method here already takes (see placeCoinTrapAt's own doc). */
+    private void confirmItemTargetOn(String targetRsn)
+    {
+        String self = localRsn();
+        final String gid = gameId;
+        final String token = playerToken;
+        final String itemKey = itemTargetKey;
+        itemTargetKey = null;
+        refreshPanel();
+        if (self == null || gid == null || token == null || itemKey == null) return;
+
+        submitAction("Use item on player", () -> apiClient.useItemOnPlayer(gid, self, token, itemKey, targetRsn),
+            e -> addChatMessage("Failed to use " + Items.get(itemKey).getDisplayName() + " on " + targetRsn + ": " + e.getMessage()));
     }
 
     public void leaveGame()
@@ -1546,6 +1632,7 @@ public class RunePartyPlugin extends Plugin
         if ("Follow".equals(event.getOption()))
         {
             addToGameMenuEntry(event);
+            addItemTargetMenuEntry(event);
             return;
         }
 
@@ -1801,6 +1888,43 @@ public class RunePartyPlugin extends Plugin
             .onClick(me -> assignRole(targetRsn, RunePartyRole.PLAYER));
     }
 
+    /** Adds a "Tele Block &lt;name&gt;"-style entry on another seated PLAYER's own Follow option
+     * while a requires_target item is armed (see beginItemTargeting) -- the exact same "inject onto
+     * the actor's own context menu" idiom addToGameMenuEntry already uses, just gated on
+     * itemTargetKey instead of isHost(). Offered on any active PLAYER other than the local player
+     * themselves, including one who's already Tele Blocked -- stacking is intentional, see
+     * TeleBlockItem's own doc, so there's no "already blocked" exclusion the way addToGameMenuEntry
+     * excludes an already-PLAYER target. Tele Block is the only requires_target item so far, hence
+     * the direct confirmItemTargetOn call rather than a more general dispatch -- generalize this
+     * once a second one exists, same caveat addItemPlacementMenuEntries's own doc carries for
+     * Coin Trap. */
+    private void addItemTargetMenuEntry(MenuEntryAdded event)
+    {
+        String itemKey = itemTargetKey;
+        if (itemKey == null || phase != GamePhase.ACTIVE) return;
+        if (!(event.getMenuEntry().getActor() instanceof Player)) return;
+
+        Player target = (Player) event.getMenuEntry().getActor();
+        if (target == null || target == client.getLocalPlayer() || target.getName() == null) return;
+
+        String targetRsn = Text.toJagexName(target.getName());
+        if (targetRsn == null || targetRsn.isBlank()) return;
+        if (rosterReducer.getRole(targetRsn) != RunePartyRole.PLAYER) return;
+
+        client.createMenuEntry(-1)
+            .setOption("Cancel " + Items.get(itemKey).getDisplayName())
+            .setTarget("")
+            .setType(MenuAction.RUNELITE)
+            .onClick(me -> cancelItemTargeting());
+
+        client.createMenuEntry(-1)
+            .setOption("<col=00FF00>Use " + Items.get(itemKey).getDisplayName() + "</col>")
+            .setTarget(event.getTarget())
+            .setType(MenuAction.RUNELITE_PLAYER)
+            .setIdentifier(event.getIdentifier())
+            .onClick(me -> confirmItemTargetOn(targetRsn));
+    }
+
     public Map<String, ApiClient.TileTypeOut> getTileTypeCatalog()
     {
         return tileTypeCatalog;
@@ -2003,6 +2127,25 @@ public class RunePartyPlugin extends Plugin
         armBanner(turnAnnounce, TURN_ANNOUNCE_DURATION_MS, () -> rsn, false);
     }
 
+    /** Same shape as scheduleTurnAnnouncement, for turnSkippedAnnounce instead -- fired on
+     * TURN_SKIPPED in place of the "It's &lt;rsn&gt;'s Turn" banner that player never actually
+     * gets this time (see that field's own doc). */
+    private void scheduleTurnSkippedAnnouncement(String rsn)
+    {
+        armBanner(turnSkippedAnnounce, TURN_ANNOUNCE_DURATION_MS, () -> rsn, false);
+    }
+
+    /** Arms teleBlockCastAnnounce -- same duration/queuing shape ItemPresentation's own
+     * scheduleItemUsedAnnouncement uses for every other item's "You/&lt;rsn&gt; used &lt;item&gt;!"
+     * banner (see ITEM_USED_ANNOUNCE_DURATION_MS), reused here rather than a bespoke duration since
+     * this is visually the same two-line title/subtitle shape, just with a target woven into the
+     * title (see renderTeleBlockCastAnnouncement). */
+    private void scheduleTeleBlockCastAnnouncement(String casterRsn, String targetRsn)
+    {
+        armBanner(teleBlockCastAnnounce, ITEM_USED_ANNOUNCE_DURATION_MS,
+            () -> new TeleBlockCastPayload(casterRsn, targetRsn), true);
+    }
+
     // scheduleMinigameBanner/scheduleMinigameSpinner/triggerMinigameRewardsBanner/
     // scheduleRoundCompleteBanner, and scheduleItemSpinner/scheduleItemCapBlockedAnnouncement/
     // scheduleItemUsedAnnouncement/scheduleCoinTrapTriggerAnnouncement, now live on
@@ -2137,10 +2280,11 @@ public class RunePartyPlugin extends Plugin
                 itemUsedThisTurn = false;
                 goldenGnomePurchasedThisTurn = false;
                 // Backstop for the same invariant rollDice() enforces on its own path (see that
-                // method's own doc) -- an armed-but-never-placed item must never survive into a
-                // turn other than the one it was armed on, regardless of how this turn actually
-                // ended.
+                // method's own doc) -- an armed-but-never-placed/targeted item must never survive
+                // into a turn other than the one it was armed on, regardless of how this turn
+                // actually ended.
                 itemPlacementKey = null;
+                itemTargetKey = null;
                 if (!catchingUp)
                 {
                     scheduleTurnAnnouncement(currentTurnRsn);
@@ -2148,6 +2292,27 @@ public class RunePartyPlugin extends Plugin
                     if (self != null && self.equalsIgnoreCase(currentTurnRsn))
                     {
                         addChatMessage("It's your turn! Use the Spin emote to roll the dice.");
+                    }
+                }
+                break;
+            }
+
+            case Events.TURN_SKIPPED:
+            {
+                // currentTurnPlayer never becomes the skipped player at all (see app.py's
+                // _start_next_eligible_turn -- this fires in place of TURN_STARTED for them, not
+                // before it), so unlike TURN_STARTED there's no turn-state field here to update --
+                // this is purely a cosmetic "here's why you didn't just see a TURN_STARTED for
+                // them" announcement.
+                if (!catchingUp)
+                {
+                    String skippedRsn = Json.requiredStr(e.payload, type, "player");
+                    if (skippedRsn != null)
+                    {
+                        scheduleTurnSkippedAnnouncement(skippedRsn);
+                        String self = localRsn();
+                        addChatMessage((self != null && self.equalsIgnoreCase(skippedRsn) ? "Your" : skippedRsn + "'s")
+                            + " turn was skipped -- Tele Blocked!");
                     }
                 }
                 break;
@@ -2291,6 +2456,32 @@ public class RunePartyPlugin extends Plugin
                 // decremented unconditionally by rosterReducer.apply above.
                 itemUsedThisTurn = true;
                 itemPresentation.handleItemUsed(e, catchingUp);
+                break;
+            }
+
+            case Events.TELE_BLOCK_APPLIED:
+            {
+                // TeleBlockItem leaves hasUseAnnouncement() at its default false (see that class's
+                // own doc) -- the generic "You used/<rsn> used <item>!" banner ITEM_USED already
+                // fires above has no target field to phrase around, so this fires its own dedicated
+                // "You/<caster> cast teleblock on <target>!" banner instead (see
+                // scheduleTeleBlockCastAnnouncement/renderTeleBlockCastAnnouncement), alongside the
+                // impact spotanim on the target's own actor -- both fire together, right here,
+                // rather than staggered the way the bowed Jad sequence's announcement/animation/
+                // coin-popup steps are: there's no earlier "reveal" step here for this to wait
+                // behind. teleblockedByPlayer itself is already updated unconditionally by
+                // rosterReducer.apply above, catch-up or not.
+                if (!catchingUp)
+                {
+                    String blockedRsn = Json.requiredStr(e.payload, type, "player");
+                    String byRsn = Json.requiredStr(e.payload, type, "appliedBy");
+                    if (blockedRsn != null && byRsn != null)
+                    {
+                        scheduleTeleBlockCastAnnouncement(byRsn, blockedRsn);
+                        triggerSpotAnimOnPlayer(TELE_BLOCK_IMPACT_SPOTANIM_ID, blockedRsn, TELE_BLOCK_IMPACT_SPOTANIM_HEIGHT);
+                        addChatMessage(byRsn + " cast teleblock on " + blockedRsn + "! " + blockedRsn + " will lose their next turn.");
+                    }
+                }
                 break;
             }
 
@@ -2486,6 +2677,41 @@ public class RunePartyPlugin extends Plugin
         triggerSpotAnimAtWorldPoint(spotAnimId, point, SPOTANIM_DEFAULT_DURATION_CYCLES);
     }
 
+    /** Plays {@code spotAnimId} directly on {@code rsn}'s own in-game actor -- follows them if they
+     * move, unlike triggerSpotAnimAtWorldPoint's fixed-point projectile trick (see that method's
+     * own doc for why *that* one needs the trick at all): an Actor can just be told to show a
+     * spotanim directly via the real, non-deprecated Actor#createSpotAnim, no faked projectile
+     * needed. {@code id} (the first createSpotAnim argument, a per-actor slot key -- see that
+     * method's own javadoc) is just spotAnimId itself; nothing here needs more than one spotanim
+     * live on the same actor at once, so there's no risk of two callers colliding on the same slot.
+     * A no-op if {@code rsn} isn't currently a loaded/visible nearby actor -- same "can't animate
+     * what isn't there" limitation every other in-world cosmetic in this codebase already accepts
+     * (see e.g. JadEncounter's own lazy-retry idiom for a resource that isn't loaded *yet*, a
+     * different problem from an actor that simply isn't nearby at all). Always hops onto the client
+     * thread, so any caller off it (an event handler, same as everything in handleEvent) can call
+     * this directly. */
+    public void triggerSpotAnimOnPlayer(int spotAnimId, String rsn, int height, int delayTicks)
+    {
+        if (rsn == null) return;
+        clientThread.invoke(() ->
+        {
+            for (Player p : client.getPlayers())
+            {
+                if (p == null || p.getName() == null) continue;
+                if (rsn.equalsIgnoreCase(Text.toJagexName(p.getName())))
+                {
+                    p.createSpotAnim(spotAnimId, spotAnimId, height, delayTicks);
+                    return;
+                }
+            }
+        });
+    }
+
+    public void triggerSpotAnimOnPlayer(int spotAnimId, String rsn, int height)
+    {
+        triggerSpotAnimOnPlayer(spotAnimId, rsn, height, 0);
+    }
+
     void refreshPanel()
     {
         if (panel != null) SwingUtilities.invokeLater(panel::refresh);
@@ -2510,6 +2736,8 @@ public class RunePartyPlugin extends Plugin
         if (boardViewActive) clientThread.invoke(this::restoreCameraFromBoardView);
         if (eventSocket != null) eventSocket.stop();
         turnAnnounce.reset();
+        turnSkippedAnnounce.reset();
+        teleBlockCastAnnounce.reset();
         itemPresentation.reset();
         turnEffectGateUntil = 0;
         gameId = null; writeKey = null; playerToken = null; joinCode = null; hostRsn = null;
@@ -2521,6 +2749,7 @@ public class RunePartyPlugin extends Plugin
         pendingReachableIndices = Collections.emptyList();
         arrivalSubmitted = false; itemUsedThisTurn = false; goldenGnomePurchasedThisTurn = false; standingOnTrackedPositionCached = false;
         itemPlacementKey = null;
+        itemTargetKey = null;
         minigamePresentation.reset();
         maxRounds = 0; completedRounds = 0;
         playerPositions.clear();
@@ -2628,6 +2857,7 @@ public class RunePartyPlugin extends Plugin
     public long getTrueOrFalseRevealUntil() { return minigamePresentation.getTrueOrFalseRevealUntil(); }
 
     public String getItemPlacementKey() { return itemPlacementKey; }
+    public String getItemTargetKey() { return itemTargetKey; }
     public Set<String> getMinigameReadyRsns() { return minigamePresentation.getMinigameReadyRsns(); }
     public boolean isMinigameCountdownStarted() { return minigamePresentation.isCountdownStarted(); }
     public boolean isMinigameCountdownSkippedForClient() { return minigamePresentation.isCountdownSkippedForClient(); }
@@ -2644,6 +2874,11 @@ public class RunePartyPlugin extends Plugin
     }
     public String getTurnAnnounceRsn() { return turnAnnounce.payload; }
     public long getTurnAnnounceUntil() { return turnAnnounce.until; }
+    public String getTurnSkippedRsn() { return turnSkippedAnnounce.payload; }
+    public long getTurnSkippedUntil() { return turnSkippedAnnounce.until; }
+    public String getTeleBlockCastCasterRsn() { return teleBlockCastAnnounce.payload != null ? teleBlockCastAnnounce.payload.casterRsn : null; }
+    public String getTeleBlockCastTargetRsn() { return teleBlockCastAnnounce.payload != null ? teleBlockCastAnnounce.payload.targetRsn : null; }
+    public long getTeleBlockCastUntil() { return teleBlockCastAnnounce.until; }
     public long getWelcomeBannerUntil() { return welcomeBanner.until; }
     public long getMinigameBannerUntil() { return minigamePresentation.getMinigameBannerUntil(); }
     public long getGameStartBannerUntil() { return gameStartBanner.until; }

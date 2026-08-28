@@ -243,6 +243,25 @@ public class ApiClient
         }
     }
 
+    /** Spends one of the local player's held requires_target items (currently only Tele Block) on
+     * {@code targetRsn} -- see the server's own use-item-on-player endpoint, a separate call from
+     * useItem the same way placeCoinTrap is (see that method's own doc), since a requires_target
+     * item has no meaningful use without a target to go with it. 409s if they don't hold it, it
+     * isn't genuinely their turn to act, or targetRsn isn't an active PLAYER in this game. */
+    public void useItemOnPlayer(String gameId, String playerRsn, String playerToken, String itemKey, String targetRsn) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("itemKey", itemKey);
+        body.addProperty("target", targetRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/use-item-on-player", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Use item on player failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     /** Spends a held Coin Trap by placing it at (x, y, plane) -- see the server's own
      * place-coin-trap endpoint, which both consumes the item and marks the tile in one call (there's
      * no separate "use" step for a requires_placement item, see Item#requiresPlacement). 409s if

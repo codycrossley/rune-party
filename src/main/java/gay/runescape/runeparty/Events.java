@@ -47,6 +47,7 @@ public final class Events
     public static final String PLAYER_READY = "PLAYER_READY";
     public static final String ROLE_ASSIGNED = "ROLE_ASSIGNED";
     public static final String ROLL_BONUS_GRANTED = "ROLL_BONUS_GRANTED";
+    public static final String TELE_BLOCK_APPLIED = "TELE_BLOCK_APPLIED";
     public static final String TILE_EFFECT = "TILE_EFFECT";
     public static final String TILE_MARKED = "TILE_MARKED";
     public static final String TILE_UNMARKED = "TILE_UNMARKED";
@@ -55,5 +56,6 @@ public final class Events
     public static final String TRUE_OR_FALSE_ANSWERED = "TRUE_OR_FALSE_ANSWERED";
     public static final String TRUE_OR_FALSE_ROUND_ENDED = "TRUE_OR_FALSE_ROUND_ENDED";
     public static final String TRUE_OR_FALSE_ROUND_STARTED = "TRUE_OR_FALSE_ROUND_STARTED";
+    public static final String TURN_SKIPPED = "TURN_SKIPPED";
     public static final String TURN_STARTED = "TURN_STARTED";
 }

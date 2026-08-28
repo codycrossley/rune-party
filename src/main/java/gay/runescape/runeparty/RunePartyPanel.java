@@ -519,6 +519,34 @@ public class RunePartyPanel extends PluginPanel
             return;
         }
 
+        // Mid-targeting (see RunePartyPlugin#beginItemTargeting) is the requires_target sibling of
+        // the requires_placement card just above -- right-clicking the highlighted player's own
+        // "Use <item>" entry (see RunePartyPlugin#onMenuEntryAdded) is the real confirm step, same
+        // "status readout plus an escape hatch" restraint that card's own doc explains.
+        String targetKey = plugin.getItemTargetKey();
+        if (targetKey != null)
+        {
+            itemsCard.setVisible(true);
+            String key = "targeting:" + targetKey;
+            if (key.equals(lastItemsKey)) return;
+            lastItemsKey = key;
+
+            itemUsePanel.removeAll();
+            JLabel hint = new JLabel("<html>Right-click another player and choose \"Use "
+                + Items.get(targetKey).getDisplayName() + "\", or Cancel below.</html>");
+            hint.setAlignmentX(LEFT_ALIGNMENT);
+            itemUsePanel.add(hint);
+            itemUsePanel.add(Box.createVerticalStrut(6));
+            JButton cancelBtn = new JButton("Cancel");
+            cancelBtn.setAlignmentX(LEFT_ALIGNMENT);
+            cancelBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+            cancelBtn.addActionListener(e -> plugin.cancelItemTargeting());
+            itemUsePanel.add(cancelBtn);
+            itemUsePanel.revalidate();
+            itemUsePanel.repaint();
+            return;
+        }
+
         RosterReducer.RosterEntry localEntry = null;
         String localRsn = plugin.getLocalRsn();
         if (localRsn != null)
@@ -553,6 +581,7 @@ public class RunePartyPanel extends PluginPanel
             useBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
             useBtn.addActionListener(e -> {
                 if (item.requiresPlacement()) plugin.beginItemPlacement(itemKey);
+                else if (item.requiresTarget()) plugin.beginItemTargeting(itemKey);
                 else plugin.useItem(itemKey);
             });
             itemUsePanel.add(useBtn);

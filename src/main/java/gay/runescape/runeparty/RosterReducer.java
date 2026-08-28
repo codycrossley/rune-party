@@ -17,6 +17,15 @@ public class RosterReducer
     private final ConcurrentHashMap<String, Integer> coinsByPlayer = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Integer> goldenGnomeCountByPlayer = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Map<String, Integer>> itemsByPlayer = new ConcurrentHashMap<>(); // itemKey -> count held
+    // How many turns this player still owes skipping, from Tele Block(s) landed on them -- see
+    // Events.TELE_BLOCK_APPLIED/TURN_SKIPPED below. Unlike coinsByPlayer/goldenGnomeCountByPlayer,
+    // this has no counterpart in ApiClient.RosterPlayerOut/the roster REST snapshot yet (see
+    // syncFromRoster/loadSnapshot) -- a client that resyncs via that snapshot rather than replaying
+    // the full event log would briefly show 0 here for an already-stacked player until the next
+    // TELE_BLOCK_APPLIED/TURN_SKIPPED arrives. Purely cosmetic gap (the server's own enforcement in
+    // _start_next_eligible_turn never reads this client-side copy), left as a known V1 gap rather
+    // than plumbing a new roster-endpoint field for it.
+    private final ConcurrentHashMap<String, Integer> teleblockedByPlayer = new ConcurrentHashMap<>();
 
     public static final class RosterEntry
     {
@@ -34,8 +43,11 @@ public class RosterReducer
         public final int coins;
         public final int goldenGnomeCount;
         public final Map<String, Integer> items;
+        /** How many turns this player still owes skipping from a Tele Block -- see
+         * teleblockedByPlayer's own doc. */
+        public final int teleblocked;
 
-        public RosterEntry(String rsn, RunePartyRole role, boolean online, String number, String colorNumber, boolean joined, int coins, int goldenGnomeCount, Map<String, Integer> items)
+        public RosterEntry(String rsn, RunePartyRole role, boolean online, String number, String colorNumber, boolean joined, int coins, int goldenGnomeCount, Map<String, Integer> items, int teleblocked)
         {
             this.rsn = rsn;
             this.role = role;
@@ -46,6 +58,7 @@ public class RosterReducer
             this.coins = coins;
             this.goldenGnomeCount = goldenGnomeCount;
             this.items = items;
+            this.teleblocked = teleblocked;
         }
     }
 
@@ -65,6 +78,12 @@ public class RosterReducer
     {
         if (canonicalRsn == null) return Collections.emptyMap();
         return itemsByPlayer.getOrDefault(canonicalRsn.toLowerCase(Locale.ROOT), Collections.emptyMap());
+    }
+
+    public int getTeleblocked(String canonicalRsn)
+    {
+        if (canonicalRsn == null) return 0;
+        return teleblockedByPlayer.getOrDefault(canonicalRsn.toLowerCase(Locale.ROOT), 0);
     }
 
     /** Authoritative resync against the server's own roster (unlike apply(), which only folds
@@ -137,6 +156,7 @@ public class RosterReducer
         coinsByPlayer.clear();
         goldenGnomeCountByPlayer.clear();
         itemsByPlayer.clear();
+        teleblockedByPlayer.clear();
     }
 
     public void loadSnapshot(List<ApiClient.RosterPlayerOut> players)
@@ -274,6 +294,29 @@ public class RosterReducer
                 inventory.compute(itemKey, (k, v) -> (v == null || v <= 1) ? null : v - 1);
                 break;
             }
+            case Events.TELE_BLOCK_APPLIED:
+            {
+                // `player` is who got blocked (the target), not who cast it -- see events.py's own
+                // doc. `stacks` is the new total, not a delta, same "real total, not a delta" shape
+                // COINS_CHANGED/GOLDEN_GNOME_PURCHASED already carry.
+                String playerRaw = Json.requiredStr(e.payload, type, "player");
+                if (playerRaw == null) return;
+                String key = canonicalKey(playerRaw);
+                if (key == null) return;
+                Integer stacks = Json.requiredInt(e.payload, type, "stacks");
+                if (stacks != null) teleblockedByPlayer.put(key, stacks);
+                break;
+            }
+            case Events.TURN_SKIPPED:
+            {
+                String playerRaw = Json.requiredStr(e.payload, type, "player");
+                if (playerRaw == null) return;
+                String key = canonicalKey(playerRaw);
+                if (key == null) return;
+                Integer stacksRemaining = Json.requiredInt(e.payload, type, "stacksRemaining");
+                if (stacksRemaining != null) teleblockedByPlayer.put(key, stacksRemaining);
+                break;
+            }
         }
     }
 
@@ -291,7 +334,8 @@ public class RosterReducer
             int coins = coinsByPlayer.getOrDefault(key, 0);
             int goldenGnomeCount = goldenGnomeCountByPlayer.getOrDefault(key, 0);
             Map<String, Integer> items = new HashMap<>(itemsByPlayer.getOrDefault(key, Collections.emptyMap()));
-            out.add(new RosterEntry(display, role, online, number, colorNumber, joined, coins, goldenGnomeCount, items));
+            int teleblocked = teleblockedByPlayer.getOrDefault(key, 0);
+            out.add(new RosterEntry(display, role, online, number, colorNumber, joined, coins, goldenGnomeCount, items, teleblocked));
         }
         out.sort((a, b) ->
         {

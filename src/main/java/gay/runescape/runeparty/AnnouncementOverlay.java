@@ -256,6 +256,7 @@ public class AnnouncementOverlay extends Overlay
         renderWelcomeBanner(g);
         renderGameStartBanner(g);
         renderTurnAnnouncement(g);
+        renderTurnSkippedAnnouncement(g);
         renderSpinHint(g);
         renderGoldenGnomeOutcome(g);
         renderJadEncounter(g);
@@ -263,6 +264,7 @@ public class AnnouncementOverlay extends Overlay
         renderItemSpinner(g);
         renderItemCapBlocked(g);
         renderItemUsedAnnouncement(g);
+        renderTeleBlockCastAnnouncement(g);
         renderCoinTrapAnnouncement(g);
         renderMinigameBanner(g);
         renderMinigameSpinner(g);
@@ -297,6 +299,30 @@ public class AnnouncementOverlay extends Overlay
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(36f));
         drawCenteredText(g, text, client.getCanvasWidth() / 2, client.getCanvasHeight() / 4, color, alpha);
+    }
+
+    /** Stands in for renderTurnAnnouncement on a player whose turn was skipped by a Tele Block --
+     * see RunePartyPlugin.turnSkippedAnnounce's own doc for why this arms instead of, never
+     * alongside, the regular turn banner for that player. Same size/position/seat-color treatment
+     * as "Your Turn!" so it reads as the same *kind* of announcement, just a different outcome. */
+    private void renderTurnSkippedAnnouncement(Graphics2D g)
+    {
+        String rsn = plugin.getTurnSkippedRsn();
+        if (rsn == null) return;
+
+        Float alpha = BannerAnim.fadeAlpha(plugin.getTurnSkippedUntil(), FADE_DURATION_MS);
+        if (alpha == null) return;
+
+        String text = isLocal(rsn) ? "Your Turn Was Skipped!" : rsn + "'s Turn Was Skipped!";
+
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
+        Color color = seatColor != null ? seatColor.awt : Color.WHITE;
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(36f));
+        drawCenteredText(g, text, client.getCanvasWidth() / 2, client.getCanvasHeight() / 4, color, alpha);
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(16f));
+        drawCenteredText(g, "Tele Blocked", client.getCanvasWidth() / 2, client.getCanvasHeight() / 4 + 26, color, alpha);
     }
 
     /** Dispatches to whichever half of the Spin hint applies to the local viewer -- "Use the SPIN!
@@ -790,6 +816,42 @@ public class AnnouncementOverlay extends Overlay
             g.setFont(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_SUBTITLE_SIZE));
             drawCenteredText(g, subtitle, centerX, y + 28, Color.LIGHT_GRAY, alpha);
         }
+    }
+
+    /** Draws "You/&lt;caster&gt; cast teleblock on &lt;target&gt;/you!" plus a matching "You/
+     * &lt;target&gt; will lose {your/their} next turn." subtitle on TELE_BLOCK_APPLIED -- see
+     * RunePartyPlugin's own teleBlockCastAnnounce/scheduleTeleBlockCastAnnouncement. Same two-line
+     * title/subtitle layout/sizing as renderItemUsedAnnouncement, just not driven by that mechanism
+     * (see TeleBlockItem's own doc for why). Personalized for whichever of the two roles the local
+     * viewer actually is -- never both, since the server refuses a self-target (see app.py's
+     * use_item_on_player), so isLocal(caster) and isLocal(target) can't both be true at once; a
+     * third-party viewer (neither) falls back to naming both literally, same as every other
+     * two-party outcome banner here (e.g. renderJadOutcome's own isLocal(rsn) split, just with a
+     * second name to account for). */
+    private void renderTeleBlockCastAnnouncement(Graphics2D g)
+    {
+        Float alpha = BannerAnim.fadeAlpha(plugin.getTeleBlockCastUntil(), ITEM_USED_ANNOUNCE_FADE_MS);
+        if (alpha == null) return;
+        String caster = plugin.getTeleBlockCastCasterRsn();
+        String target = plugin.getTeleBlockCastTargetRsn();
+        if (caster == null || target == null) return;
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 3;
+
+        boolean isCaster = isLocal(caster);
+        boolean isTarget = isLocal(target);
+
+        String casterPart = isCaster ? "You" : caster;
+        String targetPart = isTarget ? "you" : target;
+        String title = casterPart + " cast teleblock on " + targetPart + "!";
+        String subtitle = isTarget ? "You will lose your next turn." : target + " will lose their next turn.";
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_TITLE_SIZE));
+        drawCenteredText(g, title, centerX, y, Color.WHITE, alpha);
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_SUBTITLE_SIZE));
+        drawCenteredText(g, subtitle, centerX, y + 28, Color.LIGHT_GRAY, alpha);
     }
 
     /** Draws "You/&lt;rsn&gt; landed on a Coin Trap!" on COIN_TRAP_TRIGGERED -- plain single-line
