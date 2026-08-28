@@ -190,27 +190,30 @@ public class ApiClient
         }
     }
 
-    /** Accepts or declines a pending Golden Gnome offer (see RunePartyPlugin's GOLDEN_GNOME_OFFERED
-     * handling) -- triggered by the player's own YES/NO emote, not a panel button; there's no
-     * standalone "walk up and buy one anytime" flow anymore now that a Golden Gnome is a modifier
-     * on a PATH tile rather than a course stop of its own. The server -- not this call's caller --
-     * checks and debits the coin balance on accept; an unaffordable accept simply resolves to the
-     * "cant_afford" outcome rather than ever letting the client decide affordability. */
-    public void respondGoldenGnomeOffer(String gameId, String playerRsn, String playerToken, boolean accept) throws IOException
+    /** Buys the Golden Gnome currently standing at (x, y, plane) -- see the server's own
+     * purchase-golden-gnome endpoint. A free side-action during the local player's own pending
+     * roll, triggered by a right-click "Purchase Golden Gnome" menu entry rather than an emote --
+     * doesn't touch pendingRoll or advance the turn, so confirmArrival is still a separate call
+     * afterward. 409s if it isn't genuinely the local player's turn, no roll is pending, the tile
+     * isn't reachable within the current roll, they've already bought one this turn, or they can't
+     * afford it -- the server, not this call's caller, checks and debits the coin balance. */
+    public void purchaseGoldenGnome(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
-        body.addProperty("accept", accept);
+        body.addProperty("x", x);
+        body.addProperty("y", y);
+        body.addProperty("plane", plane);
 
-        try (Response resp = post("/v1/games/" + gameId + "/respond-golden-gnome-offer", body, playerToken))
+        try (Response resp = post("/v1/games/" + gameId + "/purchase-golden-gnome", body, playerToken))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Respond to Golden Gnome offer failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new IOException("Purchase Golden Gnome failed (" + resp.code() + "): " + raw);
         }
     }
 
     /** Reports the local player's BOW emote during a pending Jad encounter -- same
-     * report-then-server-decides shape as respondGoldenGnomeOffer. 409s if the encounter isn't
+     * report-then-server-decides shape as answerTrueOrFalse. 409s if the encounter isn't
      * pending for this player, or if it already smashed (the bow window expired first). */
     public void bowToJad(String gameId, String playerRsn, String playerToken) throws IOException
     {

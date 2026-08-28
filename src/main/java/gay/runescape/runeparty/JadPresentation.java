@@ -15,7 +15,8 @@ final class JadPresentation
 
     // Real state, applied catch-up or not: non-null exactly while an encounter is outstanding --
     // gates whether a BOW emote does anything (see RunePartyPlugin#isLocalPlayerAwaitingJadBow) and
-    // the encounter banner/countdown, same role offerRsn plays for GoldenGnomePresentation.
+    // the encounter banner/countdown, same "real state gating a pending decision" role pendingRoll
+    // plays for a roll.
     private volatile String encounterRsn = null;
     // Cosmetic-only (see the JAD_AWAKENED handler below): when the local client's own countdown
     // should count down from. Deliberately always equal to revealAt (see that field's own doc) --
@@ -131,10 +132,8 @@ final class JadPresentation
 
                     // The "smashed" loss itself (COINS_CHANGED reason=jad_smash, or
                     // GOLDEN_GNOME_LOST) already has its own chat announcement -- this one's scoped
-                    // to "bowed" only, same "the event carrying the actual outcome is what
-                    // announces it" split GoldenGnomePresentation's own "declined" (silent) vs
-                    // "purchased" (announced by GOLDEN_GNOME_PURCHASED, not
-                    // GOLDEN_GNOME_OFFER_RESOLVED) already follows.
+                    // to "bowed" only, so each outcome's chat line comes from the event that
+                    // actually carries it, not a generic dismissal here.
                     if ("bowed".equals(resolvedOutcome))
                     {
                         plugin.addChatMessage(resolvedRsn + " bowed before Jad!");

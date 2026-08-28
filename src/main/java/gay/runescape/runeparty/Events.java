@@ -28,8 +28,6 @@ public final class Events
     public static final String GAME_STARTED = "GAME_STARTED";
     public static final String GOLDEN_GNOME_LOST = "GOLDEN_GNOME_LOST";
     public static final String GOLDEN_GNOME_MOVED = "GOLDEN_GNOME_MOVED";
-    public static final String GOLDEN_GNOME_OFFERED = "GOLDEN_GNOME_OFFERED";
-    public static final String GOLDEN_GNOME_OFFER_RESOLVED = "GOLDEN_GNOME_OFFER_RESOLVED";
     public static final String GOLDEN_GNOME_PURCHASED = "GOLDEN_GNOME_PURCHASED";
     public static final String ITEM_CAP_BLOCKED = "ITEM_CAP_BLOCKED";
     public static final String ITEM_GRANTED = "ITEM_GRANTED";

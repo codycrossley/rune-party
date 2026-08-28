@@ -108,6 +108,7 @@ public class TileOverlay extends Overlay
         renderReturnToPositionArrow(g);
         renderStartArrow(g);
         renderItemPlacementArrows(g);
+        renderGoldenGnomePurchaseArrow(g);
 
         return null;
     }
@@ -218,16 +219,16 @@ public class TileOverlay extends Overlay
      * requirement server-side-of-the-gesture (the Spin emote does nothing until they're back), this
      * is purely the visual telling them where "back" is. Suppressed during a mini-game the same way
      * renderTargetArrow is (see that method's own doc) -- once minigameActive flips true there's no
-     * tile left to return to until the round's next TURN_STARTED. Same reasoning covers a pending
-     * Golden Gnome offer: pendingRoll is already false by the time one exists (PLAYER_MOVED clears
-     * it before the offer is even created), so without this check, wandering off mid-offer -- while
-     * deciding whether to buy -- would make this arrow reappear too, even though "return" isn't
-     * really the point right now. Unlike renderTargetArrow (which broadcasts whose turn is
-     * resolving to everyone watching), this only ever renders for the mover themselves -- it's a
-     * personal nudge to walk back, not board state anyone else needs to see. */
+     * tile left to return to until the round's next TURN_STARTED. Also suppressed for the whole
+     * duration of a pending roll (isPendingRoll), which covers wandering off toward the Golden
+     * Gnome to purchase it (see purchaseGoldenGnomeAt) just as well as any other mid-roll detour --
+     * "return" isn't the point until they've actually confirmed arrival. Unlike renderTargetArrow
+     * (which broadcasts whose turn is resolving to everyone watching), this only ever renders for
+     * the mover themselves -- it's a personal nudge to walk back, not board state anyone else needs
+     * to see. */
     private void renderReturnToPositionArrow(Graphics2D g)
     {
-        if (plugin.isPendingRoll() || plugin.isMinigameActive() || plugin.getGoldenGnomeOfferRsn() != null) return;
+        if (plugin.isPendingRoll() || plugin.isMinigameActive()) return;
         String moverRsn = plugin.getCurrentTurnRsn();
         if (moverRsn == null || !isLocalPlayer(moverRsn)) return;
 
@@ -305,6 +306,35 @@ public class TileOverlay extends Overlay
         {
             drawBouncingArrowWithLabel(g, point, "Place", COLOR_PLACEMENT_ARROW);
         }
+    }
+
+    /** "Purchase!" arrow over the Golden Gnome's own current tile while the local player has a
+     * roll pending on their own turn -- see RunePartyPlugin#addGoldenGnomePurchaseMenuEntry, the
+     * right-click entry this arrow is pointing at. Local-only, same reasoning
+     * renderItemPlacementArrows gives: nobody but the current roller can actually act on the menu
+     * entry it's advertising. Gated on exactly the same conditions that menu entry itself checks
+     * (already-purchased-this-turn, reachability) -- reported: this used to skip both, so the
+     * arrow kept advertising a purchase the menu entry would no longer even offer, either because
+     * it was already bought this turn or because the gnome had relocated somewhere out of reach.
+     * Still doesn't re-check affordability -- same as the menu entry, purchase-golden-gnome is the
+     * real authority on that (see that endpoint's own doc); showing the arrow for a purchase that
+     * turns out unaffordable just means an attempt from here 409s, same as any other doomed click.
+     * Uses the Golden Gnome tile type's own served color, same reasoning renderStartArrow ties its
+     * own arrow back to START's own green. */
+    private void renderGoldenGnomePurchaseArrow(Graphics2D g)
+    {
+        if (!plugin.isPendingRoll()) return;
+        if (plugin.isGoldenGnomePurchasedThisTurn()) return;
+        String moverRsn = plugin.getCurrentTurnRsn();
+        if (moverRsn == null || !isLocalPlayer(moverRsn)) return;
+
+        WorldPoint goldenGnomePoint = plugin.findGoldenGnomeTilePoint();
+        if (goldenGnomePoint == null) return;
+
+        Integer goldenGnomePathIndex = tileReducer.pathIndexAt(goldenGnomePoint);
+        if (goldenGnomePathIndex == null || !plugin.getPendingReachableIndices().contains(goldenGnomePathIndex)) return;
+
+        drawBouncingArrowWithLabel(g, goldenGnomePoint, "Purchase!", defaultColorFor("GOLDEN_GNOME_TILE"));
     }
 
     private Player findPlayerByRsn(String rsn)

@@ -61,7 +61,7 @@ final class MinigamePresentation
     private volatile boolean minigameCountdownStarted = false;
     private volatile boolean minigameCountdownSkippedForClient = false;
     private volatile long minigameCountdownBannerUntil = 0;
-    // Same idea as GoldenGnomePresentation's awaitingYesFinish/NoFinish, one per response to a
+    // Same idea as JadPresentation's own awaitingBowFinish, one per response to a
     // pending mini-game ready-check/True-or-False round -- see RunePartyPlugin#onAnimationChanged,
     // which consults these via the arm/isAwaiting/clear methods below as part of the same
     // priority-ordered "which gesture am I waiting for" chain every other feature's own awaiting

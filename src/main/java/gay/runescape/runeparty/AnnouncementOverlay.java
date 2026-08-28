@@ -257,7 +257,6 @@ public class AnnouncementOverlay extends Overlay
         renderGameStartBanner(g);
         renderTurnAnnouncement(g);
         renderSpinHint(g);
-        renderGoldenGnomeOffer(g);
         renderGoldenGnomeOutcome(g);
         renderJadEncounter(g);
         renderJadOutcome(g);
@@ -303,8 +302,8 @@ public class AnnouncementOverlay extends Overlay
     /** Dispatches to whichever half of the Spin hint applies to the local viewer -- "Use the SPIN!
      * emote..." (renderSpinHintSelf) for whoever's actually up, "Waiting for &lt;player&gt; to roll
      * the dice..." (renderSpinHintWaiting) for everyone else at the table, mirroring
-     * renderTurnAnnouncement/renderGoldenGnomeOffer's own "same moment, addressed per viewer"
-     * pattern. Neither half is tied to a server event or a fixed duration -- both are continuous
+     * renderTurnAnnouncement's own "same moment, addressed per viewer" pattern. Neither half is
+     * tied to a server event or a fixed duration -- both are continuous
      * reads of plugin state (isLocalPlayerReadyToRoll / isAwaitingSomeonesRoll) that disappear the
      * instant they stop being true, same as before this split. The bystander half explicitly checks
      * it isn't looking at its own mover first, so someone who's wandered off their tile mid-turn
@@ -405,83 +404,14 @@ public class AnnouncementOverlay extends Overlay
         drawLeftAlignedText(g, suffix, x, y, SPIN_HINT_COLOR, alpha);
     }
 
-    /** Draws the Golden Gnome offer -- "You found a GOLDEN GNOME!" (with "GOLDEN GNOME" in the
-     * Mario Party Hudson font, same gold as "SHOWDOWN", stitched into the surrounding plain-white
-     * text via drawLeftAlignedText the same way renderSpinHint stitches "SPIN"), then a subtitle and
-     * either the real YES/NO emote instructions (see drawEmoteInstruction, "YES"/"NO" get the same
-     * Mario-Party-logo rainbow-letter treatment as "SPIN") or a "waiting on them" line underneath,
-     * depending on who's looking. Broadcast to everyone (like renderMinigameBanner/
-     * renderGameStartBanner), not local-only, since it's a shared moment everyone's watching -- but
-     * addressed differently per viewer the same way renderTurnAnnouncement already is: the finder
-     * (goldenGnomeOfferRsn, compared against localRsn()) sees "You found..." plus the actual
-     * actionable instructions, since only their own YES/NO emote does anything (see
-     * RunePartyPlugin#isLocalPlayerAwaitingGoldenGnomeResponse); everyone else sees "&lt;rsn&gt;
-     * found..." plus a plain "waiting on them" line instead of instructions that don't apply to
-     * them. Duration-less like renderSpinHint -- it's a live read of goldenGnomeOfferRsn, not a
-     * timed fade, so it pulses instead for the same "needs to stay noticeable without a fade to draw
-     * the eye" reason. */
-    private void renderGoldenGnomeOffer(Graphics2D g)
-    {
-        String finderRsn = plugin.getGoldenGnomeOfferRsn();
-        if (finderRsn == null) return;
-
-        float alpha = GOLDEN_GNOME_OFFER_MIN_ALPHA + (1f - GOLDEN_GNOME_OFFER_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS);
-
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
-
-        boolean isLocal = isLocal(finderRsn);
-
-        String prefix = isLocal ? "You found a " : finderRsn + " found a ";
-        String goldenGnome = "GOLDEN GNOME";
-        String suffix = "!";
-
-        Font normalFont = FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_TITLE_SIZE);
-        Font goldenGnomeFont = MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_TITLE_SIZE);
-
-        g.setFont(normalFont);
-        int prefixWidth = g.getFontMetrics().stringWidth(prefix);
-        int suffixWidth = g.getFontMetrics().stringWidth(suffix);
-        g.setFont(goldenGnomeFont);
-        int goldenGnomeWidth = g.getFontMetrics().stringWidth(goldenGnome);
-
-        int x = centerX - (prefixWidth + goldenGnomeWidth + suffixWidth) / 2;
-
-        g.setFont(normalFont);
-        x = drawLeftAlignedText(g, prefix, x, y, Color.WHITE, alpha);
-        g.setFont(goldenGnomeFont);
-        x = drawLeftAlignedText(g, goldenGnome, x, y, WELCOME_TITLE_COLOR, alpha);
-        g.setFont(normalFont);
-        drawLeftAlignedText(g, suffix, x, y, Color.WHITE, alpha);
-
-        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE));
-        if (isLocal)
-        {
-            drawCenteredText(g, "Would you like to buy one?", centerX, y + 32, Color.WHITE, alpha);
-
-            Font emoteFont = FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
-            Font emoteWordFont = MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
-            drawEmoteInstruction(g, "YES", " emote: purchase", emoteFont, emoteWordFont, centerX, y + 66, alpha);
-            drawEmoteInstruction(g, "NO", " emote: decline", emoteFont, emoteWordFont, centerX, y + 96, alpha);
-        }
-        else
-        {
-            drawCenteredText(g, "Would " + finderRsn + " like to buy one?", centerX, y + 32, Color.WHITE, alpha);
-
-            g.setFont(FontManager.getRunescapeSmallFont());
-            drawCenteredText(g, "Waiting for " + finderRsn + " to decide...", centerX, y + 66, Color.LIGHT_GRAY, alpha);
-        }
-    }
-
     /** Draws the Jad encounter -- "You have awakened Jad!" / "&lt;rsn&gt; has awakened Jad!" (same
-     * per-viewer addressing split as renderGoldenGnomeOffer), Jad's own "Bow down to me!! Or
+     * per-viewer addressing split as renderTurnAnnouncement), Jad's own "Bow down to me!! Or
      * else!!" taunt (same for everyone), a countdown (purely cosmetic -- the server's own clock in
      * app.py's _run_jad_encounter is what actually enforces the window), then either the real BOW
      * emote instruction (see drawEmoteInstruction, reusing the exact same rainbow-letter treatment
-     * as Golden Gnome's own YES/NO) or a "waiting on them" line, depending on who's looking.
-     * Broadcast to everyone, not local-only, same reasoning renderGoldenGnomeOffer's own doc gives:
-     * a shared moment everyone's watching. Duration-less, pulses instead of fading for the same
-     * "needs to stay noticeable" reason.
+     * every other emote instruction here does) or a "waiting on them" line, depending on who's
+     * looking. Broadcast to everyone, not local-only -- a shared moment everyone's watching.
+     * Duration-less, pulses instead of fading for the same "needs to stay noticeable" reason.
      * <p>
      * Stops rendering entirely the instant the bow window closes (isJadSmashTriggered) -- bowing
      * then would just 409, and at that same instant JadPresentation arms the outcome banner (see
@@ -559,10 +489,11 @@ public class AnnouncementOverlay extends Overlay
         }
     }
 
-    /** Draws one Golden Gnome emote instruction line -- {@code '<word>' emote: <suffix>} -- with
-     * the quoted emote name in the Mario Party rainbow font and the rest in plain bold, all
-     * centered as one line the same way renderGoldenGnomeOffer's own title stitches segments
-     * together (just centered instead of pre-positioned, since there's no fixed left edge here). */
+    /** Draws one emote instruction line -- {@code '<word>' emote: <suffix>} -- with the quoted
+     * emote name in the Mario Party rainbow font and the rest in plain bold, all centered as one
+     * line the same segment-stitching approach drawLeftAlignedText's own callers use for a title
+     * split across fonts/colors (just centered instead of pre-positioned, since there's no fixed
+     * left edge here). */
     private void drawEmoteInstruction(Graphics2D g, String word, String suffix, Font plainFont, Font wordFont, int centerX, int y, float alpha)
     {
         String prefix = "'";
@@ -633,17 +564,18 @@ public class AnnouncementOverlay extends Overlay
         }
     }
 
-    /** Draws the Golden Gnome offer's follow-up -- "You got a Golden Gnome!" on a purchase, "You
-     * can't afford this!" if they accepted without enough coins, or "You declined!" if they
-     * declined outright (see GoldenGnomePresentation's GOLDEN_GNOME_OFFER_RESOLVED/
-     * GOLDEN_GNOME_PURCHASED handling, both of which arm this via plugin.armBanner rather than
-     * setting it directly -- so this banner queues politely behind whatever earlier effect, e.g. a
+    /** Draws the Golden Gnome purchase's own follow-up -- "You got a Golden Gnome!" -- fired from
+     * GoldenGnomePresentation's GOLDEN_GNOME_PURCHASED handling, armed via plugin.armBanner rather
+     * than set directly -- so this banner queues politely behind whatever earlier effect, e.g. a
      * Coin Trap animation or another Golden Gnome outcome, was already playing instead of stomping
      * over it; it's *also* the reason a Jad encounter's own reveal (renderJadEncounter) waits its
      * turn before showing). Addressed to whoever the outcome actually belongs to
-     * (goldenGnomeOutcomeRsn) the same way renderTurnAnnouncement/renderGoldenGnomeOffer already
-     * are -- "You..." for that player, "&lt;rsn&gt;..." for everyone else watching, rather than
-     * every client showing "You..." for an outcome that may well belong to someone else. */
+     * (goldenGnomeOutcomeRsn) the same way renderTurnAnnouncement already is -- "You..." for that
+     * player, "&lt;rsn&gt;..." for everyone else watching, rather than
+     * every client showing "You..." for an outcome that may well belong to someone else. A
+     * can't-afford/unreachable/already-bought-this-turn attempt never reaches here at all -- those
+     * are now plain 409s (see purchaseGoldenGnomeAt's own failure callback), not a broadcast
+     * outcome everyone else watching would need to see. */
     private void renderGoldenGnomeOutcome(Graphics2D g)
     {
         Float alpha = BannerAnim.fadeAlpha(plugin.getGoldenGnomeOutcomeBannerUntil(), GOLDEN_GNOME_OUTCOME_FADE_MS);
@@ -657,14 +589,6 @@ public class AnnouncementOverlay extends Overlay
         if ("purchased".equals(outcome))
         {
             text = isLocal ? "You got a Golden Gnome!" : rsn != null ? rsn + " got a Golden Gnome!" : null;
-        }
-        else if ("cant_afford".equals(outcome))
-        {
-            text = isLocal ? "You can't afford this!" : rsn != null ? rsn + " can't afford this!" : null;
-        }
-        else if ("declined".equals(outcome))
-        {
-            text = isLocal ? "You declined!" : rsn != null ? rsn + " declined!" : null;
         }
         else
         {
@@ -1030,10 +954,10 @@ public class AnnouncementOverlay extends Overlay
 
     /** Draws the mini-game ready-check screen -- the mini-game's name and instructions (moved
      * here from renderMinigameBanner's old sub-line), "Use the 'YES' emote when you're ready!" in
-     * the same rainbow-word treatment renderGoldenGnomeOffer uses for its own YES/NO instructions
-     * (see drawEmoteInstruction), then every seated, joined PLAYER in turn order (same order
+     * the same rainbow-word treatment renderJadEncounter uses for its own BOW instruction (see
+     * drawEmoteInstruction), then every seated, joined PLAYER in turn order (same order
      * StatsOverlay uses) with a Ready/Waiting status pulled from RunePartyPlugin#
-     * getMinigameReadyRsns. Not timer-gated, like renderGoldenGnomeOffer -- it's a live read of
+     * getMinigameReadyRsns. Not timer-gated -- it's a live read of
      * plugin state, kept visible for MINIGAME_COUNTDOWN_START_DELAY_MS after the last player's
      * ready lands (see the countdownRevealed check below) specifically so everyone gets a beat to
      * actually see every player marked "Ready!" before the screen changes, rather than it flipping

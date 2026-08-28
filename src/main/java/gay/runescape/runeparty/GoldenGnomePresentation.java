@@ -5,32 +5,29 @@ import net.runelite.api.coords.WorldPoint;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
-/** Golden Gnome offer/outcome/popup/relocation state and event handling -- extracted from
+/** Golden Gnome outcome/popup/relocation state and event handling -- extracted from
  * RunePartyPlugin per ARCHITECTURE_REVIEW.md's C1 finding, step 2. Owns its own fields, folds its
  * own event types via apply(), and clears itself via reset(); RunePartyPlugin still exposes every
- * getter under its original name, just delegating here, so no external caller needs to change. */
+ * getter under its original name, just delegating here, so no external caller needs to change.
+ * There's no more offer/response state here -- purchase_golden_gnome (see the server's own doc) is
+ * a direct request/response now, triggered by a right-click menu entry rather than an emote, so
+ * this class only ever reacts to what already happened (purchased/lost/moved), never gates a
+ * pending decision. */
 final class GoldenGnomePresentation
 {
     private final RunePartyPlugin plugin;
 
-    // ---- offer (server-driven, everyone sees it -- see GOLDEN_GNOME_OFFERED/
-    // GOLDEN_GNOME_OFFER_RESOLVED handling below). offerRsn is real state (non-null exactly while
-    // a response is outstanding, same role pendingRoll plays for a roll) -- it gates whether a
-    // YES/NO emote does anything (see RunePartyPlugin#isLocalPlayerAwaitingGoldenGnomeResponse) as
-    // well as the offer banner, and who AnnouncementOverlay#renderGoldenGnomeOffer addresses "You
-    // found..." to vs "<rsn> found...". outcome below is purely the follow-up announcement ("You
-    // got a Golden Gnome!"/"You can't afford this!"), cosmetic only -- its own rsn payload is what
-    // lets that banner address the actual buyer ("You...") differently from everyone else watching
-    // ("<rsn>..."), the same split offerRsn already does for the offer itself. ----
-    private volatile String offerRsn = null;
+    // ---- outcome banner ("You got a Golden Gnome!") -- fired on GOLDEN_GNOME_PURCHASED, its own
+    // rsn payload letting the banner address the actual buyer ("You...") differently from everyone
+    // else watching ("<rsn>...") ----
     private final TimedBanner<OutcomePayload> outcome = new TimedBanner<>();
 
     // ---- count popup (client-side timer -- see PlayerOverlay#drawGoldenGnomePopup, same "+1" ->
     // running-total shape and timing as the coin popup) ----
     private final TimedBanner<PopupPayload> popup = new TimedBanner<>();
 
-    // ---- relocation choreography (client-side timers -- see TileOverlay#updateGoldenGnomeModels,
-    // the only reader). TileReducer already has the *real* tile state the instant
+    // ---- relocation choreography (client-side timers -- see models/GoldenGnomeModel#update, the
+    // only reader). TileReducer already has the *real* tile state the instant
     // TILE_UNMARKED/TILE_MARKED land (tileReducer.apply runs unconditionally for every event,
     // before RunePartyPlugin's own switch on event type even looks at what kind it is) -- these
     // four fields are purely about *when the model visually catches up to that*, so the sequence
@@ -40,13 +37,6 @@ final class GoldenGnomePresentation
     private volatile long moveHideOldAt = 0; // model still force-shown at moveOldPoint until this passes, even though TileReducer already dropped it
     private volatile WorldPoint moveNewPoint = null;
     private volatile long moveShowNewAt = 0; // model force-hidden at moveNewPoint until this passes, even though TileReducer already has it
-
-    // Same idea as RunePartyPlugin#awaitingSpinFinish, one per response to a pending offer -- see
-    // RunePartyPlugin#onAnimationChanged, which consults these via the arm/isAwaiting/clear methods
-    // below as part of the same priority-ordered "which gesture am I waiting for" chain every
-    // other feature's own awaiting flags participate in.
-    private volatile boolean awaitingYesFinish = false;
-    private volatile boolean awaitingNoFinish = false;
 
     GoldenGnomePresentation(RunePartyPlugin plugin)
     {
@@ -58,61 +48,11 @@ final class GoldenGnomePresentation
         String type = e.type.toUpperCase(Locale.ROOT);
         switch (type)
         {
-            case Events.GOLDEN_GNOME_OFFERED:
-            {
-                // Real state, applied catch-up or not: non-null exactly while a response is
-                // outstanding, gating both a YES/NO emote doing anything (see
-                // RunePartyPlugin#isLocalPlayerAwaitingGoldenGnomeResponse) and rolling again (see
-                // isLocalPlayerReadyToRoll). Pauses TILE_EFFECT/COINS_CHANGED for the underlying
-                // tile until GOLDEN_GNOME_OFFER_RESOLVED -- see the server's confirm_arrival/
-                // respond_golden_gnome_offer split.
-                offerRsn = Json.requiredStr(e.payload, type, "player");
-                if (!catchingUp)
-                {
-                    plugin.addChatMessage(offerRsn + " found a Golden Gnome!");
-                }
-                break;
-            }
-
-            case Events.GOLDEN_GNOME_OFFER_RESOLVED:
-            {
-                offerRsn = null; // always clear, catch-up or not -- real state
-                awaitingYesFinish = false;
-                awaitingNoFinish = false;
-                // "purchased"'s own announcement comes from the GOLDEN_GNOME_PURCHASED case below
-                // instead (it carries the new total, which this event doesn't) -- "cant_afford" and
-                // "declined" both get their own announcement here, since this is the only event
-                // carrying either outcome. Armed via plugin.armBanner (scheduleAfterTurnEffects
-                // underneath) rather than set directly -- see that method's own doc: without it,
-                // this banner would show immediately even if some earlier effect (a Coin Trap
-                // animation, another Golden Gnome outcome, now a Jad encounter reveal) was still
-                // playing, stomping over it instead of queuing politely behind it.
-                if (!catchingUp)
-                {
-                    String resolvedOutcome = Json.requiredStr(e.payload, type, "outcome");
-                    String resolvedRsn = Json.requiredStr(e.payload, type, "player");
-                    if ("cant_afford".equals(resolvedOutcome))
-                    {
-                        plugin.armBanner(outcome, RunePartyPlugin.GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS,
-                            () -> new OutcomePayload("cant_afford", resolvedRsn), true);
-                        plugin.addChatMessage("Can't afford the Golden Gnome!");
-                    }
-                    else if ("declined".equals(resolvedOutcome))
-                    {
-                        plugin.armBanner(outcome, RunePartyPlugin.GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS,
-                            () -> new OutcomePayload("declined", resolvedRsn), true);
-                        plugin.addChatMessage(resolvedRsn + " declined the Golden Gnome!");
-                    }
-                }
-                break;
-            }
-
             case Events.GOLDEN_GNOME_PURCHASED:
             {
                 // The running total itself lives in rosterReducer (updated unconditionally by
                 // RunePartyPlugin.handleEvent's preamble, catch-up or not) -- everything here is
-                // purely cosmetic: the "You got a Golden Gnome!" announcement (outcome, reusing the
-                // same banner renderGoldenGnomeOutcome uses for "cant_afford"/"declined") plus the
+                // purely cosmetic: the "You got a Golden Gnome!" announcement (outcome) plus the
                 // "+1 Golden Gnome" popup, both fired from this one event since it's the only one
                 // carrying the new total the popup needs. The popup keeps its own existing
                 // immediate/self-queuing behavior (see enqueueCoinPopup's own queue-chaining
@@ -198,28 +138,15 @@ final class GoldenGnomePresentation
 
     void reset()
     {
-        offerRsn = null;
         outcome.reset();
         popup.reset();
         moveOldPoint = null;
         moveHideOldAt = 0;
         moveNewPoint = null;
         moveShowNewAt = 0;
-        awaitingYesFinish = false;
-        awaitingNoFinish = false;
     }
 
-    // ---- awaiting-emote flags, consulted by RunePartyPlugin#onAnimationChanged as part of its
-    // single priority-ordered "which gesture am I waiting for" chain ----
-    void armAwaitingYesFinish() { awaitingYesFinish = true; }
-    void armAwaitingNoFinish() { awaitingNoFinish = true; }
-    boolean isAwaitingYesFinish() { return awaitingYesFinish; }
-    boolean isAwaitingNoFinish() { return awaitingNoFinish; }
-    void clearAwaitingYesFinish() { awaitingYesFinish = false; }
-    void clearAwaitingNoFinish() { awaitingNoFinish = false; }
-
     // ---- getters, mirrored 1:1 by RunePartyPlugin's own facade under their original names ----
-    String getOfferRsn() { return offerRsn; }
     String getOutcome() { return outcome.payload != null ? outcome.payload.outcome : null; }
     String getOutcomeRsn() { return outcome.payload != null ? outcome.payload.rsn : null; }
     long getOutcomeBannerUntil() { return outcome.until; }
@@ -233,11 +160,13 @@ final class GoldenGnomePresentation
     WorldPoint getMoveNewPoint() { return moveNewPoint; }
     long getMoveShowNewAt() { return moveShowNewAt; }
 
-    /** Payload for the Golden Gnome purchase outcome banner ("You got a Golden Gnome!"/"You can't
-     * afford this!") -- see the GOLDEN_GNOME_OFFER_RESOLVED handler above. */
+    /** Payload for the Golden Gnome purchase outcome banner ("You got a Golden Gnome!") -- see the
+     * GOLDEN_GNOME_PURCHASED handler above, the only writer. outcome is always "purchased" in
+     * practice -- carried as a real field rather than a hardcoded string only because
+     * renderGoldenGnomeOutcome (see its own doc) still checks it explicitly. */
     private static final class OutcomePayload
     {
-        final String outcome; // "purchased" | "declined" | "cant_afford"
+        final String outcome; // "purchased", always -- see this class's own doc
         final String rsn;
 
         OutcomePayload(String outcome, String rsn)
