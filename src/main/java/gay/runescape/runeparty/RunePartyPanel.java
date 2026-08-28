@@ -73,6 +73,7 @@ public class RunePartyPanel extends PluginPanel
     private final JComboBox<CoursePreset> presetDropdown = new JComboBox<>();
     private final JButton placeBtn = new JButton("Place");
     private final JButton clearCourseBtn = new JButton("Clear Course");
+    private final JButton buildCustomBtn = new JButton("Build Custom Course");
 
     // Host game settings (LOBBY only) -- turns-per-player, sent along with Start Game
     private static final int DEFAULT_MAX_ROUNDS = 5;
@@ -377,13 +378,40 @@ public class RunePartyPanel extends PluginPanel
         clearCourseBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
         clearCourseBtn.addActionListener(e -> plugin.clearCourse());
 
+        // Free-form alternative to the preset dropdown/placeBtn above -- toggles
+        // RunePartyPlugin#customCourseBuildMode, mutually exclusive with preset placement mode
+        // (see that field's own doc). Text/enabled-state of both this and the preset controls is
+        // kept in sync with whichever mode's actually armed by refreshCourseBuildButton(), called
+        // from refresh() -- there's no separate "mid-build" status card the way item
+        // placement/targeting get, same restraint the preset flow's own placeBtn already takes
+        // (the in-world menu itself, not the panel, carries the rest of the interaction).
+        buildCustomBtn.setAlignmentX(LEFT_ALIGNMENT);
+        buildCustomBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        buildCustomBtn.addActionListener(e -> {
+            if (plugin.isCustomCourseBuildMode()) plugin.exitCustomCourseBuildMode();
+            else plugin.enterCustomCourseBuildMode();
+        });
+
         courseToolsPanel.add(caption);
         courseToolsPanel.add(Box.createVerticalStrut(4));
         courseToolsPanel.add(presetDropdown);
         courseToolsPanel.add(Box.createVerticalStrut(4));
         courseToolsPanel.add(placeBtn);
         courseToolsPanel.add(Box.createVerticalStrut(4));
+        courseToolsPanel.add(buildCustomBtn);
+        courseToolsPanel.add(Box.createVerticalStrut(4));
         courseToolsPanel.add(clearCourseBtn);
+    }
+
+    /** Keeps buildCustomBtn's label/the preset controls' enabled-state in sync with whichever
+     * course-building mode (if any) is actually armed -- see RunePartyPlugin#customCourseBuildMode/
+     * coursePlacementMode's own mutual-exclusion doc. Called from refresh(). */
+    private void refreshCourseBuildButton()
+    {
+        boolean building = plugin.isCustomCourseBuildMode();
+        buildCustomBtn.setText(building ? "Stop Building" : "Build Custom Course");
+        presetDropdown.setEnabled(!building);
+        placeBtn.setEnabled(!building);
     }
 
     private void copyJoinCodeToClipboard()
@@ -471,6 +499,7 @@ public class RunePartyPanel extends PluginPanel
 
         hostControlsCard.setVisible(isHost && (phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE));
         courseToolsPanel.setVisible(isHost && phase == GamePhase.LOBBY);
+        refreshCourseBuildButton();
         gameSettingsRow.setVisible(isHost && phase == GamePhase.LOBBY);
         startGameBtn.setVisible(isHost && phase == GamePhase.LOBBY);
         endGameBtn.setVisible(isHost && phase == GamePhase.ACTIVE);

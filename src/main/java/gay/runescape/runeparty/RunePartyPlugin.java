@@ -6,6 +6,7 @@ import gay.runescape.runeparty.items.Items;
 import gay.runescape.runeparty.models.JadEncounter;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -26,7 +27,9 @@ import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
+import net.runelite.api.Menu;
 import net.runelite.api.MenuAction;
+import net.runelite.api.MenuEntry;
 import net.runelite.api.Player;
 import net.runelite.api.Tile;
 import net.runelite.api.coords.WorldPoint;
@@ -523,6 +526,16 @@ public class RunePartyPlugin extends Plugin
     private volatile boolean coursePlacementMode = false;
     private volatile CoursePreset selectedPreset = null;
     private volatile int presetRotationSteps = 0; // quarter-turns clockwise: 0/1/2/3 = 0/90/180/270 degrees
+    // Free-form, one-tile-at-a-time alternative to stamping down a whole CoursePreset -- see
+    // enterCustomCourseBuildMode/addCustomCourseBuildMenuEntries. Mutually exclusive with
+    // coursePlacementMode: entering either one cancels the other, same "only one placement mode
+    // armed at a time" invariant itemPlacementKey/itemTargetKey already keep for item use.
+    private volatile boolean customCourseBuildMode = false;
+    // Armed by "Link From Here" -- the source pathIndex a subsequent "Link To Here"/"Unlink" click
+    // targets. Null when not mid-link. Client-local only, same as itemPlacementKey/itemTargetKey --
+    // the server never hears about this until an actual mark-tiles call goes out, so there's
+    // nothing to undo server-side just by backing out of it.
+    private volatile Integer courseLinkFromIndex = null;
 
     // ---- turn engine ----
     private volatile String currentTurnRsn = null;
@@ -1385,6 +1398,8 @@ public class RunePartyPlugin extends Plugin
 
     public void enterCoursePlacementMode()
     {
+        customCourseBuildMode = false; // mutually exclusive -- see that field's own doc
+        courseLinkFromIndex = null;
         coursePlacementMode = true;
         refreshPanel();
     }
@@ -1398,6 +1413,27 @@ public class RunePartyPlugin extends Plugin
     public void rotatePresetNext()
     {
         presetRotationSteps = (presetRotationSteps + 1) % 4;
+    }
+
+    public boolean isCustomCourseBuildMode()
+    {
+        return customCourseBuildMode;
+    }
+
+    public void enterCustomCourseBuildMode()
+    {
+        if (!isHost()) return;
+        coursePlacementMode = false; // mutually exclusive -- see customCourseBuildMode's own doc
+        customCourseBuildMode = true;
+        courseLinkFromIndex = null;
+        refreshPanel();
+    }
+
+    public void exitCustomCourseBuildMode()
+    {
+        customCourseBuildMode = false;
+        courseLinkFromIndex = null;
+        refreshPanel();
     }
 
     /** Unmarks every currently-committed course tile -- the host's "start over" button. */
@@ -1577,6 +1613,238 @@ public class RunePartyPlugin extends Plugin
         submitAction("Commit course", () -> apiClient.markTiles(gid, wk, tileSpecs));
     }
 
+    /** Same "Walk here" -> custom RUNELITE entries idiom as addPresetMenuEntries, for free-form
+     * course building -- one tile at a time instead of a whole preset stamped down atomically.
+     * Two mutually exclusive sub-modes, switched on courseLinkFromIndex:
+     * <p>
+     * Not linking (courseLinkFromIndex == null): a "Set Tile" submenu (see addSetTileSubmenu --
+     * places a new tile here, or retypes the one already here in place, see setCustomTileAt's own
+     * doc for why retyping preserves pathIndex/nextIndices rather than treating it as a fresh
+     * append), plus "Link From Here"/"Remove Tile" once the hovered spot already holds a course
+     * tile (courseTileAt != null).
+     * <p>
+     * Linking (courseLinkFromIndex != null): delegates to addCourseLinkMenuEntries for
+     * "Link To Here"/"Unlink" against whichever *other* tile is hovered, plus "Cancel Linking". */
+    private void addCustomCourseBuildMenuEntries()
+    {
+        Tile tile = client.getTopLevelWorldView().getSelectedSceneTile();
+        if (tile == null) return;
+        WorldPoint point = tile.getWorldLocation();
+        if (point == null) return;
+
+        Integer linkFrom = courseLinkFromIndex;
+        if (linkFrom != null)
+        {
+            addCourseLinkMenuEntries(point, linkFrom);
+            return;
+        }
+
+        client.createMenuEntry(-1)
+            .setOption("Cancel Building")
+            .setTarget("")
+            .setType(MenuAction.RUNELITE)
+            .onClick(me -> exitCustomCourseBuildMode());
+
+        TileReducer.TileEntry existing = courseTileAt(point);
+        if (existing != null)
+        {
+            client.createMenuEntry(-1)
+                .setOption("Link From Here")
+                .setTarget("")
+                .setType(MenuAction.RUNELITE)
+                .onClick(me -> { courseLinkFromIndex = existing.pathIndex; refreshPanel(); });
+
+            client.createMenuEntry(-1)
+                .setOption("<col=FF0000>Remove Tile</col>")
+                .setTarget("")
+                .setType(MenuAction.RUNELITE)
+                .onClick(me -> removeCustomTileAt(point, existing.tileType));
+        }
+
+        addSetTileSubmenu(point);
+    }
+
+    /** "Set Tile" -> one entry per non-modifier tile type (see MenuEntry#createSubMenu), populated
+     * from the already-fetched catalog (getTileTypeCatalog) rather than a hardcoded copy. Golden
+     * Gnome/Coin Trap are filtered out -- neither is ever host-authored directly, both are
+     * modifiers a separate dedicated flow places dynamically during real play (see tiles/base.py's
+     * own is_modifier doc). */
+    private void addSetTileSubmenu(WorldPoint point)
+    {
+        MenuEntry parent = client.createMenuEntry(-1)
+            .setOption("Set Tile")
+            .setTarget("")
+            .setType(MenuAction.RUNELITE);
+
+        Menu submenu = parent.createSubMenu();
+        List<ApiClient.TileTypeOut> types = new ArrayList<>(tileTypeCatalog.values());
+        types.sort(Comparator.comparing(t -> t.displayName));
+        for (ApiClient.TileTypeOut type : types)
+        {
+            if (type.isModifier) continue;
+            submenu.createMenuEntry(-1)
+                .setOption(type.displayName)
+                .setTarget("")
+                .setType(MenuAction.RUNELITE)
+                .onClick(me -> setCustomTileAt(point, type.key));
+        }
+    }
+
+    /** Linking half of addCustomCourseBuildMenuEntries, armed by "Link From Here" -- offers
+     * "Link To Here" (add {@code point}'s own pathIndex to {@code fromIndex}'s outgoing edges) or
+     * "Unlink" (remove it) depending on whether it's already there, plus "Cancel Linking". A no-op
+     * (beyond "Cancel Linking") if {@code point} isn't itself a course tile, is the armed source
+     * tile itself, or the armed source has since been removed out from under this -- same
+     * "doesn't offer an option the action method would just no-op/reject anyway" restraint every
+     * sibling menu-entry method here already takes. */
+    private void addCourseLinkMenuEntries(WorldPoint point, int fromIndex)
+    {
+        client.createMenuEntry(-1)
+            .setOption("Cancel Linking")
+            .setTarget("")
+            .setType(MenuAction.RUNELITE)
+            .onClick(me -> { courseLinkFromIndex = null; refreshPanel(); });
+
+        TileReducer.TileEntry target = courseTileAt(point);
+        if (target == null || target.pathIndex == null || target.pathIndex.equals(fromIndex)) return;
+
+        TileReducer.TileEntry source = tileReducer.tileAtIndex(fromIndex);
+        if (source == null) return; // armed source was removed out from under this -- nothing left to link from
+
+        boolean alreadyLinked = false;
+        for (int idx : tileReducer.resolveNextIndices(source))
+        {
+            if (idx == target.pathIndex) { alreadyLinked = true; break; }
+        }
+
+        if (alreadyLinked)
+        {
+            client.createMenuEntry(-1)
+                .setOption("<col=FF0000>Unlink</col>")
+                .setTarget("")
+                .setType(MenuAction.RUNELITE)
+                .onClick(me -> unlinkCustomTile(source, target.pathIndex));
+        }
+        else
+        {
+            client.createMenuEntry(-1)
+                .setOption("<col=00FF00>Link To Here</col>")
+                .setTarget("")
+                .setType(MenuAction.RUNELITE)
+                .onClick(me -> linkCustomTiles(source, target.pathIndex));
+        }
+    }
+
+    /** The course tile (has its own pathIndex) at {@code point}, or null -- see TileEntry#pathIndex's
+     * own doc for why a null pathIndex is exactly "not a course stop of its own" (a modifier).
+     * Scans tileReducer's live snapshot directly, same "the reducer is the one source of truth"
+     * reasoning findGoldenGnomeTilePoint already follows -- course sizes are small and this is only
+     * ever called from a menu-build callback, never a hot path. */
+    private TileReducer.TileEntry courseTileAt(WorldPoint point)
+    {
+        for (TileReducer.TileEntry entry : tileReducer.snapshot())
+        {
+            if (entry.pathIndex != null && entry.point.equals(point)) return entry;
+        }
+        return null;
+    }
+
+    /** Places (or retypes in place) a course tile at {@code point} -- called from the "Set Tile"
+     * submenu (see addSetTileSubmenu). If {@code point} already holds a course tile, this keeps
+     * its existing pathIndex/nextIndices and just swaps tileType -- fixing a mistake without
+     * breaking whatever already links to/from it. Otherwise it's a brand new tile, appended at
+     * tileReducer.courseLength() (one past the current highest pathIndex) and linked purely via
+     * the engine's own default +1 edge (no explicit nextIndices) -- the "sequential freehand
+     * placement, each click appends the next path index" shape CoursePreset's own class doc
+     * already envisioned for this feature. Deliberately doesn't reassign a fresh index after a
+     * mid-course removal left a gap -- courseLength() naturally reuses the freed slot on its own,
+     * no bespoke bookkeeping needed (see removeCustomTileAt's own doc for the removal side of
+     * this). */
+    private void setCustomTileAt(WorldPoint point, String tileTypeKey)
+    {
+        final String gid = gameId;
+        final String wk = writeKey;
+        if (gid == null || wk == null) return;
+
+        TileReducer.TileEntry existing = courseTileAt(point);
+        Integer pathIndex = existing != null ? existing.pathIndex : tileReducer.courseLength();
+        int[] nextIndices = existing != null ? existing.nextIndices : new int[0];
+
+        ApiClient.TileSpec spec = new ApiClient.TileSpec(point.getX(), point.getY(), point.getPlane(),
+            tileTypeKey, null, null, pathIndex, nextIndices);
+        submitAction("Set tile", () -> apiClient.markTiles(gid, wk, Collections.singletonList(spec)));
+    }
+
+    /** Unmarks a single course tile -- called from the "Remove Tile" menu entry. Deliberately
+     * doesn't rewrite anyone else's nextIndices to route around the gap it leaves behind: a
+     * dangling edge (explicit or default) is left for the host to notice -- RunePartyMapDialog's
+     * own route lines make this visible immediately -- and fix by hand, rather than this guessing
+     * at which rewrite is "correct" when the removed tile was itself a fork point or a merge
+     * target. */
+    private void removeCustomTileAt(WorldPoint point, String tileTypeKey)
+    {
+        final String gid = gameId;
+        final String wk = writeKey;
+        if (gid == null || wk == null) return;
+
+        submitAction("Remove tile", () -> apiClient.unmarkTiles(gid, wk,
+            Collections.singletonList(new ApiClient.PointSpec(point.getX(), point.getY(), point.getPlane(), tileTypeKey))));
+    }
+
+    /** Adds {@code targetIndex} to {@code source}'s own outgoing edges -- called from "Link To
+     * Here" (see addCourseLinkMenuEntries). If source currently has no explicit nextIndices (using
+     * the engine's own default +1 edge), this seeds the new explicit list with that resolved
+     * default first, then the new target -- adding a fork branch shouldn't silently cost the host
+     * their existing "continue forward" connection, the same shape CoursePreset.buildForkedLoop's
+     * own fork tile already demonstrates (nextIndices = {default-continuation, branch}). Clears
+     * courseLinkFromIndex optimistically on submit, same "client-local mode, nothing to undo
+     * server-side" reasoning cancelItemPlacement's own doc explains for its sibling modes. */
+    private void linkCustomTiles(TileReducer.TileEntry source, int targetIndex)
+    {
+        final String gid = gameId;
+        final String wk = writeKey;
+        courseLinkFromIndex = null;
+        refreshPanel();
+        if (gid == null || wk == null || source.pathIndex == null) return;
+
+        List<Integer> edges = new ArrayList<>();
+        for (int idx : tileReducer.resolveNextIndices(source)) edges.add(idx);
+        if (!edges.contains(targetIndex)) edges.add(targetIndex);
+
+        ApiClient.TileSpec spec = new ApiClient.TileSpec(source.point.getX(), source.point.getY(), source.point.getPlane(),
+            source.tileType, source.color, source.orientation, source.pathIndex, toIntArray(edges));
+        submitAction("Link tiles", () -> apiClient.markTiles(gid, wk, Collections.singletonList(spec)));
+    }
+
+    /** Removes {@code targetIndex} from {@code source}'s own explicit outgoing edges -- called
+     * from "Unlink" (see addCourseLinkMenuEntries). If that empties the list entirely, this sends
+     * an empty nextIndices array rather than omitting the field -- the server's own _mark_one_tile
+     * already treats an empty list and a missing one identically (`t.get("nextIndices") or None`),
+     * so this reverts the tile to the engine's default +1 edge exactly as if nextIndices had never
+     * been set. */
+    private void unlinkCustomTile(TileReducer.TileEntry source, int targetIndex)
+    {
+        final String gid = gameId;
+        final String wk = writeKey;
+        courseLinkFromIndex = null;
+        refreshPanel();
+        if (gid == null || wk == null || source.pathIndex == null) return;
+
+        List<Integer> edges = new ArrayList<>();
+        for (int idx : tileReducer.resolveNextIndices(source)) if (idx != targetIndex) edges.add(idx);
+
+        ApiClient.TileSpec spec = new ApiClient.TileSpec(source.point.getX(), source.point.getY(), source.point.getPlane(),
+            source.tileType, source.color, source.orientation, source.pathIndex, toIntArray(edges));
+        submitAction("Unlink tiles", () -> apiClient.markTiles(gid, wk, Collections.singletonList(spec)));
+    }
+
+    private static int[] toIntArray(List<Integer> list)
+    {
+        int[] arr = new int[list.size()];
+        for (int i = 0; i < arr.length; i++) arr[i] = list.get(i);
+        return arr;
+    }
+
     // -------------------------------------------------------------------------
     // Movement -- detect arrival at a rolled destination the same way Gnomeball
     // detects zone/out-of-bounds crossings: watch the local player's position
@@ -1686,6 +1954,11 @@ public class RunePartyPlugin extends Plugin
         if (phase == GamePhase.LOBBY && isHost() && coursePlacementMode)
         {
             addPresetMenuEntries();
+            return;
+        }
+        if (phase == GamePhase.LOBBY && isHost() && customCourseBuildMode)
+        {
+            addCustomCourseBuildMenuEntries();
             return;
         }
         if (phase == GamePhase.ACTIVE && itemPlacementKey != null)
@@ -2795,6 +3068,7 @@ public class RunePartyPlugin extends Plugin
         gameId = null; writeKey = null; playerToken = null; joinCode = null; hostRsn = null;
         phase = GamePhase.DISCONNECTED;
         coursePlacementMode = false; selectedPreset = null; presetRotationSteps = 0;
+        customCourseBuildMode = false; courseLinkFromIndex = null;
         currentTurnRsn = null; lastDiceRoll = null; pendingRoll = false; rollRequestSubmitted = false;
         awaitingSpinFinish = false;
         pendingTargetIndices = Collections.emptyList();
