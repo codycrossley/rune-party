@@ -602,13 +602,16 @@ public class AnnouncementOverlay extends Overlay
         drawCenteredText(g, text, client.getCanvasWidth() / 2, client.getCanvasHeight() / 3, color, alpha);
     }
 
-    /** Draws the Jad encounter's own follow-up -- "You chose to bow to Jad!" or "You chose not to
-     * bow to Jad!" -- once JAD_DISMISSED settles things either way (see JadPresentation's
-     * outcome TimedBanner, armed via plugin.armBanner the identical way renderGoldenGnomeOutcome's
-     * own banner is, so this queues behind whatever's still showing rather than colliding with it).
-     * Neither outcome is framed as clearly good or bad the way Golden Gnome's purchase is (no gold
-     * text here), since "not bowing" already has its own separate penalty messaging (chat + the
-     * coin/Golden Gnome popup) -- this banner is just stating what happened, not judging it. */
+    /** Draws the Jad encounter's own follow-up -- "Your loyalty will cost you N coins!" or "You
+     * chose not to bow to Jad!" -- once JAD_DISMISSED settles things either way (see
+     * JadPresentation's outcome TimedBanner, armed via plugin.armBanner the identical way
+     * renderGoldenGnomeOutcome's own banner is, so this queues behind whatever's still showing
+     * rather than colliding with it). The bowed path's text doubles as the up-front warning for the
+     * coin toll that's actually deducted later, once this banner's had its full
+     * JAD_OUTCOME_BANNER_DURATION_MS to be read and the bow-acknowledge animation's played (see
+     * RunePartyPlugin's own JAD_DISMISSED/COINS_CHANGED handling) -- unlike "not bowing," whose
+     * penalty messaging (chat + the coin/Golden Gnome popup) is separate and reactive, this one's
+     * announced before it happens. */
     private void renderJadOutcome(Graphics2D g)
     {
         Float alpha = BannerAnim.fadeAlpha(plugin.getJadOutcomeBannerUntil(), GOLDEN_GNOME_OUTCOME_FADE_MS);
@@ -621,7 +624,8 @@ public class AnnouncementOverlay extends Overlay
         String text;
         if ("bowed".equals(outcome))
         {
-            text = isLocal ? "You chose to bow to Jad!" : rsn != null ? rsn + " chose to bow to Jad!" : null;
+            text = isLocal ? "Your loyalty will cost you " + RunePartyPlugin.JAD_BOW_COIN_COST + " coins!"
+                : rsn != null ? rsn + "'s loyalty will cost them " + RunePartyPlugin.JAD_BOW_COIN_COST + " coins!" : null;
         }
         else if ("smashed".equals(outcome))
         {

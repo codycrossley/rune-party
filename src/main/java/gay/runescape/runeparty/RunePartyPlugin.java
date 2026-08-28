@@ -267,22 +267,39 @@ public class RunePartyPlugin extends Plugin
     // rather than the smash's own one-shot animation.
     public static final int JAD_IDLE_ANIMATION_ID = 2650;
 
-    // Played once on the Jad model the instant the "You chose to bow to Jad!" outcome banner arms
-    // (see JadPresentation's JAD_DISMISSED "bowed" branch and JadEncounter#playBowThenClear) -- a
-    // one-shot reaction to being bowed to, same idiom as JAD_SMASH_ANIMATION_ID but for the
-    // opposite outcome. Purely client-side timing throughout (no server timer backs any of this,
-    // unlike the smash/penalty sequence -- bowing already closed the encounter server-side the
-    // instant it landed): JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS is a first estimate of how long
-    // 2655 itself plays for (not measured, same caveat JAD_SMASH_ANIMATION_SECONDS's own doc
-    // carries), after which Jad returns to JAD_IDLE_ANIMATION_ID for
+    // Played once on the Jad model after the "Your loyalty will cost you N coins!" outcome banner
+    // has had JAD_OUTCOME_BANNER_DURATION_MS to be read (see JadPresentation's JAD_DISMISSED
+    // "bowed" branch and RunePartyPlugin's own handleEvent, which schedules
+    // JadEncounter#playBowThenClear that far out instead of firing it immediately) -- a one-shot
+    // reaction to being bowed to, same idiom as JAD_SMASH_ANIMATION_ID but for the opposite
+    // outcome. Purely client-side timing throughout (no server timer backs any of this, unlike the
+    // smash/penalty sequence -- bowing, and the coin toll it costs, already closed the encounter
+    // server-side the instant it landed): JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS is a first estimate
+    // of how long 2655 itself plays for (not measured, same caveat JAD_SMASH_ANIMATION_SECONDS's
+    // own doc carries), after which Jad returns to JAD_IDLE_ANIMATION_ID for
     // JAD_BOW_ACKNOWLEDGE_IDLE_HOLD_MS before actually despawning.
     public static final int JAD_BOW_ACKNOWLEDGE_ANIMATION_ID = 2655;
     public static final long JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS = 1000;
     public static final long JAD_BOW_ACKNOWLEDGE_IDLE_HOLD_MS = 3000;
 
-    /** How long AnnouncementOverlay's Jad outcome banner ("You chose to/not to bow to Jad!") stays
-     * up -- fires on JAD_DISMISSED, same duration/queuing shape as
-     * GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS (see JadPresentation's own armBanner call). */
+    // Flat coin toll bowing costs (see AnnouncementOverlay's "Your loyalty will cost you..." banner
+    // and the COINS_CHANGED reason="jad_bow" popup) -- must match app.py's own JAD_BOW_COIN_COST.
+    // Only needed client-side as display text: the banner announces the *nominal* cost before the
+    // real COINS_CHANGED (already floored at 0 server-side by apply_coins_delta, same as any other
+    // debit) has even arrived, so unlike JAD_SMASH's own chat line -- which just echoes back
+    // whatever real delta the event already carried -- there's no event payload to read this from
+    // yet at the point the banner needs it. Loosely paired with the server constant, not
+    // protocol-coupled, same "close enough" idiom JAD_BOW_WINDOW_MS's own doc explains.
+    public static final int JAD_BOW_COIN_COST = 15;
+
+    /** How long AnnouncementOverlay's Jad outcome banner stays up -- "Your loyalty will cost you N
+     * coins!" on the bowed path, "You chose not to bow to Jad!" on the smashed one. Fires on
+     * JAD_DISMISSED/JAD_SMASH_TRIGGERED, same duration/queuing shape as
+     * GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS (see JadPresentation's own armBanner calls). The
+     * bowed path also reuses this same duration as the delay before the bow-acknowledge animation
+     * and the eventual coin popup fire (see handleEvent's JAD_DISMISSED/COINS_CHANGED cases), so
+     * the toll is never seen being deducted mid-sentence, before the announcement's even done
+     * fading. */
     public static final long JAD_OUTCOME_BANNER_DURATION_MS = GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
 
     /** How long AnnouncementOverlay's "GAME OVER!" title card stays up -- the first step of the
@@ -2213,18 +2230,44 @@ public class RunePartyPlugin extends Plugin
             {
                 jadPresentation.apply(e, catchingUp);
                 // "bowed" gets its own one-shot reaction (JAD_BOW_ACKNOWLEDGE_ANIMATION_ID, then
-                // back to JAD_IDLE_ANIMATION_ID -- see JadEncounter#playBowThenClear) timed off the
-                // same moment the "You chose to bow to Jad!" outcome banner arms (jadPresentation's
-                // own JAD_DISMISSED handling, called just above). Every other case (smashed, or a
-                // catching-up client with nothing to animate) despawns immediately instead -- by
-                // the time this fires on the smashed path, the whole encounter (including the
-                // smash animation) has already played out on its own server-timed schedule, so
-                // there's no "vanishes before it's drawn" risk left to guard against. A no-op if
-                // nothing's spawned, e.g. a catching-up client that never saw the TILE_EFFECT-driven
-                // spawn in the first place.
+                // back to JAD_IDLE_ANIMATION_ID -- see JadEncounter#playBowThenClear), held back
+                // JAD_OUTCOME_BANNER_DURATION_MS from this same moment rather than fired
+                // immediately, so the "Your loyalty will cost you N coins!" outcome banner
+                // (jadPresentation's own JAD_DISMISSED handling, called just above) has had its
+                // full duration to be read before Jad actually reacts -- see that constant's own
+                // doc for why the eventual coin popup (COINS_CHANGED reason="jad_bow" below) is
+                // timed off this same delay in turn. Every other case (smashed, or a catching-up
+                // client with nothing to animate) despawns immediately instead -- by the time this
+                // fires on the smashed path, the whole encounter (including the smash animation)
+                // has already played out on its own server-timed schedule, so there's no "vanishes
+                // before it's drawn" risk left to guard against. A no-op if nothing's spawned, e.g.
+                // a catching-up client that never saw the TILE_EFFECT-driven spawn in the first
+                // place.
                 if (!catchingUp && "bowed".equals(Json.safeStr(e.payload, "outcome")))
                 {
-                    jadEncounter.playBowThenClear();
+                    scheduleDelayed(jadEncounter::playBowThenClear, JAD_OUTCOME_BANNER_DURATION_MS);
+
+                    // Reserve the turn-effect gate for the *whole* client-timed bowed sequence up
+                    // front, not just the outcome banner's own duration -- jadPresentation.apply
+                    // above already extended it that far (armBanner's own extendGate=true), which
+                    // is only enough to stop the *next* turn/mini-game announcement from colliding
+                    // with the banner itself. Without this, that announcement (gated purely on
+                    // turnEffectGateUntil, see scheduleAfterTurnEffects) could still fire the moment
+                    // the banner fades while Jad's model is still mid-animation/idle-hold on screen,
+                    // or before the delayed "jad_bow" coin popup (COINS_CHANGED handling below) has
+                    // even appeared -- both of those extend the gate themselves too, but only once
+                    // each actually *runs* (JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS/COIN_POPUP_
+                    // DURATION_MS later), which is too late to stop an earlier announcement that
+                    // already fired in the gap. Whichever finishes later -- Jad's own despawn
+                    // (animation hold + idle hold) or the coin popup's own on-screen window -- wins;
+                    // Math.max inside extendTurnEffectGate makes those two later, smaller extensions
+                    // harmless no-ops rather than double-booking.
+                    long now = System.currentTimeMillis();
+                    long jadClearAt = now + JAD_OUTCOME_BANNER_DURATION_MS + JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS
+                        + JAD_BOW_ACKNOWLEDGE_IDLE_HOLD_MS;
+                    long coinPopupEndsAt = now + JAD_OUTCOME_BANNER_DURATION_MS + JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS
+                        + COIN_POPUP_DURATION_MS;
+                    extendTurnEffectGate(Math.max(jadClearAt, coinPopupEndsAt));
                 }
                 else
                 {
@@ -2319,7 +2362,7 @@ public class RunePartyPlugin extends Plugin
                 if (!catchingUp && ("standard_tile".equals(coinsChangedReason) || "item".equals(coinsChangedReason)
                     || "coin_trap".equals(coinsChangedReason) || "coin_rush".equals(coinsChangedReason)
                     || "true_or_false".equals(coinsChangedReason) || "jad_smash".equals(coinsChangedReason)
-                    || "dev_adjust".equals(coinsChangedReason)))
+                    || "jad_bow".equals(coinsChangedReason) || "dev_adjust".equals(coinsChangedReason)))
                 {
                     String coinsChangedRsn = Json.requiredStr(e.payload, type, "player");
                     Integer delta = Json.requiredInt(e.payload, type, "delta");
@@ -2327,15 +2370,37 @@ public class RunePartyPlugin extends Plugin
 
                     if (coinsChangedRsn != null)
                     {
-                        enqueueCoinPopup(coinsChangedRsn, delta != null ? delta : 0, total != null ? total : 0,
-                            COIN_POPUP_DURATION_MS, false);
-                        // Jad has no Golden Gnome to take here (see JadPresentation's own
-                        // GOLDEN_GNOME_LOST handling for that branch's own chat message) -- this is
-                        // the only feedback the coin-loss branch gets, matching Coin Trap's own
-                        // restraint (popup + chat, no dedicated banner).
-                        if ("jad_smash".equals(coinsChangedReason))
+                        // "jad_bow" is the one reason here that doesn't reflect its popup/chat the
+                        // instant the event lands -- the toll has to visibly land only *after* the
+                        // "Your loyalty will cost you N coins!" banner has been read and the
+                        // bow-acknowledge animation has played, not sight-unseen the moment the
+                        // server's already-resolved COINS_CHANGED happens to arrive (see
+                        // JAD_OUTCOME_BANNER_DURATION_MS's own doc for why handleEvent's
+                        // JAD_DISMISSED case delays the animation itself by the same amount). Every
+                        // other reason here has no such staged reveal to wait on, so they still fire
+                        // immediately.
+                        if ("jad_bow".equals(coinsChangedReason))
                         {
-                            addChatMessage("Jad smashes " + coinsChangedRsn + "! They lost " + Math.abs(delta != null ? delta : 0) + " coins!");
+                            int jadBowDelta = delta != null ? delta : 0;
+                            int jadBowTotal = total != null ? total : 0;
+                            scheduleDelayed(() ->
+                            {
+                                enqueueCoinPopup(coinsChangedRsn, jadBowDelta, jadBowTotal, COIN_POPUP_DURATION_MS, false);
+                                addChatMessage(coinsChangedRsn + "'s loyalty cost them " + Math.abs(jadBowDelta) + " coins!");
+                            }, JAD_OUTCOME_BANNER_DURATION_MS + JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS);
+                        }
+                        else
+                        {
+                            enqueueCoinPopup(coinsChangedRsn, delta != null ? delta : 0, total != null ? total : 0,
+                                COIN_POPUP_DURATION_MS, false);
+                            // Jad has no Golden Gnome to take here (see JadPresentation's own
+                            // GOLDEN_GNOME_LOST handling for that branch's own chat message) -- this
+                            // is the only feedback the coin-loss branch gets, matching Coin Trap's
+                            // own restraint (popup + chat, no dedicated banner).
+                            if ("jad_smash".equals(coinsChangedReason))
+                            {
+                                addChatMessage("Jad smashes " + coinsChangedRsn + "! They lost " + Math.abs(delta != null ? delta : 0) + " coins!");
+                            }
                         }
                     }
                 }

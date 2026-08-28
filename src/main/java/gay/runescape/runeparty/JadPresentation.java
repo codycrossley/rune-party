@@ -61,11 +61,16 @@ final class JadPresentation
 
     private volatile boolean awaitingBowFinish = false;
 
-    // ---- outcome banner ("You chose to bow to Jad!" / "You chose not to bow to Jad!") -- fired
-    // once the whole encounter's settled, either way, on JAD_DISMISSED. Armed via plugin.armBanner
-    // (see GoldenGnomePresentation's own outcome banner for the identical shape/reasoning), so it
-    // queues behind whatever's still showing rather than colliding with it, and reserves its own
-    // window so the *next* turn/mini-game announcement waits behind this in turn. ----
+    // ---- outcome banner ("Your loyalty will cost you N coins!" / "You chose not to bow to Jad!")
+    // -- fired once the whole encounter's settled, either way, on JAD_DISMISSED/
+    // JAD_SMASH_TRIGGERED. Armed via plugin.armBanner (see GoldenGnomePresentation's own outcome
+    // banner for the identical shape/reasoning), so it queues behind whatever's still showing
+    // rather than colliding with it, and reserves its own window so the *next* turn/mini-game
+    // announcement waits behind this in turn. The bowed path's own coin toll (COINS_CHANGED
+    // reason="jad_bow") isn't armed here at all -- RunePartyPlugin's own COINS_CHANGED handling
+    // arms that popup itself, deliberately delayed behind this banner and the bow-acknowledge
+    // animation rather than fired the instant this event lands (see
+    // RunePartyPlugin.JAD_OUTCOME_BANNER_DURATION_MS's own doc). ----
     private final TimedBanner<OutcomePayload> outcome = new TimedBanner<>();
 
     JadPresentation(RunePartyPlugin plugin)
