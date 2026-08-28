@@ -29,6 +29,8 @@ public final class Events
     public static final String GOLDEN_GNOME_LOST = "GOLDEN_GNOME_LOST";
     public static final String GOLDEN_GNOME_MOVED = "GOLDEN_GNOME_MOVED";
     public static final String GOLDEN_GNOME_PURCHASED = "GOLDEN_GNOME_PURCHASED";
+    public static final String HOME_TELEPORT_ARMED = "HOME_TELEPORT_ARMED";
+    public static final String HOME_TELEPORT_ARRIVED = "HOME_TELEPORT_ARRIVED";
     public static final String ITEM_CAP_BLOCKED = "ITEM_CAP_BLOCKED";
     public static final String ITEM_GRANTED = "ITEM_GRANTED";
     public static final String ITEM_USED = "ITEM_USED";

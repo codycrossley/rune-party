@@ -190,6 +190,27 @@ public class ApiClient
         }
     }
 
+    /** Reports that the local player has finished walking to the Start tile after using a Home
+     * Teleport -- see the server's own confirm-home-teleport-arrival endpoint, which is what
+     * actually pays out the reward (never at use time, see items/home_teleport.py's own doc). Same
+     * "client reports a position claim, server decides" trust boundary confirmArrival already
+     * uses, just not tied to a pending roll -- Home Teleport is a free action, so this can be
+     * called well after (even a turn or more after) the item was actually used. */
+    public void confirmHomeTeleportArrival(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("x", x);
+        body.addProperty("y", y);
+        body.addProperty("plane", plane);
+
+        try (Response resp = post("/v1/games/" + gameId + "/confirm-home-teleport-arrival", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Home Teleport arrival failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     /** Buys the Golden Gnome currently standing at (x, y, plane) -- see the server's own
      * purchase-golden-gnome endpoint. A free side-action during the local player's own pending
      * roll, triggered by a right-click "Purchase Golden Gnome" menu entry rather than an emote --

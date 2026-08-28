@@ -26,6 +26,12 @@ public class RosterReducer
     // _start_next_eligible_turn never reads this client-side copy), left as a known V1 gap rather
     // than plumbing a new roster-endpoint field for it.
     private final ConcurrentHashMap<String, Integer> teleblockedByPlayer = new ConcurrentHashMap<>();
+    // Canonical keys of players currently owed a Home Teleport arrival bonus -- see
+    // Events.HOME_TELEPORT_ARMED/HOME_TELEPORT_ARRIVED below. Not threaded through RosterEntry/
+    // snapshot() the way teleblockedByPlayer is -- nothing needs to *display* this per player, it's
+    // purely read by RunePartyPlugin's own onGameTick to decide whether to auto-fire
+    // confirmHomeTeleportArrival for the local player (see isHomeTeleportPending, the only reader).
+    private final Set<String> homeTeleportPendingByPlayer = ConcurrentHashMap.newKeySet();
 
     public static final class RosterEntry
     {
@@ -84,6 +90,12 @@ public class RosterReducer
     {
         if (canonicalRsn == null) return 0;
         return teleblockedByPlayer.getOrDefault(canonicalRsn.toLowerCase(Locale.ROOT), 0);
+    }
+
+    public boolean isHomeTeleportPending(String canonicalRsn)
+    {
+        if (canonicalRsn == null) return false;
+        return homeTeleportPendingByPlayer.contains(canonicalRsn.toLowerCase(Locale.ROOT));
     }
 
     /** Authoritative resync against the server's own roster (unlike apply(), which only folds
@@ -157,6 +169,7 @@ public class RosterReducer
         goldenGnomeCountByPlayer.clear();
         itemsByPlayer.clear();
         teleblockedByPlayer.clear();
+        homeTeleportPendingByPlayer.clear();
     }
 
     public void loadSnapshot(List<ApiClient.RosterPlayerOut> players)
@@ -315,6 +328,24 @@ public class RosterReducer
                 if (key == null) return;
                 Integer stacksRemaining = Json.requiredInt(e.payload, type, "stacksRemaining");
                 if (stacksRemaining != null) teleblockedByPlayer.put(key, stacksRemaining);
+                break;
+            }
+            case Events.HOME_TELEPORT_ARMED:
+            {
+                String playerRaw = Json.requiredStr(e.payload, type, "player");
+                if (playerRaw == null) return;
+                String key = canonicalKey(playerRaw);
+                if (key == null) return;
+                homeTeleportPendingByPlayer.add(key);
+                break;
+            }
+            case Events.HOME_TELEPORT_ARRIVED:
+            {
+                String playerRaw = Json.requiredStr(e.payload, type, "player");
+                if (playerRaw == null) return;
+                String key = canonicalKey(playerRaw);
+                if (key == null) return;
+                homeTeleportPendingByPlayer.remove(key);
                 break;
             }
         }

@@ -557,6 +557,10 @@ public class RunePartyPlugin extends Plugin
     // Never null, only ever empty.
     private volatile List<Integer> pendingReachableIndices = Collections.emptyList();
     private volatile boolean arrivalSubmitted = false; // guards confirm-arrival from firing every tick while the echo is in flight
+    // Guards confirmHomeTeleportArrival the same way arrivalSubmitted guards confirmArrival --
+    // see onGameTick's own Home Teleport check, which is independent of pendingRoll (see that
+    // field's own doc for why Home Teleport can be pending well outside any roll window).
+    private volatile boolean homeTeleportArrivalSubmitted = false;
     // Real state, applied catch-up or not: whether the current turn's player has already spent
     // their one-item-per-turn allowance -- reset on every TURN_STARTED, set by ITEM_USED. Mirrors
     // the server's own itemUsedThisTurn (see app.py's use_item).
@@ -1088,6 +1092,33 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
+    /** Reports arrival at the Start tile after using a Home Teleport -- called automatically from
+     * onGameTick once the local player has a pending arrival (see
+     * rosterReducer.isHomeTeleportPending) and is standing on their own tracked position (which a
+     * Home Teleport's own PLAYER_MOVED already set to Start the instant it was used, see
+     * items/home_teleport.py). Same retry-on-transient-failure-only shape as confirmArrival's own
+     * doc explains -- a definitive 4xx means the server's already rejected this exact claim (e.g.
+     * nothing was actually pending, or a stale HOME_TELEPORT_ARRIVED already closed it), so
+     * homeTeleportArrivalSubmitted staying true blocks a tick-every-retry spam; only a genuine
+     * transient failure resets it. */
+    private void confirmHomeTeleportArrival(WorldPoint pos)
+    {
+        String self = localRsn();
+        final String gid = gameId;
+        final String token = playerToken;
+        if (self == null || gid == null || token == null) return;
+
+        submitAction("Confirm Home Teleport arrival",
+            () -> apiClient.confirmHomeTeleportArrival(gid, self, token, pos.getX(), pos.getY(), pos.getPlane()), e ->
+        {
+            addChatMessage("Failed to confirm Home Teleport arrival: " + e.getMessage());
+            if (!(e instanceof ApiClient.ApiHttpException) || ((ApiClient.ApiHttpException) e).code >= 500)
+            {
+                homeTeleportArrivalSubmitted = false; // let the next tick retry
+            }
+        });
+    }
+
     // checkCoinRushCollection/collectCoinRushCoin now live on MinigamePresentation, along with the
     // Coin Rush fields/handleEvent cases/getters they back -- see ARCHITECTURE_REVIEW.md's C1
     // finding, step 2.
@@ -1571,6 +1602,21 @@ public class RunePartyPlugin extends Plugin
         if (isCoinRushActive() && isMinigamePlayable())
         {
             minigamePresentation.checkCoinRushCollection(selfPlayer);
+        }
+
+        // Also independent of the turn engine below -- unlike a rolled destination (pendingRoll,
+        // only ever true on the local player's own turn), a Home Teleport arrival can still be
+        // owed well after the turn it was armed on, whosever turn it currently is (see
+        // homeTeleportArrivalSubmitted's own doc). standingOnTrackedPositionCached already covers
+        // "have they actually walked over" -- a Home Teleport's own PLAYER_MOVED set the tracked
+        // position to Start the instant it was used, so this is the same "back on your own tracked
+        // tile" check confirmArrival's caller relies on, just not gated on pendingRoll/whose turn
+        // it is.
+        if (self != null && !homeTeleportArrivalSubmitted && standingOnTrackedPositionCached
+            && rosterReducer.isHomeTeleportPending(self))
+        {
+            homeTeleportArrivalSubmitted = true;
+            confirmHomeTeleportArrival(selfPlayer.getWorldLocation());
         }
 
         // GAME_STARTED fired but turn order hasn't begun yet (currentTurnRsn still null) -- this
@@ -2277,6 +2323,12 @@ public class RunePartyPlugin extends Plugin
                 pendingTargetIndices = Collections.emptyList();
                 pendingReachableIndices = Collections.emptyList();
                 arrivalSubmitted = false;
+                // NOT a resync of whether a Home Teleport arrival is actually still owed (that's
+                // rosterReducer.isHomeTeleportPending, driven by HOME_TELEPORT_ARMED/ARRIVED, and
+                // deliberately survives a turn change -- see homeTeleportPendingByPlayer's own
+                // doc) -- just the same "let the next tick retry" backstop arrivalSubmitted itself
+                // gets here, in case a stray in-flight submission never got its own retry reset.
+                homeTeleportArrivalSubmitted = false;
                 itemUsedThisTurn = false;
                 goldenGnomePurchasedThisTurn = false;
                 // Backstop for the same invariant rollDice() enforces on its own path (see that
@@ -2748,6 +2800,7 @@ public class RunePartyPlugin extends Plugin
         pendingTargetIndices = Collections.emptyList();
         pendingReachableIndices = Collections.emptyList();
         arrivalSubmitted = false; itemUsedThisTurn = false; goldenGnomePurchasedThisTurn = false; standingOnTrackedPositionCached = false;
+        homeTeleportArrivalSubmitted = false;
         itemPlacementKey = null;
         itemTargetKey = null;
         minigamePresentation.reset();
