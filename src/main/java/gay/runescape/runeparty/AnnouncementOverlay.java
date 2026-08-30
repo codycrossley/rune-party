@@ -269,9 +269,17 @@ public class AnnouncementOverlay extends Overlay
         renderMinigameBanner(g);
         renderMinigameSpinner(g);
         renderMinigameReadyCheck(g);
-        renderMinigameCountdown(g);
+        if (RunePartyPlugin.ARENA_KEY.equals(plugin.getMinigameKey()))
+        {
+            renderArenaGatherMessage(g);
+        }
+        else
+        {
+            renderMinigameCountdown(g);
+        }
         renderTrueOrFalseReveal(g);
         renderTrueOrFalseQuestion(g);
+        renderMinigameOverBanner(g);
         renderMinigameRewardsBanner(g);
         renderRoundCompleteBanner(g);
         renderDiceRoll(g);
@@ -687,6 +695,23 @@ public class AnnouncementOverlay extends Overlay
 
         g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
         drawCenteredRainbowText(g, "MINIGAME!", RAINBOW_LETTER_COLORS, centerX, y, alpha);
+    }
+
+    /** The closing bookend to renderMinigameBanner's own "MINIGAME!" -- fired on every
+     * MINIGAME_ENDED, for every mini-game alike (see MinigamePresentation#triggerMinigameOverBanner,
+     * armed first in handleMinigameEnded, chained ahead of the rewards recap via the shared
+     * turnEffectGateUntil). Same size/fade/rainbow treatment as the opening banner, just the
+     * closing line instead. */
+    private void renderMinigameOverBanner(Graphics2D g)
+    {
+        Float alpha = BannerAnim.fadeAlpha(plugin.getMinigameOverBannerUntil(), MINIGAME_FADE_MS);
+        if (alpha == null) return;
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 3;
+
+        g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
+        drawCenteredRainbowText(g, "MINIGAME OVER!", RAINBOW_LETTER_COLORS, centerX, y, alpha);
     }
 
     /** Draws the mini-game selection spinner -- a rainbow prize wheel (RAINBOW_LETTER_COLORS,
@@ -1132,6 +1157,34 @@ public class AnnouncementOverlay extends Overlay
         {
             drawCenteredRainbowText(g, "BEGIN!", RAINBOW_LETTER_COLORS, centerX, y, 1f);
         }
+    }
+
+    /** Arena-specific replacement for renderMinigameCountdown -- the Arena's own round doesn't
+     * begin on a fixed clock, it begins the instant every seated player is standing inside the
+     * arena (see the server's minigames/arena.py, MinigameContext.get_positions), which can take
+     * more or less than the generic countdown's own fixed MINIGAME_COUNTDOWN_DURATION_MS. Showing
+     * "3...2...1...BEGIN!" here would either lie (claiming the round's begun before it has) or
+     * leave players confused once "BEGIN!" comes and goes with nothing actually happening yet, so
+     * this shows a persistent instruction instead, for exactly the same window
+     * renderMinigameCountdown would otherwise occupy: once the ready-check screen has hidden (see
+     * renderMinigameReadyCheck's own countdownRevealed, mirrored here so both a live and a
+     * catching-up client transition at the same moment) until MINIGAME_ROUND_BEGIN genuinely lands
+     * (isMinigameRoundBegun) -- no fixed duration, since there isn't one to have. */
+    private void renderArenaGatherMessage(Graphics2D g)
+    {
+        boolean countdownRevealed = plugin.isMinigameCountdownStarted()
+            && (plugin.isMinigameCountdownSkippedForClient() || plugin.getMinigameCountdownBannerUntil() != 0);
+        if (!countdownRevealed) return;
+        if (plugin.isMinigameRoundBegun()) return;
+
+        long now = System.currentTimeMillis();
+        float alpha = MINIGAME_READY_CHECK_MIN_ALPHA + (1f - MINIGAME_READY_CHECK_MIN_ALPHA) * BannerAnim.pulse(now, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 2;
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE));
+        drawCenteredText(g, "All players must stand within the arena!", centerX, y, Color.WHITE, alpha);
     }
 
     /** Draws the current True or False round's question, then a live countdown to its own 5-second

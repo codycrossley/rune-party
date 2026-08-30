@@ -13,7 +13,7 @@ public class RosterReducer
     private final ConcurrentHashMap<String, Boolean> actuallyJoined = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Boolean> onlineByPlayer = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> numberByPlayer = new ConcurrentHashMap<>(); // turn-order position ("1", "2", ...)
-    private final ConcurrentHashMap<String, String> colorNumberByPlayer = new ConcurrentHashMap<>(); // stable per-player color identity, see RosterEntry#colorNumber
+    private final ConcurrentHashMap<String, String> colorNumberByPlayer = new ConcurrentHashMap<>(); // host-chosen seat color while a PLAYER, cleared on removal -- see RosterEntry#colorNumber
     private final ConcurrentHashMap<String, Integer> coinsByPlayer = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Integer> goldenGnomeCountByPlayer = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Map<String, Integer>> itemsByPlayer = new ConcurrentHashMap<>(); // itemKey -> count held
@@ -39,11 +39,12 @@ public class RosterReducer
         public final RunePartyRole role;
         public final boolean online;
         public final String number;
-        /** Stable per-player color identity (see RunePartyColor#forNumber) -- assigned once the
-         * first time this player becomes a PLAYER and never reassigned, unlike {@link #number}
-         * (live turn order), so a player who leaves and is later re-added by the host keeps their
-         * original color rather than inheriting whatever the current turn-order enumeration would
-         * hand them. */
+        /** This player's host-chosen seat color while a PLAYER (see RunePartyColor#forNumber and
+         * RunePartyPlugin#addToGameMenuEntry/RunePartyPanel#buildAddToGamePopup, the "Add to Game"
+         * submenus that let the host pick it) -- blank once removed, freeing that color for a new
+         * player (see app.py's PLAYER_LEFT handling). Unlike {@link #number} (live turn order,
+         * always recomputed), this is genuinely per-instance state carried on the ROLE_ASSIGNED
+         * event itself, not derived. */
         public final String colorNumber;
         public final boolean joined;
         public final int coins;
@@ -242,12 +243,15 @@ public class RosterReducer
             {
                 // Demoted to SPECTATOR, not deleted -- matches the server's own PLAYER_LEFT
                 // handling (see _apply_roster_event in app.py), which deliberately keeps the
-                // player's dict entry so colorNumber/join_order survive a later re-add via
-                // assignRole. Deleting the row here (the old behavior) meant a departed player
-                // could vanish from this client's roster entirely, with nothing to bring them
-                // back except a full syncFromRoster -- see that method's own doc. numberByPlayer
-                // is cleared since their old turn-order slot is now stale; colorNumberByPlayer is
-                // deliberately left alone since that's the whole point of preserving the row.
+                // player's dict entry so join_order survives a later re-add via assignRole (their
+                // turn-order slot stays stable relative to everyone else's, even though the actual
+                // "number" is always recomputed fresh). Deleting the row here (the old behavior)
+                // meant a departed player could vanish from this client's roster entirely, with
+                // nothing to bring them back except a full syncFromRoster -- see that method's own
+                // doc. numberByPlayer is cleared since their old turn-order slot is now stale;
+                // colorNumberByPlayer is also cleared -- removing a player frees their seat color
+                // for a new player (see app.py's own PLAYER_LEFT handling), rather than the old
+                // behavior of preserving it for an eventual return.
                 String playerRaw = Json.requiredStr(e.payload, type, "player");
                 if (playerRaw == null) return;
                 String key = canonicalKey(playerRaw);
@@ -255,6 +259,7 @@ public class RosterReducer
                 roleByPlayer.put(key, RunePartyRole.SPECTATOR);
                 actuallyJoined.put(key, false);
                 numberByPlayer.remove(key);
+                colorNumberByPlayer.remove(key);
                 break;
             }
             case Events.COINS_CHANGED:

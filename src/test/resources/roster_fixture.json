@@ -1,16 +1,19 @@
 {
-  "description": "Locks in the exact PLAYER_LEFT/colorNumber-preservation property ARCHITECTURE_REVIEW.md's C7 flagged as drifted: a departed PLAYER is demoted to SPECTATOR (never deleted), and re-promoting them later restores their original colorNumber and join-order turn slot rather than handing them a new one. Server: _apply_roster_event + _finalize_roster (app.py), replayed by tests/test_roster_fold.py. Client: RosterReducer, replayed by RosterReducerTest#fixtureRoundTripMatchesServer, which folds these events via apply() and then calls syncFromRoster(expectedRoster) -- mirroring RunePartyPlugin's real live flow, since apply() alone never reconstructs 'number'/'colorNumber' from the event stream (see that test's own doc for why). Kept in sync by hand across the two separate repos -- there's no shared build between them (see check_event_parity.py's own doc for the same constraint on the event-type parity check).",
+  "description": "Locks in the current roster-color property: removing a PLAYER (PLAYER_LEFT) frees their seat color for a new player, and a later re-add does NOT automatically reclaim the old color -- colorNumber now lives entirely on the ROLE_ASSIGNED event itself (the host's own explicit choice, validated for availability by assign_role), not derived at fold time. join_order (and so turn-order 'number') still survives a leave/re-add unchanged. Server: _apply_roster_event + _finalize_roster (app.py), replayed by tests/test_roster_fold.py. Client: RosterReducer, replayed by RosterReducerTest#fixtureRoundTripMatchesServer, which folds these events via apply() and then calls syncFromRoster(expectedRoster) -- mirroring RunePartyPlugin's real live flow, since apply() alone never reconstructs 'number'/'colorNumber' from the event stream (see that test's own doc for why). Kept in sync by hand across the two separate repos -- there's no shared build between them (see check_event_parity.py's own doc for the same constraint on the event-type parity check).",
   "events": [
     {"type": "PLAYER_JOINED", "payload": {"player": "Zezima"}},
-    {"type": "ROLE_ASSIGNED", "payload": {"player": "Zezima", "role": "PLAYER"}},
+    {"type": "ROLE_ASSIGNED", "payload": {"player": "Zezima", "role": "PLAYER", "colorNumber": 1}},
     {"type": "PLAYER_JOINED", "payload": {"player": "Woox"}},
-    {"type": "ROLE_ASSIGNED", "payload": {"player": "Woox", "role": "PLAYER"}},
+    {"type": "ROLE_ASSIGNED", "payload": {"player": "Woox", "role": "PLAYER", "colorNumber": 2}},
     {"type": "PLAYER_LEFT", "payload": {"player": "Zezima"}},
+    {"type": "PLAYER_JOINED", "payload": {"player": "Suomi"}},
+    {"type": "ROLE_ASSIGNED", "payload": {"player": "Suomi", "role": "PLAYER", "colorNumber": 1}},
     {"type": "PLAYER_JOINED", "payload": {"player": "Zezima"}},
-    {"type": "ROLE_ASSIGNED", "payload": {"player": "Zezima", "role": "PLAYER"}}
+    {"type": "ROLE_ASSIGNED", "payload": {"player": "Zezima", "role": "PLAYER", "colorNumber": 3}}
   ],
   "expectedRoster": [
-    {"rsn": "Zezima", "role": "PLAYER", "joined": true, "online": false, "number": "1", "colorNumber": "1", "coins": 0, "goldenGnomeCount": 0, "items": {}},
-    {"rsn": "Woox", "role": "PLAYER", "joined": true, "online": false, "number": "2", "colorNumber": "2", "coins": 0, "goldenGnomeCount": 0, "items": {}}
+    {"rsn": "Zezima", "role": "PLAYER", "joined": true, "online": false, "number": "1", "colorNumber": "3", "coins": 0, "goldenGnomeCount": 0, "items": {}},
+    {"rsn": "Woox", "role": "PLAYER", "joined": true, "online": false, "number": "2", "colorNumber": "2", "coins": 0, "goldenGnomeCount": 0, "items": {}},
+    {"rsn": "Suomi", "role": "PLAYER", "joined": true, "online": false, "number": "3", "colorNumber": "1", "coins": 0, "goldenGnomeCount": 0, "items": {}}
   ]
 }

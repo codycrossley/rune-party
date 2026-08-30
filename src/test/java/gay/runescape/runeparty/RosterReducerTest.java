@@ -18,10 +18,10 @@ import static org.junit.Assert.assertTrue;
 /**
  * Locks in RosterReducer's PLAYER_LEFT/syncFromRoster behavior against the server's own roster
  * model (see app.py's _apply_roster_event/PLAYER_LEFT and _finalize_roster) -- a departed PLAYER
- * is demoted to SPECTATOR with their colorNumber preserved, never deleted outright, and a roster
- * resync can always repair whatever apply() alone left behind. See ARCHITECTURE_REVIEW.md C7 for
- * the drift this once had (apply() deleted the row entirely, and syncFromRoster couldn't
- * resurrect it) that these two behaviors guard against regressing.
+ * is demoted to SPECTATOR (never deleted outright) with their seat color freed for a new player,
+ * and a roster resync can always repair whatever apply() alone left behind. See
+ * ARCHITECTURE_REVIEW.md C7 for the original drift this guards against regressing (apply() used to
+ * delete the row entirely, and syncFromRoster couldn't resurrect it).
  */
 public class RosterReducerTest
 {
@@ -75,7 +75,7 @@ public class RosterReducerTest
         assertTrue("departed player must still appear in the roster, not vanish", entry != null);
         assertEquals(RunePartyRole.SPECTATOR, entry.role);
         assertFalse(entry.joined);
-        assertEquals("stable colorNumber must survive a leave", "2", entry.colorNumber);
+        assertEquals("colorNumber must be freed on removal, not survive it", "", entry.colorNumber);
         assertEquals("stale turn-order number must be cleared", "", entry.number);
     }
 

@@ -11,11 +11,12 @@ import java.util.List;
  */
 public final class Minigames
 {
-    // Registered 4 times under different keys, matching the server's own REGISTRY (see
-    // minigames/__init__.py), alongside the two real mini-games (CoinRushMinigame,
-    // TrueOrFalseMinigame) so the selection wheel has more than three options to actually cycle
-    // through. Dropping any of them would silently break that server's actual rounds by falling
-    // back to a mini-game with no matching UI for what the server thinks is happening.
+    // PlaceholderMinigame registered 4 times under different keys, matching the server's own
+    // REGISTRY (see minigames/__init__.py), alongside the real mini-games (CoinRushMinigame,
+    // TrueOrFalseMinigame, ArenaMinigame) so the selection wheel has more than a few options to
+    // actually cycle through. Dropping any of them would silently break that server's actual
+    // rounds by falling back to a mini-game with no matching UI for what the server thinks is
+    // happening.
     private static final KeyedRegistry<Minigame> REGISTRY = new KeyedRegistry<>("placeholder-1");
 
     static
@@ -26,6 +27,7 @@ public final class Minigames
         REGISTRY.register(new PlaceholderMinigame("placeholder-4", "Placeholder Mini-Game #4"));
         REGISTRY.register(new CoinRushMinigame());
         REGISTRY.register(new TrueOrFalseMinigame());
+        REGISTRY.register(new ArenaMinigame());
     }
 
     public static Minigame get(String key)

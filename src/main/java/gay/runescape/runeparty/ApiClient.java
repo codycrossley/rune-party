@@ -135,12 +135,17 @@ public class ApiClient
 
     /** Host-only: promotes/demotes a roster member between PLAYER and SPECTATOR. Joining a game
      * only ever grants SPECTATOR (see /v1/join/{code}) -- this is how the host opts someone into
-     * the turn order, same assign-role contract as Gnomeball's ApiClient. */
-    public void assignRole(String gameId, String writeKey, String playerRsn, RunePartyRole role) throws IOException
+     * the turn order, same assign-role contract as Gnomeball's ApiClient. colorNumber is the
+     * host's own explicit seat-color choice (see RunePartyColor#seatNumber, and RunePartyPlugin#
+     * addToGameMenuEntry/RunePartyPanel#buildAddToGamePopup, which offer one submenu entry per
+     * currently-available color) -- null for a SPECTATOR demotion, or to let the server auto-pick
+     * the lowest available color instead. */
+    public void assignRole(String gameId, String writeKey, String playerRsn, RunePartyRole role, Integer colorNumber) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
         body.addProperty("role", role.name());
+        if (colorNumber != null) body.addProperty("colorNumber", colorNumber);
 
         try (Response resp = post("/v1/games/" + gameId + "/assign-role", body, writeKey))
         {
@@ -208,6 +213,27 @@ public class ApiClient
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Home Teleport arrival failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** Continuous "here's where I am right now" ping, fired every game tick while a mini-game is
+     * playable (see RunePartyPlugin#onGameTick) -- unlike confirmArrival/confirmHomeTeleportArrival,
+     * this isn't a one-shot report of reaching a specific destination, it's a live heartbeat a
+     * mini-game's own server-side round (e.g. the Arena's hazard tiles) reads back to know who's
+     * standing where, moment to moment. Generic, not Arena-specific -- any future mini-game that
+     * needs live positions reuses this same call. */
+    public void reportMinigamePosition(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("x", x);
+        body.addProperty("y", y);
+        body.addProperty("plane", plane);
+
+        try (Response resp = post("/v1/games/" + gameId + "/minigame-position", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Report minigame position failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -644,7 +670,7 @@ public class ApiClient
         public boolean joined;
         public boolean online;
         public String number; // turn-order position ("1", "2", ...), same field shape RosterReducer already expects
-        public String colorNumber; // stable per-player color identity, assigned once and never reassigned even if this player leaves and is later re-added -- see RunePartyColor#forNumber
+        public String colorNumber; // host-chosen seat color while a PLAYER, "" once removed -- see RunePartyColor#forNumber
         public int coins;
         public int goldenGnomeCount;
         public Map<String, Integer> items = new HashMap<>(); // itemKey -> count held, defaulted so an older server response without this field doesn't NPE
@@ -662,6 +688,7 @@ public class ApiClient
         public String colorHex;
         public String description;
         public boolean isModifier;
+        public boolean isMinigameTile; // only ever spawned by a mini-game's own board swap -- see addSetTileSubmenu
     }
 
     private static class CreateGameResponse

@@ -19,6 +19,12 @@ public final class Events
      * game event, same as EVENTS_BATCH above. */
     public static final String CAUGHT_UP = "CAUGHT_UP";
 
+    /** Server-only bookkeeping (see the server's minigames/arena.py hazard loop) fired when a
+     * player is eliminated -- standing on a tile the instant it reaches red, or stepping off the
+     * arena after having been on it. Never dispatched on by any handler here; declared solely so
+     * check_event_parity.py's one-for-one assertion holds -- an eliminated player just doesn't get
+     * paid at the end, there's no other visible consequence this pass. */
+    public static final String ARENA_PLAYER_ELIMINATED = "ARENA_PLAYER_ELIMINATED";
     public static final String COIN_RUSH_COLLECTED = "COIN_RUSH_COLLECTED";
     public static final String COIN_RUSH_SPAWN = "COIN_RUSH_SPAWN";
     public static final String COIN_TRAP_TRIGGERED = "COIN_TRAP_TRIGGERED";
@@ -37,6 +43,11 @@ public final class Events
     public static final String JAD_AWAKENED = "JAD_AWAKENED";
     public static final String JAD_DISMISSED = "JAD_DISMISSED";
     public static final String JAD_SMASH_TRIGGERED = "JAD_SMASH_TRIGGERED";
+    /** Server-only bookkeeping (see the server's MinigameContext.swap_board) fired alongside the
+     * TILES_UNMARKED/TILES_MARKED pair a board swap actually renders as -- purely so the server can
+     * restore the real course later. Never dispatched on by any handler here; declared solely so
+     * check_event_parity.py's one-for-one assertion holds. */
+    public static final String MINIGAME_BOARD_SWAPPED = "MINIGAME_BOARD_SWAPPED";
     public static final String MINIGAME_COUNTDOWN_STARTED = "MINIGAME_COUNTDOWN_STARTED";
     public static final String MINIGAME_ENDED = "MINIGAME_ENDED";
     public static final String MINIGAME_PLAYER_READY = "MINIGAME_PLAYER_READY";

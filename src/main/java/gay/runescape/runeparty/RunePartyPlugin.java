@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Deque;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,6 +22,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javax.inject.Inject;
@@ -196,6 +198,13 @@ public class RunePartyPlugin extends Plugin
      * (see minigames/true_or_false.py), same role COIN_RUSH_KEY plays for Coin Rush. */
     public static final String TRUE_OR_FALSE_KEY = "true-or-false";
 
+    /** Client-side key for the Arena mini-game -- must match the server's own registration (see
+     * minigames/arena.py), same role COIN_RUSH_KEY/TRUE_OR_FALSE_KEY play for their own mini-games.
+     * Used by AnnouncementOverlay to swap the generic "3...2...1...BEGIN!" countdown for Arena's
+     * own "All players must stand within the arena!" gather message -- see
+     * renderArenaGatherMessage's own doc for why Arena can't use the generic countdown at all. */
+    public static final String ARENA_KEY = "arena";
+
     /** How long the question sits on screen before the answer countdown starts ticking, measured
      * from the moment TRUE_OR_FALSE_ROUND_STARTED lands (see trueOrFalseRoundStartedAt/
      * getTrueOrFalseAnswerWindowStartsAt) -- purely a client-side display value for
@@ -234,11 +243,20 @@ public class RunePartyPlugin extends Plugin
      * instead of overlapping it. */
     public static final long ROUND_COMPLETE_BANNER_DURATION_MS = 10000;
 
+    /** How long AnnouncementOverlay's "MINIGAME OVER!" banner stays up -- fired on every
+     * MINIGAME_ENDED, for every mini-game, before the rewards recap even starts (see
+     * MinigamePresentation#triggerMinigameOverBanner, called first in handleMinigameEnded, and
+     * triggerMinigameRewardsBanner right behind it -- both armBanner calls, so the rewards recap
+     * automatically waits behind this one via the shared turnEffectGateUntil, same chaining every
+     * other back-to-back banner pair here already uses). */
+    public static final long MINIGAME_OVER_BANNER_DURATION_MS = 3000;
+
     /** How long AnnouncementOverlay's mini-game rewards recap ("who got what") stays up -- also
-     * triggered on MINIGAME_ENDED (see triggerMinigameRewardsBanner), but shown *before* the round
-     * recap: scheduleRoundCompleteBanner defers triggerRoundCompleteBanner via
-     * scheduleAfterTurnEffects, which waits on turnEffectGateUntil -- extended by this banner --
-     * so the two never overlap. */
+     * triggered on MINIGAME_ENDED (see triggerMinigameRewardsBanner), but shown *after* the
+     * "MINIGAME OVER!" banner above and *before* the round recap: both scheduleRoundCompleteBanner
+     * and triggerMinigameRewardsBanner defer via scheduleAfterTurnEffects/armBanner, which wait on
+     * turnEffectGateUntil -- extended by whichever banner armed most recently -- so all three never
+     * overlap. */
     public static final long MINIGAME_REWARDS_BANNER_DURATION_MS = 7500;
 
     /** How long AnnouncementOverlay's Golden Gnome outcome banner ("You got a Golden Gnome!")
@@ -574,6 +592,13 @@ public class RunePartyPlugin extends Plugin
     // see onGameTick's own Home Teleport check, which is independent of pendingRoll (see that
     // field's own doc for why Home Teleport can be pending well outside any roll window).
     private volatile boolean homeTeleportArrivalSubmitted = false;
+    // Guards reportMinigamePosition against piling up requests on the single-threaded executor if
+    // any one round-trip ever takes longer than a game tick -- unlike arrivalSubmitted/
+    // homeTeleportArrivalSubmitted (each cleared only once the specific claim they guard is
+    // resolved one way or another), this one is meant to fire again every single tick, so it's
+    // cleared unconditionally in submitAction's own finallyAction the instant each call resolves,
+    // not selectively on success/failure. See onGameTick's own reportMinigamePosition check.
+    private final AtomicBoolean minigamePositionReportInFlight = new AtomicBoolean(false);
     // Real state, applied catch-up or not: whether the current turn's player has already spent
     // their one-item-per-turn allowance -- reset on every TURN_STARTED, set by ITEM_USED. Mirrors
     // the server's own itemUsedThisTurn (see app.py's use_item).
@@ -1105,6 +1130,29 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
+    /** Fires the local player's own current position off to the server -- called every tick a
+     * mini-game is playable (see onGameTick), not once per claim like confirmArrival. No retry
+     * logic on failure: a dropped or failed report is superseded by the next tick's own report
+     * 600ms later, so there's nothing worth resubmitting. minigamePositionReportInFlight is cleared
+     * in finallyAction regardless of outcome, so a failure doesn't leave future ticks permanently
+     * blocked from trying again. */
+    private void reportMinigamePosition(WorldPoint pos)
+    {
+        String self = localRsn();
+        final String gid = gameId;
+        final String token = playerToken;
+        if (self == null || gid == null || token == null)
+        {
+            minigamePositionReportInFlight.set(false);
+            return;
+        }
+
+        submitAction("Report minigame position",
+            () -> apiClient.reportMinigamePosition(gid, self, token, pos.getX(), pos.getY(), pos.getPlane()),
+            null,
+            () -> minigamePositionReportInFlight.set(false));
+    }
+
     /** Reports arrival at the Start tile after using a Home Teleport -- called automatically from
      * onGameTick once the local player has a pending arrival (see
      * rosterReducer.isHomeTeleportPending) and is standing on their own tracked position (which a
@@ -1358,21 +1406,25 @@ public class RunePartyPlugin extends Plugin
 
     /** Host-only: promotes a spectator into the turn order (or, symmetrically, could demote a
      * player back to spectator). Joining a game only ever grants SPECTATOR -- see ApiClient.assignRole
-     * -- so this is the only path onto the roster's turn order. */
-    public void assignRole(String playerRsn, RunePartyRole role)
+     * -- so this is the only path onto the roster's turn order. colorNumber is the host's own
+     * explicit seat-color choice for a PLAYER promotion (see addToGameMenuEntry/RunePartyPanel#
+     * buildAddToGamePopup, both of which pass one) -- null for a SPECTATOR demotion. */
+    public void assignRole(String playerRsn, RunePartyRole role, Integer colorNumber)
     {
         if (!isHost() || gameId == null) return;
 
         final String gid = gameId;
         final String wk = writeKey;
-        submitAction("Assign role", () -> apiClient.assignRole(gid, wk, playerRsn, role),
+        submitAction("Assign role", () -> apiClient.assignRole(gid, wk, playerRsn, role, colorNumber),
             e -> addChatMessage("Failed to update " + playerRsn + "'s role: " + e.getMessage()));
     }
 
     /** Host-only kick, wired to the roster panel's "Remove Player" right-click entry
      * (RunePartyPanel#buildRemovePlayerPopup) -- same PLAYER_LEFT outcome as the target leaving
-     * on their own (see ApiClient#removePlayer), so they drop out of turn order but keep their
-     * colorNumber/seat if the host re-adds them later via assignRole. */
+     * on their own (see ApiClient#removePlayer), so they drop out of turn order and free their
+     * seat color for a new player -- see app.py's own PLAYER_LEFT handling. A returning player
+     * gets whatever color the host picks for them at that point, same as anyone else, rather than
+     * automatically reclaiming their old one. */
     public void removePlayer(String playerRsn)
     {
         if (!isHost() || gameId == null) return;
@@ -1664,11 +1716,15 @@ public class RunePartyPlugin extends Plugin
         addSetTileSubmenu(point);
     }
 
-    /** "Set Tile" -> one entry per non-modifier tile type (see MenuEntry#createSubMenu), populated
-     * from the already-fetched catalog (getTileTypeCatalog) rather than a hardcoded copy. Golden
-     * Gnome/Coin Trap are filtered out -- neither is ever host-authored directly, both are
-     * modifiers a separate dedicated flow places dynamically during real play (see tiles/base.py's
-     * own is_modifier doc). */
+    /** "Set Tile" -> one entry per host-placeable tile type (see MenuEntry#createSubMenu),
+     * populated from the already-fetched catalog (getTileTypeCatalog) rather than a hardcoded copy.
+     * Two kinds of catalog entry are filtered out, for two different reasons: Golden Gnome/Coin
+     * Trap (isModifier) are never host-authored directly, both are modifiers a separate dedicated
+     * flow places dynamically during real play (see tiles/base.py's own is_modifier doc); Arena
+     * Boundary and any future mini-game-only type (isMinigameTile) are never host-authored either,
+     * only ever spawned in bulk by a mini-game's own MinigameContext.swap_board (see
+     * tiles/base.py's own is_minigame_tile doc) -- placing one here would just get swept away (or
+     * worse, confusingly survive) the next time a board swap runs. */
     private void addSetTileSubmenu(WorldPoint point)
     {
         MenuEntry parent = client.createMenuEntry(-1)
@@ -1681,7 +1737,7 @@ public class RunePartyPlugin extends Plugin
         types.sort(Comparator.comparing(t -> t.displayName));
         for (ApiClient.TileTypeOut type : types)
         {
-            if (type.isModifier) continue;
+            if (type.isModifier || type.isMinigameTile) continue;
             submenu.createMenuEntry(-1)
                 .setOption(type.displayName)
                 .setTarget("")
@@ -1870,6 +1926,27 @@ public class RunePartyPlugin extends Plugin
         if (isCoinRushActive() && isMinigamePlayable())
         {
             minigamePresentation.checkCoinRushCollection(selfPlayer);
+        }
+
+        // Generic (not Coin-Rush/Arena-specific) live position heartbeat -- any mini-game whose
+        // own server-side round wants to know where seated players actually are (today: the
+        // Arena's hazard tiles, and the Arena's own round-begin gate -- see MinigameContext.
+        // get_positions) reads this back. Gated on isMinigameActive() alone, deliberately NOT
+        // isMinigamePlayable() -- the Arena's round begins the instant everyone's reported
+        // position lands inside its own grid (see minigames/arena.py's
+        // _wait_for_everyone_to_arrive), which can happen well before the generic countdown's own
+        // fixed isMinigamePlayable() moment; gating reporting on that fixed moment would silently
+        // put a floor under how fast the Arena could ever actually begin. Harmless for every other
+        // mini-game, which doesn't read positions at all. Unlike every other check in this method,
+        // this one is meant to keep firing every single tick for the whole time a mini-game is
+        // active, not just once -- minigamePositionReportInFlight only guards against piling up
+        // requests if a round-trip is unusually slow, it doesn't gate on "have I already reported"
+        // the way arrivalSubmitted does for a one-shot claim.
+        if (self != null && selfPlayer != null && isMinigameActive()
+            && rosterReducer.getRole(self) == RunePartyRole.PLAYER
+            && minigamePositionReportInFlight.compareAndSet(false, true))
+        {
+            reportMinigamePosition(selfPlayer.getWorldLocation());
         }
 
         // Also independent of the turn engine below -- unlike a rolled destination (pendingRoll,
@@ -2181,10 +2258,33 @@ public class RunePartyPlugin extends Plugin
         return tile != null && tile.point.equals(pos);
     }
 
-    /** Adds an "Add to Game" entry on another player's Follow option, host-only, so the host can
-     * pull a spectator into the turn order without them running the join flow themselves --
-     * joining only ever grants SPECTATOR (see assignRole's doc). Hidden once the target is already
-     * a PLAYER, same as Gnomeball's Enlist submenu skipping the enlisted player's current role. */
+    /** Every RunePartyColor not currently held by a seated PLAYER -- shared by addToGameMenuEntry
+     * (world right-click submenu) and RunePartyPanel#buildAddToGamePopup (roster panel submenu),
+     * the two "Add to Game" surfaces, so the host is never offered a color that would immediately
+     * 409 as taken. Recomputed fresh on every menu build rather than cached, same "always read the
+     * live roster" approach every other menu-availability check here already takes. */
+    List<RunePartyColor> availableSeatColors()
+    {
+        Set<RunePartyColor> taken = EnumSet.noneOf(RunePartyColor.class);
+        for (RosterReducer.RosterEntry entry : rosterReducer.seatedPlayers())
+        {
+            RunePartyColor color = RunePartyColor.forNumber(entry.colorNumber);
+            if (color != null) taken.add(color);
+        }
+        List<RunePartyColor> available = new ArrayList<>();
+        for (RunePartyColor color : RunePartyColor.values())
+        {
+            if (!taken.contains(color)) available.add(color);
+        }
+        return available;
+    }
+
+    /** Adds an "Add to Game" submenu -- one entry per currently-available seat color (see
+     * availableSeatColors) -- on another player's Follow option, host-only, so the host can pull a
+     * spectator into the turn order with a specific color rather than always following whatever
+     * order players happened to be added in. Joining a game only ever grants SPECTATOR (see
+     * assignRole's doc). Hidden once the target is already a PLAYER, same as Gnomeball's Enlist
+     * submenu skipping the enlisted player's current role. */
     private void addToGameMenuEntry(MenuEntryAdded event)
     {
         if (!isHost() || gameId == null) return;
@@ -2199,12 +2299,21 @@ public class RunePartyPlugin extends Plugin
         if (rosterReducer.getRole(targetRsn) == RunePartyRole.PLAYER) return;
         if (isGameFull()) return;
 
-        client.createMenuEntry(-1)
+        MenuEntry parent = client.createMenuEntry(-1)
             .setOption("Add to Game")
             .setTarget(event.getTarget())
             .setType(MenuAction.RUNELITE_PLAYER)
-            .setIdentifier(event.getIdentifier())
-            .onClick(me -> assignRole(targetRsn, RunePartyRole.PLAYER));
+            .setIdentifier(event.getIdentifier());
+
+        Menu submenu = parent.createSubMenu();
+        for (RunePartyColor color : availableSeatColors())
+        {
+            submenu.createMenuEntry(-1)
+                .setOption(color.menuTag(color.displayName))
+                .setTarget("")
+                .setType(MenuAction.RUNELITE)
+                .onClick(me -> assignRole(targetRsn, RunePartyRole.PLAYER, color.seatNumber()));
+        }
     }
 
     /** Adds a "Tele Block &lt;name&gt;"-style entry on another seated PLAYER's own Follow option
@@ -3189,6 +3298,11 @@ public class RunePartyPlugin extends Plugin
     public boolean isMinigameCountdownStarted() { return minigamePresentation.isCountdownStarted(); }
     public boolean isMinigameCountdownSkippedForClient() { return minigamePresentation.isCountdownSkippedForClient(); }
     public long getMinigameCountdownBannerUntil() { return minigamePresentation.getCountdownBannerUntil(); }
+    /** Whether MINIGAME_ROUND_BEGIN has genuinely landed for the current mini-game -- unlike
+     * isMinigamePlayable() (a fixed local timer off MINIGAME_COUNTDOWN_STARTED), this is a real
+     * server signal, true for however long or short the round actually took to begin. See
+     * AnnouncementOverlay#renderArenaGatherMessage, the only current reader. */
+    public boolean isMinigameRoundBegun() { return minigamePresentation.isRoundBegun(); }
     public int getMaxRounds() { return maxRounds; }
     /** 1-indexed round currently in progress, capped at maxRounds so the round the final
      * MINIGAME_ENDED just completed doesn't briefly read as "one past the end" before GAME_ENDED
@@ -3208,6 +3322,7 @@ public class RunePartyPlugin extends Plugin
     public long getTeleBlockCastUntil() { return teleBlockCastAnnounce.until; }
     public long getWelcomeBannerUntil() { return welcomeBanner.until; }
     public long getMinigameBannerUntil() { return minigamePresentation.getMinigameBannerUntil(); }
+    public long getMinigameOverBannerUntil() { return minigamePresentation.getMinigameOverBannerUntil(); }
     public long getGameStartBannerUntil() { return gameStartBanner.until; }
     public long getRoundCompleteBannerUntil() { return minigamePresentation.getRoundCompleteBannerUntil(); }
     public int getRoundCompleteRoundNumber() { return minigamePresentation.getRoundCompleteRoundNumber(); }

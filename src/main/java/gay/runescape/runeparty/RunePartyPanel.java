@@ -716,12 +716,22 @@ public class RunePartyPanel extends PluginPanel
         rosterTablePanel.repaint();
     }
 
+    /** One submenu entry per currently-available seat color (see RunePartyPlugin#
+     * availableSeatColors, shared with addToGameMenuEntry's own world-menu submenu), rather than a
+     * single flat "Add to Game" item -- lets the host pick a specific color instead of always
+     * following whatever order players happened to be added in. */
     private JPopupMenu buildAddToGamePopup(String rsn)
     {
         JPopupMenu popup = new JPopupMenu();
-        JMenuItem addItem = new JMenuItem("Add to Game");
-        addItem.addActionListener(e -> plugin.assignRole(rsn, RunePartyRole.PLAYER));
-        popup.add(addItem);
+        JMenu addMenu = new JMenu("Add to Game");
+        for (RunePartyColor color : plugin.availableSeatColors())
+        {
+            JMenuItem colorItem = new JMenuItem(color.displayName);
+            colorItem.setForeground(color.awt);
+            colorItem.addActionListener(e -> plugin.assignRole(rsn, RunePartyRole.PLAYER, color.seatNumber()));
+            addMenu.add(colorItem);
+        }
+        popup.add(addMenu);
         return popup;
     }
 

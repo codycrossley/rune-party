@@ -61,6 +61,15 @@ final class MinigamePresentation
     private volatile boolean minigameCountdownStarted = false;
     private volatile boolean minigameCountdownSkippedForClient = false;
     private volatile long minigameCountdownBannerUntil = 0;
+    // Real state, applied catch-up or not: true once MINIGAME_ROUND_BEGIN has genuinely landed for
+    // the current mini-game -- unlike minigameCountdownBannerUntil (a fixed local timer that always
+    // resolves MINIGAME_COUNTDOWN_DURATION_MS after arming, regardless of what the server's
+    // actually doing), this reflects the real server-side moment, whatever it turns out to be. The
+    // Arena mini-game's own round-begin timing depends on when everyone's actually walked onto its
+    // grid (see the server's minigames/arena.py), which isn't tied to the generic countdown's fixed
+    // schedule at all -- see AnnouncementOverlay#renderArenaGatherMessage, the reader this exists
+    // for.
+    private volatile boolean minigameRoundBegun = false;
     // Same idea as JadPresentation's own awaitingBowFinish, one per response to a
     // pending mini-game ready-check/True-or-False round -- see RunePartyPlugin#onAnimationChanged,
     // which consults these via the arm/isAwaiting/clear methods below as part of the same
@@ -71,6 +80,11 @@ final class MinigamePresentation
     private volatile boolean awaitingTrueOrFalseNoFinish = false;
     // ---- minigame banner (server-driven, everyone sees it -- see MINIGAME_STARTED handling) ----
     private final TimedBanner<Void> minigameBanner = new TimedBanner<>();
+    // ---- minigame-over banner (server-driven, everyone sees it -- see MINIGAME_ENDED handling and
+    // triggerMinigameOverBanner). Fires for every mini-game, no payload of its own -- just a beat
+    // between the round actually ending and the rewards recap taking over, see
+    // triggerMinigameRewardsBanner's own doc for how the two chain. ----
+    private final TimedBanner<Void> minigameOverBanner = new TimedBanner<>();
     // ---- round-complete banner (server-driven, everyone sees it -- see MINIGAME_ENDED handling
     // and scheduleRoundCompleteBanner). Its payload is the *upcoming* round -- the one about to
     // start, same number getCurrentRound() would return live -- snapshotted at trigger time so it
@@ -151,6 +165,7 @@ final class MinigamePresentation
                 minigameCountdownStarted = false;
                 minigameCountdownSkippedForClient = false;
                 minigameCountdownBannerUntil = 0;
+                minigameRoundBegun = false;
                 minigameSpinnerStart = 0;
                 minigameSpinnerUntil = 0;
                 minigameSpinnerSkippedForClient = catchingUp;
@@ -253,6 +268,11 @@ final class MinigamePresentation
                 {
                     coinRushRoundStartAt = System.currentTimeMillis();
                 }
+                // Unconditional, unlike the Coin-Rush-specific stamp above -- every mini-game fires
+                // this event (see events.minigame_round_begin's own doc), so this flips true
+                // regardless of which one is active. See its own field doc for why this exists
+                // separately from the generic countdown's fixed timer.
+                minigameRoundBegun = true;
                 break;
 
             case Events.COIN_RUSH_SPAWN:
@@ -398,6 +418,7 @@ final class MinigamePresentation
         if (!catchingUp)
         {
             plugin.addChatMessage("Mini-game complete!");
+            triggerMinigameOverBanner();
             triggerMinigameRewardsBanner(payload);
             // Skipped on the game's last round -- GAME_ENDED fires right behind this same
             // MINIGAME_ENDED (see app.py's _resolve_minigame_if_complete, which checks maxRounds
@@ -497,18 +518,29 @@ final class MinigamePresentation
         });
     }
 
+    /** Arms AnnouncementOverlay's "MINIGAME OVER!" banner -- fired first on every MINIGAME_ENDED,
+     * for every mini-game alike, before the rewards recap even starts (see
+     * triggerMinigameRewardsBanner, armed right behind this one in handleMinigameEnded and chained
+     * behind it via the shared turnEffectGateUntil armBanner reserves here). No payload of its own
+     * -- just a beat between the round genuinely ending and the recap taking over. */
+    private void triggerMinigameOverBanner()
+    {
+        plugin.armBanner(minigameOverBanner, RunePartyPlugin.MINIGAME_OVER_BANNER_DURATION_MS, () -> null, true);
+    }
+
     /** Arms AnnouncementOverlay's mini-game rewards recap ("who got what") -- called from
-     * handleMinigameEnded, parsing its own "payouts" list once here rather than having
-     * AnnouncementOverlay re-parse the raw event payload every frame. Extends turnEffectGateUntil
-     * so both the round-complete recap (see scheduleRoundCompleteBanner) and the new round's first
-     * TURN_STARTED banner wait behind this one instead of overlapping it. Not an armBanner call
-     * (see that method's own doc) -- this arms synchronously, with no scheduleAfterTurnEffects
-     * wrapper to collapse. */
+     * handleMinigameEnded, parsing its own "payouts" list eagerly (payload is a fixed, already-
+     * landed MINIGAME_ENDED event -- it never changes, so there's nothing to gain from re-parsing
+     * it lazily inside armBanner's own callback) rather than having AnnouncementOverlay re-parse
+     * the raw event payload every frame. armBanner chains this behind whatever's already reserved
+     * turnEffectGateUntil -- the "MINIGAME OVER!" banner above, armed immediately before this call
+     * in handleMinigameEnded -- and extends it further so both the round-complete recap (see
+     * scheduleRoundCompleteBanner) and the new round's first TURN_STARTED banner wait behind this
+     * one too. */
     private void triggerMinigameRewardsBanner(JsonObject payload)
     {
-        minigameRewardsBanner.payload = Json.safeMinigameRewards(payload, "payouts");
-        minigameRewardsBanner.until = System.currentTimeMillis() + RunePartyPlugin.MINIGAME_REWARDS_BANNER_DURATION_MS;
-        plugin.extendTurnEffectGate(minigameRewardsBanner.until);
+        List<MinigameReward> rewards = Json.safeMinigameRewards(payload, "payouts");
+        plugin.armBanner(minigameRewardsBanner, RunePartyPlugin.MINIGAME_REWARDS_BANNER_DURATION_MS, () -> rewards, true);
     }
 
     /** Schedules AnnouncementOverlay's post-round "ROUND x" / "Current Standings" recap via
@@ -528,6 +560,7 @@ final class MinigamePresentation
     void reset()
     {
         minigameBanner.reset();
+        minigameOverBanner.reset();
         if (minigameSpinnerTask != null) { minigameSpinnerTask.cancel(false); minigameSpinnerTask = null; }
         roundCompleteBanner.reset();
         minigameRewardsBanner.reset();
@@ -583,7 +616,9 @@ final class MinigamePresentation
     boolean isCountdownStarted() { return minigameCountdownStarted; }
     boolean isCountdownSkippedForClient() { return minigameCountdownSkippedForClient; }
     long getCountdownBannerUntil() { return minigameCountdownBannerUntil; }
+    boolean isRoundBegun() { return minigameRoundBegun; }
     long getMinigameBannerUntil() { return minigameBanner.until; }
+    long getMinigameOverBannerUntil() { return minigameOverBanner.until; }
     long getRoundCompleteBannerUntil() { return roundCompleteBanner.until; }
     int getRoundCompleteRoundNumber() { return roundCompleteBanner.payload != null ? roundCompleteBanner.payload : 0; }
     long getMinigameRewardsBannerUntil() { return minigameRewardsBanner.until; }
