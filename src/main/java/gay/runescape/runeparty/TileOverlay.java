@@ -74,6 +74,7 @@ public class TileOverlay extends Overlay
     private static final Stroke ROUTE_STROKE   = new BasicStroke(2f);
 
     private static final Color COLOR_PLACEMENT_ARROW = new Color(255, 140, 0);
+    private static final Color COLOR_CONNECT_FROM_ARROW = new Color(0, 220, 255);
 
     private final Client client;
     private final RunePartyConfig config;
@@ -149,6 +150,7 @@ public class TileOverlay extends Overlay
         renderStartArrow(g);
         renderItemPlacementArrows(g);
         renderGoldenGnomePurchaseArrow(g);
+        renderConnectFromIndicator(g);
 
         return null;
     }
@@ -494,6 +496,19 @@ public class TileOverlay extends Overlay
         if (goldenGnomePathIndex == null || !plugin.getPendingReachableIndices().contains(goldenGnomePathIndex)) return;
 
         drawBouncingArrowWithLabel(g, goldenGnomePoint, "Purchase!", defaultColorFor("GOLDEN_GNOME_TILE"));
+    }
+
+    /** "Connecting From Here" arrow over the tile currently armed via custom-course-build mode's
+     * "Connect From" menu entry -- see RunePartyPlugin#getCourseConnectFromPoint, which resolves
+     * the armed pathIndex back to a WorldPoint (or null once nothing's armed, e.g. after "Connect
+     * To"/"Cancel Connecting" clears it). Local-only concern, same as the other build-mode arrows:
+     * only the host doing the editing has anything armed to show. */
+    private void renderConnectFromIndicator(Graphics2D g)
+    {
+        WorldPoint connectFromPoint = plugin.getCourseConnectFromPoint();
+        if (connectFromPoint == null) return;
+
+        drawBouncingArrowWithLabel(g, connectFromPoint, "Connecting From Here", COLOR_CONNECT_FROM_ARROW);
     }
 
     private Player findPlayerByRsn(String rsn)

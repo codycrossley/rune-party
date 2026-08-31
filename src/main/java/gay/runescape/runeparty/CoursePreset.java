@@ -10,14 +10,13 @@ import java.util.Map;
 /** A course layout: an <b>ordered</b> list of tiles relative to a center anchor, with rotation
  * support -- the Rune Party analog of Gnomeball's FieldPreset. {@code tiles}' list order is still
  * the tile's stable identity (tile 0 is the start, and a fresh commit assigns pathIndex == list
- * position, see RunePartyPlugin#commitPreset) -- but it's no longer the *only* way tiles connect.
- * By default each tile leads to "list position + 1" (wrapping at the end, closing the loop), same
- * as every course before forks existed; a tile can override that default via
- * {@link RelativeTile#nextIndices} to point at one or more *other* list positions instead --
- * that's a fork (more than one) or a merge redirect (exactly one, pointing somewhere other than
- * "+1"). See {@link #buildForkedLoop} for a worked example of both. Built-in courses and
- * host-saved custom courses share this one representation, same as FieldPreset does for Gnomeball
- * fields. */
+ * position, see RunePartyPlugin#commitPreset), and it's also the *only* way tiles connect here:
+ * every tile's {@link RelativeTile#nextIndices} has to be set explicitly, pointing at one or more
+ * other list positions -- there's no implicit "list position + 1" default (see
+ * TileReducer.TileEntry#nextIndices's own doc for why). {@link #buildStandardLoop} bakes that
+ * "+1, wrapping at the end" edge into every one of its own tiles explicitly, for exactly this
+ * reason. Built-in courses and host-saved custom courses share this one representation, same as
+ * FieldPreset does for Gnomeball fields. */
 public final class CoursePreset
 {
     public final String name;
@@ -137,14 +136,14 @@ public final class CoursePreset
         public final int dx, dy;
         public final String tileType;
         public final String color;
-        /** Explicit outgoing edges, as *list positions* in this preset's own {@code tiles} (which
-         * become pathIndex values 1:1 on commit -- see RunePartyPlugin#commitPreset). Empty means
-         * "no override": the default single edge to list position {@code (thisIndex + 1) %
-         * tiles.size()} applies, same linear-with-wraparound behavior every course had before
-         * forks existed. Two or more entries is a fork; exactly one entry that isn't "+1" is a
-         * merge redirect (e.g. a branch's last tile rejoining the trunk somewhere else in the
-         * list). Always empty for a decorative tile -- it has no course position of its own to
-         * route from. */
+        /** This tile's own outgoing edges, as *list positions* in this preset's own {@code tiles}
+         * (which become pathIndex values 1:1 on commit -- see RunePartyPlugin#commitPreset) --
+         * its *only* ones, empty means a genuine dead end. No implicit default (see
+         * TileReducer.TileEntry#nextIndices's own doc for why); a plain "continue to the next
+         * tile in the loop" edge has to be listed explicitly, same as a fork (two or more entries)
+         * or a merge redirect (one entry pointing somewhere other than "+1" -- e.g. a branch's
+         * last tile rejoining the trunk elsewhere in the list). Always empty for a decorative tile
+         * -- it has no course position of its own to route from. */
         public final int[] nextIndices;
         /** True for a modifier tile that sits on top of another (non-decorative) tile at the same
          * dx/dy rather than being a course stop of its own -- a Golden Gnome tile, currently the
@@ -196,12 +195,17 @@ public final class CoursePreset
      * A generated placeholder loop (a plain rectangular ring of PATH tiles, START at index 0) so
      * there's at least one non-empty, testable built-in course out of the box. Actual course
      * <i>design</i> is explicitly out of scope for this pass -- real courses are expected to be
-     * host-authored via sequential freehand placement (each click appends the next path index) and
-     * saved as custom slots through {@link #fromTiles}, the same way Gnomeball hosts build/save
-     * custom fields. Also exercises a Golden Gnome modifier end-to-end (see RelativeTile#decorative)
-     * two steps out from START, so it's reachable by almost any first roll. Also carries a Jad
-     * Tile at list index 10 (see JadEncounter), swapped in the same "same dx/dy, new tileType" way
-     * as the Item Space below.
+     * host-authored via sequential freehand placement (each click appends the next path index,
+     * then explicitly wired up via "Connect From"/"Connect To" -- see
+     * RunePartyPlugin#setCustomTileAt/#connectCustomTiles) and saved as custom slots through
+     * {@link #fromTiles}, the same way Gnomeball hosts build/save custom fields. Every tile here
+     * gets its own explicit single-edge nextIndices baked in below (the perimeter walk's own "+1,
+     * wrapping at the end" order) -- there's no implicit default to lean on (see
+     * TileReducer.TileEntry#nextIndices's own doc for why), so a generated course has to set this
+     * itself same as a host-built one would. Also exercises a Golden Gnome modifier end-to-end
+     * (see RelativeTile#decorative) two steps out from START, so it's reachable by almost any
+     * first roll. Also carries a Jad Tile at list index 10 (see JadEncounter), swapped in the same
+     * "same dx/dy, new tileType" way as the Item Space below.
      */
     public static CoursePreset buildStandardLoop()
     {
@@ -241,6 +245,19 @@ public final class CoursePreset
             tiles.set(jadTileIndex, new RelativeTile(jadTile.dx, jadTile.dy, "JAD_TILE", null, jadTile.nextIndices));
         }
 
+        // Bake in every tile's own explicit "+1, wrapping at the end" edge -- must happen after
+        // every tileType swap above (tileType/color aren't touched here) and before the decorative
+        // Golden Gnome tile is appended below, since courseLen has to be exactly the real course's
+        // own tile count, not real-tiles-plus-decorative (a decorative tile never gets a pathIndex
+        // of its own, see RelativeTile#decorative's own doc, so it must never factor into this
+        // wraparound modulus either).
+        int courseLen = tiles.size();
+        for (int i = 0; i < tiles.size(); i++)
+        {
+            RelativeTile t = tiles.get(i);
+            tiles.set(i, new RelativeTile(t.dx, t.dy, t.tileType, t.color, (i + 1) % courseLen));
+        }
+
         // Decorative Golden Gnome modifier, stacked on the PATH tile two steps out from START (see
         // RelativeTile#decorative's own doc for why this has to be appended *after* the real path
         // rather than spliced in at its logical dx/dy).
@@ -250,50 +267,7 @@ public final class CoursePreset
         return new CoursePreset("Standard Loop", tiles);
     }
 
-    /**
-     * A test course exercising forks end-to-end: the trunk splits in two three tiles out from
-     * START, an "upper" and a "lower" branch each run three tiles, and both rejoin a single merge
-     * tile before the trunk continues and loops back to START. Only the fork tile and each
-     * branch's last tile need an explicit nextIndices override -- everything else (including the
-     * loop closing back to index 0) is the default "+1" edge, same as Standard Loop. Rolling a
-     * value that lands exactly on the fork tile offers both branches as candidates (see
-     * TileOverlay#renderTargetArrow, which draws one arrow per candidate); rolling past it without
-     * landing there resolves normally along whichever branch that specific roll's step count
-     * reaches.
-     */
-    public static CoursePreset buildForkedLoop()
-    {
-        List<RelativeTile> tiles = new ArrayList<>();
-
-        tiles.add(new RelativeTile(-3, 0, "START", null));       // 0
-        tiles.add(new RelativeTile(-2, 0, "PATH", null));        // 1
-        tiles.add(new RelativeTile(-1, 0, "PENALTY_TILE", null));        // 2
-        tiles.add(new RelativeTile(0, 0, "PENALTY_TILE", null, 4, 7));   // 3 -- FORK: upper branch (4) or lower branch (7)
-
-        // Branch A ("upper route"), arcing north of the trunk.
-        tiles.add(new RelativeTile(1, -1, "PATH", null));        // 4
-        tiles.add(new RelativeTile(2, -1, "PENALTY_TILE", null));        // 5
-        tiles.add(new RelativeTile(3, -1, "PATH", null, 10));    // 6 -- rejoins at the merge tile (10)
-
-        // Branch B ("lower route"), arcing south of the trunk.
-        tiles.add(new RelativeTile(1, 1, "PATH", null));         // 7
-        tiles.add(new RelativeTile(2, 1, "PENALTY_TILE", null));         // 8
-        tiles.add(new RelativeTile(3, 1, "PENALTY_TILE", null, 10));     // 9 -- rejoins at the merge tile (10)
-
-        tiles.add(new RelativeTile(4, 0, "PATH", null));         // 10 -- MERGE: both branches lead here, trunk continues
-
-        // Trunk continues, then loops back around to START (default "+1" wraparound closes it).
-        tiles.add(new RelativeTile(5, 0, "PATH", null));         // 11
-        tiles.add(new RelativeTile(5, 3, "PENALTY_TILE", null));         // 12
-        tiles.add(new RelativeTile(0, 3, "PENALTY_TILE", null));         // 13
-        tiles.add(new RelativeTile(-3, 3, "PENALTY_TILE", null));        // 14
-        tiles.add(new RelativeTile(-3, 1, "PATH", null));        // 15 -- default next wraps to 0 (START)
-
-        return new CoursePreset("Forked Loop", tiles);
-    }
-
     public static final CoursePreset STANDARD_LOOP = buildStandardLoop();
-    public static final CoursePreset FORKED_LOOP = buildForkedLoop();
 
-    public static final List<CoursePreset> ALL = List.of(STANDARD_LOOP, FORKED_LOOP);
+    public static final List<CoursePreset> ALL = List.of(STANDARD_LOOP);
 }

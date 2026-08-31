@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit;
 
 public class ApiClient
 {
-    static final String BASE_URL = "http://localhost:8000/runeparty";
+    static final String BASE_URL = "http://localhost:8005/runeparty";
     // static final String BASE_URL = "https://runeparty.shrunk.studio/runeparty";
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
@@ -57,7 +57,7 @@ public class ApiClient
         try (Response resp = post("/v1/join/" + joinCode, body, null))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Join failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Join failed (" + resp.code() + "): " + raw);
             JoinResponse parsed = gson.fromJson(raw, JoinResponse.class);
             return new JoinResult(parsed.gameId, parsed.host, parsed.playerToken);
         }
@@ -546,9 +546,40 @@ public class ApiClient
         }
     }
 
+    /** Read-only check that {@code writeKey} still actually works for {@code gameId} -- see
+     * RunePartyPlugin#attemptSessionResume, the only caller: a host's writeKey lives only in that
+     * client's own memory (never persisted server-side beyond its hash, see create_game's own
+     * doc), so a plugin restart has nothing to reload it from except this same client's own
+     * earlier-persisted copy. This just confirms that copy is still good -- and hands back the
+     * game's current joinCode/hostRsn/status -- before RunePartyPlugin resumes acting as host with
+     * it. Throws ApiHttpException(403) if the key's simply wrong, (404) if the game's gone
+     * entirely -- both mean this game can never be hosted again from here, there's no reissue path
+     * (unlike a player's own session token, see joinGame). */
+    public HostSessionInfo checkHostSession(String gameId, String writeKey) throws IOException
+    {
+        try (Response resp = get("/v1/games/" + gameId + "/host-session", writeKey))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Check host session failed (" + resp.code() + "): " + raw);
+            HostSessionInfo parsed = gson.fromJson(raw, HostSessionInfo.class);
+            if (parsed == null) throw new IOException("Empty response from host-session endpoint");
+            return parsed;
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
+
+    private Response get(String path, String bearerToken) throws IOException
+    {
+        Request.Builder builder = new Request.Builder().url(BASE_URL + path).get();
+        if (bearerToken != null && !bearerToken.isEmpty())
+        {
+            builder.header("Authorization", "Bearer " + bearerToken);
+        }
+        return http.newCall(builder.build()).execute();
+    }
 
     private Response post(String path, JsonObject body, String writeKey) throws IOException
     {
@@ -613,7 +644,7 @@ public class ApiClient
         public final String color; // nullable
         public final Integer orientation; // nullable -- reserved for future directional tiles
         public final Integer pathIndex; // nullable -- this tile's position along the walked course
-        public final int[] nextIndices; // empty -- the default (pathIndex + 1) % courseLength edge applies server-side; see app.py's _resolve_next_indices
+        public final int[] nextIndices; // this tile's only outgoing edges -- empty means a genuine dead end, no fallback; see app.py's _resolve_next_indices
 
         public TileSpec(int x, int y, int plane, String tileType, String color, Integer orientation, Integer pathIndex, int[] nextIndices)
         {
@@ -698,6 +729,14 @@ public class ApiClient
     public static class TileTypesResponse
     {
         public List<TileTypeOut> tileTypes;
+    }
+
+    public static class HostSessionInfo
+    {
+        public String gameId;
+        public String joinCode;
+        public String hostRsn;
+        public String status; // LOBBY/ACTIVE/ENDED -- matches GamePhase's own names, same as RosterSnapshot#status
     }
 
     public static class TileTypeOut

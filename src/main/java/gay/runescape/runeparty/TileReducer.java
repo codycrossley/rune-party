@@ -16,10 +16,14 @@ public class TileReducer
         public final String color;
         public final Integer orientation; // nullable -- reserved for future directional tiles
         public final Integer pathIndex; // nullable -- null only for a non-course decorative marker; every PATH/START/GOLDEN_GNOME_TILE/EVENT_TILE/JAD_TILE has one
-        /** Explicit outgoing edges (pathIndex values), for board forks/merges -- empty means "use
-         * the default (pathIndex + 1) % courseLength" edge every tile had before forks existed.
-         * Only ever non-empty at a fork tile or a branch's tile just before a merge point; see
-         * TileReducer#resolveNextIndices, which is what actually applies the default. */
+        /** This tile's own outgoing edges (pathIndex values) -- its *only* ones. Empty means a
+         * dead end, not an implied "next tile in line": there used to be a default (pathIndex + 1)
+         * % courseLength fallback here, removed because it made freehand tile placement silently
+         * auto-connect tiles the host never actually wired together (see
+         * RunePartyPlugin#setCustomTileAt's own doc). Every edge -- including a plain "continue to
+         * the next tile" one -- now has to be set explicitly via "Connect From"/"Connect To" (see
+         * RunePartyPlugin#connectCustomTiles). See TileReducer#resolveNextIndices, which just
+         * returns this as-is now. */
         public final int[] nextIndices;
 
         public TileEntry(WorldPoint point, String tileType, String color, Integer orientation, Integer pathIndex, int[] nextIndices)
@@ -157,18 +161,16 @@ public class TileReducer
         return max + 1;
     }
 
-    /** Resolves a tile's outgoing graph edges: its own explicit nextIndices if it set any (a fork,
-     * or a merge redirect), else the default single edge to (pathIndex + 1) % courseLength -- same
-     * linear-with-wraparound behavior every course had before forks existed. Mirrors the server's
-     * own _resolve_next_indices exactly, so route-line rendering always agrees with what a roll
-     * can actually resolve to (see ApiClient's DICE_ROLLED targetIndices). */
+    /** A tile's outgoing graph edges -- always exactly its own explicit nextIndices, never
+     * inferred (see TileEntry#nextIndices's own doc for why there's no default fallback anymore).
+     * Kept as its own method, rather than every caller reading entry.nextIndices directly, purely
+     * so callers read the same "this is the resolved edge set" vocabulary the server's own
+     * _resolve_next_indices uses -- route-line rendering here always agrees with what a roll can
+     * actually resolve to server-side (see ApiClient's DICE_ROLLED targetIndices) because both
+     * sides now do the exact same nothing-but-what's-explicit lookup. */
     public int[] resolveNextIndices(TileEntry entry)
     {
-        if (entry.nextIndices.length > 0) return entry.nextIndices;
-        if (entry.pathIndex == null) return new int[0];
-        int length = courseLength();
-        if (length == 0) return new int[0];
-        return new int[] { (entry.pathIndex + 1) % length };
+        return entry.nextIndices;
     }
 
     private static String key(int x, int y, int plane, String tileType)
