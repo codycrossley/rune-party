@@ -16,9 +16,14 @@ import net.runelite.client.util.ImageUtil;
 
 /** Shows the local player's own Fishing Contest catch tally -- a titled panel with a shrimp/
  * anchovy icon and a big bold running count each, side by side -- while a Fishing Contest round is
- * active (see RunePartyPlugin#isFishingContestActive). Every completed Headbang emote near the Pond
- * rolls one catch (see RunePartyPlugin#performFishingCatchRoll) -- there's no separate "started
- * fishing" state to gate on, this shows for the whole round regardless of whether the local
+ * active (see RunePartyPlugin#isFishingContestActive) AND actually playable (see
+ * RunePartyPlugin#isMinigamePlayable) -- the second check matters here specifically: without it
+ * this would render the instant MINIGAME_STARTED lands, spoiling the "MINIGAME!" banner/selection
+ * wheel's own reveal by showing a titled "Fishing Contest" panel before the wheel's even finished
+ * spinning (reported bug -- same fix CoinRushTimerOverlay/StatsOverlay's Coin Rush scoreboard
+ * already apply). Every completed Headbang emote near the Pond rolls one catch (see
+ * RunePartyPlugin#performFishingCatchRoll) -- there's no separate "started fishing" state to gate
+ * on beyond that, this shows for the whole rest of the round regardless of whether the local
  * player's caught anything yet.
  * <p>
  * Deliberately front-and-center (OverlayPosition.TOP_CENTER) with large icons/numbers rather than a
@@ -72,7 +77,7 @@ public class FishingCatchOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (!plugin.isFishingContestActive()) return null;
+        if (!plugin.isFishingContestActive() || !plugin.isMinigamePlayable()) return null;
 
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);

@@ -17,7 +17,11 @@ import net.runelite.client.ui.overlay.OverlayPosition;
 
 /** Turf Wars' own live scoreboard -- one colored swatch+count per team currently in play, plus a
  * small "time left" countdown, while a Turf Wars round is active (see RunePartyPlugin#
- * isTurfWarsActive). Front-and-center (OverlayPosition.TOP_CENTER) with big bold numbers, same
+ * isTurfWarsActive) AND actually playable (see RunePartyPlugin#isMinigamePlayable) -- without the
+ * second check this would render (title and all) the instant MINIGAME_STARTED lands, spoiling the
+ * "MINIGAME!" banner/selection wheel's own reveal by naming the mini-game before the wheel's even
+ * finished spinning, same reported bug FishingCatchOverlay's own identical fix addresses. Front-
+ * and-center (OverlayPosition.TOP_CENTER) with big bold numbers, same
  * reasoning FishingCatchOverlay's own redesign gives for not tucking a live count a player is
  * meant to actually watch mid-round into a corner or side panel -- this game in particular needs
  * the score to read at a glance while running across a 64-tile grid. The panel's own border is
@@ -70,7 +74,7 @@ public class TurfWarsScoreOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (!plugin.isTurfWarsActive()) return null;
+        if (!plugin.isTurfWarsActive() || !plugin.isMinigamePlayable()) return null;
 
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
