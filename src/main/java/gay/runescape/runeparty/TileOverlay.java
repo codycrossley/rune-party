@@ -1,8 +1,11 @@
 package gay.runescape.runeparty;
 
+import gay.runescape.runeparty.models.ArenaFireModel;
 import gay.runescape.runeparty.models.CoinRushModel;
 import gay.runescape.runeparty.models.CoinTrapModel;
 import gay.runescape.runeparty.models.GoldenGnomeModel;
+import gay.runescape.runeparty.models.PondModel;
+import gay.runescape.runeparty.models.TableModel;
 import net.runelite.api.Client;
 import net.runelite.api.Perspective;
 import net.runelite.api.Player;
@@ -24,7 +27,11 @@ import java.util.List;
  * tile renders individually as its own rounded-corner outline (see renderOutlinedTile), inset a
  * little inward from the tile's true boundary so adjacent tiles' outlines read as a clean grid
  * rather than doubled-up touching edges, with a connecting line drawn between consecutive path
- * indices to make the route itself legible. */
+ * indices to make the route itself legible. The one exception is the Fishing Contest platform's
+ * FISHING_TILE block, which -- like Gnomeball's own zones -- genuinely is one connected region
+ * rather than a walked path, so it renders as a single merged-area outline instead (see
+ * renderFishingZoneOutline), sharing roundedInsetPolygon with every per-tile outline so its corners
+ * read exactly the same. */
 @Slf4j
 public class TileOverlay extends Overlay
 {
@@ -41,6 +48,12 @@ public class TileOverlay extends Overlay
     private static final double TILE_OUTLINE_INSET_PX = 4.0;
     private static final double TILE_OUTLINE_CORNER_RADIUS_PX = 7.0;
 
+    // Applied to FISHING_TILE's own catalog color only (see renderFishingZoneOutline), not to
+    // resolveColor generally -- every per-tile outline elsewhere still draws at that color's own
+    // full opacity, this alpha is layered on top of it just for the merged zone outline so it reads
+    // as a lighter boundary marker rather than as prominent as an individual tile's own outline.
+    private static final int FISHING_ZONE_OUTLINE_ALPHA = 120;
+
     private static final Stroke SOLID_STROKE   = new BasicStroke(3.5f);
     private static final Stroke PREVIEW_STROKE = new BasicStroke(3.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 10f, new float[]{7f, 5f}, 0f);
     private static final Stroke ROUTE_STROKE   = new BasicStroke(2f);
@@ -52,13 +65,16 @@ public class TileOverlay extends Overlay
     private final RunePartyPlugin plugin;
     private final TileReducer tileReducer;
 
-    // The three tile-decoration 3D models -- Golden Gnome, Coin Trap, Coin Rush -- each own their
-    // own SceneObjectSet-backed diff/spawn (see ARCHITECTURE_REVIEW.md's C5) under models/, split
-    // out of this class since more of these are planned; this overlay just owns one instance of
-    // each and calls update()/clear() at the right moments below.
+    // The tile-decoration 3D models -- Golden Gnome, Coin Trap, Coin Rush, Arena Fire -- each own
+    // their own SceneObjectSet-backed diff/spawn (see ARCHITECTURE_REVIEW.md's C5) under models/,
+    // split out of this class since more of these are planned; this overlay just owns one instance
+    // of each and calls update()/clear() at the right moments below.
     private final GoldenGnomeModel goldenGnomeModel;
     private final CoinTrapModel coinTrapModel;
     private final CoinRushModel coinRushModel;
+    private final ArenaFireModel arenaFireModel;
+    private final PondModel pondModel;
+    private final TableModel tableModel;
 
     public TileOverlay(Client client, RunePartyConfig config, RunePartyPlugin plugin, TileReducer tileReducer)
     {
@@ -70,6 +86,9 @@ public class TileOverlay extends Overlay
         this.goldenGnomeModel = new GoldenGnomeModel(client, plugin);
         this.coinTrapModel = new CoinTrapModel(client, plugin);
         this.coinRushModel = new CoinRushModel(client, plugin);
+        this.arenaFireModel = new ArenaFireModel(client);
+        this.pondModel = new PondModel(client);
+        this.tableModel = new TableModel(client);
 
         setPosition(OverlayPosition.DYNAMIC);
         setLayer(OverlayLayer.ABOVE_SCENE);
@@ -83,6 +102,9 @@ public class TileOverlay extends Overlay
             clearGoldenGnomeModels();
             clearCoinTrapModels();
             clearCoinRushModels();
+            clearArenaFireModels();
+            clearPondModels();
+            clearTableModels();
             return null;
         }
         GamePhase phase = plugin.getPhase();
@@ -91,6 +113,9 @@ public class TileOverlay extends Overlay
             clearGoldenGnomeModels();
             clearCoinTrapModels();
             clearCoinRushModels();
+            clearArenaFireModels();
+            clearPondModels();
+            clearTableModels();
             return null;
         }
 
@@ -121,13 +146,67 @@ public class TileOverlay extends Overlay
         {
             if ("GOLDEN_GNOME_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see models/GoldenGnomeModel
             if ("COIN_TRAP_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see models/CoinTrapModel
+            if ("ARENA_TILE".equals(entry.tileType) && ArenaFireModel.isDead(entry.color)) continue; // rendered as a 3D model instead, see models/ArenaFireModel
+            if ("POND_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see models/PondModel
+            if ("FISHING_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderFishingZoneOutline
             Color base = resolveColor(entry.color, entry.tileType);
             renderOutlinedTile(g, entry.point, base, SOLID_STROKE);
         }
 
+        renderFishingZoneOutline(g, entries);
+
         goldenGnomeModel.update(entries);
         coinTrapModel.update(entries);
+        arenaFireModel.update(entries);
+        tableModel.update(entries);
+        pondModel.update(entries);
         renderRouteLines(g, entries);
+    }
+
+    /** Draws the whole Fishing Contest platform's FISHING_TILE block as one merged-area outline,
+     * rather than each of its tiles getting its own individually like renderCommittedCourse's main
+     * loop does for a walked path -- the platform is a genuinely connected region (see this class's
+     * own doc), so tracing every internal seam would just be visual noise. Derives the region's
+     * center from the POND_TILE modifier stacked at its exact center coordinate (see
+     * minigames/fishing_contest.py's own _centered_platform, the only source of this layout) rather
+     * than averaging FISHING_TILE corners itself, and its size from the FISHING_TILE entries' own
+     * bounding box rather than a hardcoded constant, so this keeps working if PLATFORM_SIZE ever
+     * changes. {@link Perspective#getCanvasTileAreaPoly} is the AoE-polygon counterpart to
+     * getCanvasTilePoly (which a single renderOutlinedTile call uses) -- same 4-corner polygon
+     * shape, just spanning the whole region instead of one tile, so it drops straight into the same
+     * roundedInsetPolygon call every other outline here already uses. */
+    private void renderFishingZoneOutline(Graphics2D g, List<TileReducer.TileEntry> entries)
+    {
+        WorldPoint center = null;
+        Color color = null;
+        Integer minX = null, maxX = null, minY = null, maxY = null;
+        for (TileReducer.TileEntry entry : entries)
+        {
+            if ("POND_TILE".equals(entry.tileType))
+            {
+                center = entry.point;
+            }
+            else if ("FISHING_TILE".equals(entry.tileType))
+            {
+                WorldPoint p = entry.point;
+                if (color == null) color = resolveColor(entry.color, entry.tileType);
+                minX = (minX == null) ? p.getX() : Math.min(minX, p.getX());
+                maxX = (maxX == null) ? p.getX() : Math.max(maxX, p.getX());
+                minY = (minY == null) ? p.getY() : Math.min(minY, p.getY());
+                maxY = (maxY == null) ? p.getY() : Math.max(maxY, p.getY());
+            }
+        }
+        if (center == null || minX == null) return;
+
+        LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), center);
+        if (lp == null) return;
+
+        Polygon poly = Perspective.getCanvasTileAreaPoly(client, lp, maxX - minX + 1, maxY - minY + 1, center.getPlane(), 0);
+        if (poly == null) return;
+
+        g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), FISHING_ZONE_OUTLINE_ALPHA));
+        g.setStroke(SOLID_STROKE);
+        g.draw(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
     }
 
     /** Despawns and forgets every Golden Gnome RuneLiteObject -- called whenever this overlay
@@ -151,6 +230,28 @@ public class TileOverlay extends Overlay
     public void clearCoinRushModels()
     {
         coinRushModel.clear();
+    }
+
+    /** Despawns and forgets every Arena Fire RuneLiteObject -- same reasoning/call sites as
+     * clearGoldenGnomeModels/clearCoinTrapModels/clearCoinRushModels. */
+    public void clearArenaFireModels()
+    {
+        arenaFireModel.clear();
+    }
+
+    /** Despawns and forgets every Pond RuneLiteObject -- same reasoning/call sites as
+     * clearGoldenGnomeModels/clearCoinTrapModels/clearCoinRushModels/clearArenaFireModels. */
+    public void clearPondModels()
+    {
+        pondModel.clear();
+    }
+
+    /** Despawns and forgets every Table RuneLiteObject -- same reasoning/call sites as
+     * clearGoldenGnomeModels/clearCoinTrapModels/clearCoinRushModels/clearArenaFireModels/
+     * clearPondModels. */
+    public void clearTableModels()
+    {
+        tableModel.clear();
     }
 
     /** Draws a bouncing, pulsing arrow -- in the mover's own RunePartyColor (see

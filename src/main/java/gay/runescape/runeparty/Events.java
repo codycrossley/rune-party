@@ -30,6 +30,11 @@ public final class Events
     public static final String COIN_TRAP_TRIGGERED = "COIN_TRAP_TRIGGERED";
     public static final String COINS_CHANGED = "COINS_CHANGED";
     public static final String DICE_ROLLED = "DICE_ROLLED";
+    /** Echo of the client's own submit-fishing-catch call (see ApiClient#submitFishingCatch) --
+     * the client already knows its own final tally the instant it sends it, so nothing here needs
+     * to react to the echo. Declared solely so check_event_parity.py's one-for-one assertion
+     * holds, same treatment as MINIGAME_BOARD_SWAPPED/ARENA_PLAYER_ELIMINATED above. */
+    public static final String FISHING_CATCH_SUBMITTED = "FISHING_CATCH_SUBMITTED";
     public static final String GAME_ENDED = "GAME_ENDED";
     public static final String GAME_STARTED = "GAME_STARTED";
     public static final String GOLDEN_GNOME_LOST = "GOLDEN_GNOME_LOST";

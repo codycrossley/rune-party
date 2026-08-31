@@ -118,6 +118,12 @@ final class MinigamePresentation
     // confirms it).
     private final Set<Integer> coinRushCollectSubmitted = ConcurrentHashMap.newKeySet();
     private volatile long coinRushRoundStartAt = 0;
+    // ---- Fishing Contest (client-local catches, see RunePartyPlugin#onGameTick's own fishing
+    // section -- this class only tracks the round's own start, exactly the same "wall-clock moment
+    // the round actually began, stamped from MINIGAME_ROUND_BEGIN" shape coinRushRoundStartAt
+    // already uses. Catch counts themselves are never reported to the server mid-round, so they
+    // have no counterpart here -- only RunePartyPlugin's own local fields track those. ----
+    private volatile long fishingRoundStartAt = 0;
 
     // ---- True or False (server-driven rounds -- see TRUE_OR_FALSE_ROUND_STARTED/ANSWERED/
     // ROUND_ENDED handling). All real state, applied catch-up or not: trueOrFalseQuestion/
@@ -184,6 +190,13 @@ final class MinigamePresentation
                     coinRushScores.clear();
                     coinRushCollectSubmitted.clear();
                     coinRushRoundStartAt = 0;
+                }
+                // Same reasoning as Coin Rush's own reset above -- fishingRoundStartAt deliberately
+                // isn't set here either, for the identical reason (the round isn't playable yet,
+                // see MINIGAME_ROUND_BEGIN below, the only writer).
+                if (RunePartyPlugin.FISHING_CONTEST_KEY.equals(minigameKey))
+                {
+                    fishingRoundStartAt = 0;
                 }
                 // Same reasoning as Coin Rush's own reset just above -- a fresh True or False
                 // instance starts with no question/answers/reveal, regardless of catch-up.
@@ -263,10 +276,15 @@ final class MinigamePresentation
                 // client (this event's own arrival *is* the moment) and best-effort for a
                 // catching-up client, same as every other real-state field here. True or False
                 // doesn't need this -- trueOrFalseRoundStartedAt already anchors off its own
-                // TRUE_OR_FALSE_ROUND_STARTED -- so this only acts on Coin Rush.
+                // TRUE_OR_FALSE_ROUND_STARTED -- so this only acts on Coin Rush (and now Fishing
+                // Contest, same reasoning).
                 if (RunePartyPlugin.COIN_RUSH_KEY.equals(minigameKey))
                 {
                     coinRushRoundStartAt = System.currentTimeMillis();
+                }
+                if (RunePartyPlugin.FISHING_CONTEST_KEY.equals(minigameKey))
+                {
+                    fishingRoundStartAt = System.currentTimeMillis();
                 }
                 // Unconditional, unlike the Coin-Rush-specific stamp above -- every mini-game fires
                 // this event (see events.minigame_round_begin's own doc), so this flips true
@@ -582,6 +600,7 @@ final class MinigamePresentation
         coinRushScores.clear();
         coinRushCollectSubmitted.clear();
         coinRushRoundStartAt = 0;
+        fishingRoundStartAt = 0;
         trueOrFalseQuestion = null;
         trueOrFalseRoundNumber = 0;
         trueOrFalseAnsweredRsns.clear();
@@ -631,6 +650,14 @@ final class MinigamePresentation
      * no round is active yet or the round hasn't actually become playable (see
      * coinRushRoundStartAt's own doc on when that gets stamped). */
     long getCoinRushEndsAt() { return coinRushRoundStartAt != 0 ? coinRushRoundStartAt + RunePartyPlugin.COIN_RUSH_DURATION_MS : 0; }
+
+    boolean isFishingContestActive() { return minigameActive && RunePartyPlugin.FISHING_CONTEST_KEY.equals(minigameKey); }
+    /** When the current Fishing Contest round's own local catch-timer should stop -- 0 if no round
+     * is active yet or the round hasn't actually become playable (see fishingRoundStartAt's own
+     * doc on when that gets stamped). RunePartyPlugin#onGameTick's own fishing section compares
+     * against this to decide when to submit the local player's final tally, same "stamped instant
+     * + fixed duration" shape getCoinRushEndsAt already uses. */
+    long getFishingContestEndsAt() { return fishingRoundStartAt != 0 ? fishingRoundStartAt + RunePartyPlugin.FISHING_CONTEST_DURATION_MS : 0; }
 
     String getTrueOrFalseQuestion() { return trueOrFalseQuestion; }
     int getTrueOrFalseRoundNumber() { return trueOrFalseRoundNumber; }

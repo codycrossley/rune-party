@@ -237,6 +237,25 @@ public class ApiClient
         }
     }
 
+    /** Submits the local player's final Fishing Contest catch tally -- see the server's own
+     * submit-fishing-catch endpoint. Fired exactly once per round, from RunePartyPlugin#
+     * submitFishingCatch the moment that client's own local 30-second timer elapses -- unlike
+     * reportMinigamePosition's own per-tick heartbeat, this is a one-shot report, not a
+     * continuously-repeated one. */
+    public void submitFishingCatch(String gameId, String playerRsn, String playerToken, int anchovies, int shrimp) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("anchovies", anchovies);
+        body.addProperty("shrimp", shrimp);
+
+        try (Response resp = post("/v1/games/" + gameId + "/submit-fishing-catch", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Submit fishing catch failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     /** Buys the Golden Gnome currently standing at (x, y, plane) -- see the server's own
      * purchase-golden-gnome endpoint. A free side-action during the local player's own pending
      * roll, triggered by a right-click "Purchase Golden Gnome" menu entry rather than an emote --

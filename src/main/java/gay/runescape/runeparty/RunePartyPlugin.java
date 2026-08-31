@@ -21,6 +21,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -204,6 +205,19 @@ public class RunePartyPlugin extends Plugin
      * own "All players must stand within the arena!" gather message -- see
      * renderArenaGatherMessage's own doc for why Arena can't use the generic countdown at all. */
     public static final String ARENA_KEY = "arena";
+
+    /** Client-side key for the Fishing Contest mini-game -- must match the server's own
+     * registration (see minigames/fishing_contest.py), same role ARENA_KEY/COIN_RUSH_KEY play for
+     * their own mini-games. */
+    public static final String FISHING_CONTEST_KEY = "fishing-contest";
+
+    /** How long a Fishing Contest round's own local catch loop runs before the local player's
+     * final tally gets submitted -- must match the server's own FISHING_DURATION_SECONDS
+     * (minigames/fishing_contest.py). Measured from MINIGAME_ROUND_BEGIN (see
+     * MinigamePresentation#fishingRoundStartAt/getFishingContestEndsAt), not from whenever an
+     * individual player happens to right-click the pond -- everyone's local timer runs out at the
+     * same moment, matching what the server's own bounded wait (submit-fishing-catch) expects. */
+    public static final long FISHING_CONTEST_DURATION_MS = 30000;
 
     /** How long the question sits on screen before the answer countdown starts ticking, measured
      * from the moment TRUE_OR_FALSE_ROUND_STARTED lands (see trueOrFalseRoundStartedAt/
@@ -474,6 +488,7 @@ public class RunePartyPlugin extends Plugin
     private AnnouncementOverlay announcementOverlay;
     private ConfettiOverlay confettiOverlay;
     private JadEncounter jadEncounter;
+    private FishingCatchOverlay fishingCatchOverlay;
     private RosterReducer rosterReducer;
     ApiClient apiClient; // package-private: presenters (MinigamePresentation) issue their own requests
     private EventSocket eventSocket;
@@ -567,15 +582,21 @@ public class RunePartyPlugin extends Plugin
     // finishes -- onAnimationChanged only actually calls rollDice() on the animation change that
     // clears this, so the roll never fires mid-emote.
     private volatile boolean awaitingSpinFinish = false;
-    // At most one of these six "awaiting" flags (this one plus GoldenGnomePresentation's own
-    // Golden Gnome pair, plus MinigamePresentation's own mini-game/True-or-False three) is ever
-    // true at once -- see onAnimationChanged. A roll and a Golden Gnome offer are both only
-    // possible outside a mini-game (isLocalPlayerReadyToRoll requires !minigameActive), a mini-game
-    // ready-check is only possible before its own countdown starts
-    // (isLocalPlayerAwaitingMinigameReady requires !minigameCountdownStarted), and a True or False
-    // answer is only possible once the round's actually playable
+    // True from the moment the local player's Headbang emote starts until it finishes -- same
+    // "wait for the animation to actually finish, not just start" idiom as awaitingSpinFinish, see
+    // onAnimationChanged's EMOTE_DANCE_HEADBANG branch / performFishingCatchRoll.
+    private volatile boolean awaitingHeadbangFinish = false;
+    // At most one of these seven "awaiting" flags (this one plus GoldenGnomePresentation's own
+    // Golden Gnome pair, plus MinigamePresentation's own mini-game/True-or-False three, plus
+    // awaitingHeadbangFinish above) is ever true at once -- see onAnimationChanged. A roll and a
+    // Golden Gnome offer are both only possible outside a mini-game (isLocalPlayerReadyToRoll
+    // requires !minigameActive), a mini-game ready-check is only possible before its own countdown
+    // starts (isLocalPlayerAwaitingMinigameReady requires !minigameCountdownStarted), a True or
+    // False answer is only possible once that round's actually playable
     // (isLocalPlayerAwaitingTrueOrFalseAnswer requires isMinigamePlayable(), which itself requires
-    // the countdown to have both started and finished) -- so no two of these can ever overlap.
+    // the countdown to have both started and finished), and a Headbang catch roll is only possible
+    // while Fishing Contest is the active mini-game (isFishingContestActive) -- since exactly one
+    // mini-game (or none) is ever active at a time, no two of these can ever overlap.
     // Candidate destination tiles for the current roll -- more than one when the roll's path
     // crosses a fork (see TileOverlay#renderTargetArrow, which draws one arrow per candidate).
     // Never null, only ever empty.
@@ -599,6 +620,20 @@ public class RunePartyPlugin extends Plugin
     // cleared unconditionally in submitAction's own finallyAction the instant each call resolves,
     // not selectively on success/failure. See onGameTick's own reportMinigamePosition check.
     private final AtomicBoolean minigamePositionReportInFlight = new AtomicBoolean(false);
+    // ---- Fishing Contest (entirely client-local until the one final submission -- see
+    // minigames/fishing_contest.py's own doc for why catches are never reported per-catch). Every
+    // completed Headbang emote near the Fish bowl rolls one catch (see onAnimationChanged's
+    // EMOTE_DANCE_HEADBANG branch / performFishingCatchRoll) -- there's no "start fishing" state,
+    // catching is just however many Headbangs land within a round. shrimpCount/anchovyCount are
+    // owned solely by the client thread (performFishingCatchRoll, onGameTick's submission check),
+    // same single-writer assumption every other per-tick field in this class already relies on, so
+    // plain (non-atomic) fields are fine here. fishingCatchSubmitted guards the one-time end-of-
+    // round submission (see onGameTick) and is reset on MINIGAME_STARTED, set defensively on
+    // MINIGAME_ENDED too in case a round ends abnormally (host force-end) before the local
+    // 30-second timer would have fired the submission itself. ----
+    private volatile boolean fishingCatchSubmitted = false;
+    private int shrimpCount = 0;
+    private int anchovyCount = 0;
     // Real state, applied catch-up or not: whether the current turn's player has already spent
     // their one-item-per-turn allowance -- reset on every TURN_STARTED, set by ITEM_USED. Mirrors
     // the server's own itemUsedThisTurn (see app.py's use_item).
@@ -809,6 +844,9 @@ public class RunePartyPlugin extends Plugin
         jadEncounter = new JadEncounter(client, clientThread, this);
         overlayManager.add(jadEncounter);
 
+        fishingCatchOverlay = new FishingCatchOverlay(this);
+        overlayManager.add(fishingCatchOverlay);
+
         panel = new RunePartyPanel(this);
         navButton = NavigationButton.builder()
             .tooltip("Rune Party")
@@ -833,13 +871,14 @@ public class RunePartyPlugin extends Plugin
         if (eventSocket != null) eventSocket.shutdown();
         executor.shutdownNow();
         uiTimerExec.shutdownNow();
-        if (tileOverlay != null) { tileOverlay.clearGoldenGnomeModels(); tileOverlay.clearCoinRushModels(); overlayManager.remove(tileOverlay); }
+        if (tileOverlay != null) { tileOverlay.clearGoldenGnomeModels(); tileOverlay.clearCoinRushModels(); tileOverlay.clearPondModels(); tileOverlay.clearTableModels(); overlayManager.remove(tileOverlay); }
         if (statsOverlay != null) overlayManager.remove(statsOverlay);
         if (coinRushTimerOverlay != null) overlayManager.remove(coinRushTimerOverlay);
         if (playerOverlay != null) overlayManager.remove(playerOverlay);
         if (announcementOverlay != null) overlayManager.remove(announcementOverlay);
         if (confettiOverlay != null) overlayManager.remove(confettiOverlay);
         if (jadEncounter != null) { jadEncounter.clear(); overlayManager.remove(jadEncounter); }
+        if (fishingCatchOverlay != null) overlayManager.remove(fishingCatchOverlay);
         if (navButton != null) clientToolbar.removeNavigation(navButton);
         if (mapDialog != null) { mapDialog.dispose(); mapDialog = null; }
         resetState();
@@ -1151,6 +1190,32 @@ public class RunePartyPlugin extends Plugin
             () -> apiClient.reportMinigamePosition(gid, self, token, pos.getX(), pos.getY(), pos.getPlane()),
             null,
             () -> minigamePositionReportInFlight.set(false));
+    }
+
+    /** Fires the local player's final Fishing Contest tally off to the server -- called exactly
+     * once per round, from onGameTick the moment its own local 30-second timer elapses (see
+     * FISHING_CONTEST_DURATION_MS's own doc). Snapshots shrimpCount/anchovyCount at call time
+     * rather than reading them again inside the lambda -- fishingCatchSubmitted is already true by
+     * the time this runs (see onGameTick, the only caller, which sets it right before calling this
+     * so performFishingCatchRoll can no longer add to either count), but this keeps the submitted
+     * numbers visibly tied to the exact instant the round ended rather than "whatever they happen
+     * to be when the request actually fires." No retry on
+     * failure -- unlike reportMinigamePosition's own every-tick heartbeat, there's no next tick to
+     * supersede a dropped one-shot submission with, but a missed submission just means this player
+     * shows as 0 anchovies (see the server's own submit_fishing_catch/pay_out_top), not a hung
+     * round. */
+    private void submitFishingCatch()
+    {
+        String self = localRsn();
+        final String gid = gameId;
+        final String token = playerToken;
+        final int shrimp = shrimpCount;
+        final int anchovies = anchovyCount;
+        if (self == null || gid == null || token == null) return;
+
+        submitAction("Submit fishing catch",
+            () -> apiClient.submitFishingCatch(gid, self, token, anchovies, shrimp),
+            e -> addChatMessage("Failed to submit your fishing catch: " + e.getMessage()));
     }
 
     /** Reports arrival at the Start tile after using a Home Teleport -- called automatically from
@@ -1617,6 +1682,42 @@ public class RunePartyPlugin extends Plugin
         return null;
     }
 
+    /** The Pond's own current tile, if one is currently marked -- see performFishingCatchRoll, the
+     * only reader. Scans tileReducer's live snapshot directly rather than caching, same "the
+     * reducer is the one source of truth" reasoning findGoldenGnomeTilePoint already follows. */
+    WorldPoint findPondTilePoint()
+    {
+        for (TileReducer.TileEntry entry : tileReducer.snapshot())
+        {
+            if ("POND_TILE".equals(entry.tileType)) return entry.point;
+        }
+        return null;
+    }
+
+    /** Rolls one Fishing Contest catch -- called from onAnimationChanged the moment the local
+     * player's own Headbang emote finishes (see awaitingHeadbangFinish). Re-checks
+     * isFishingContestActive()/fishingCatchSubmitted here on top of onAnimationChanged's own gate
+     * before arming, same "each response re-checks its own state" convention rollDice()/
+     * bowToJad()/confirmMinigameReady() already follow -- the round could have ended mid-emote.
+     * Requires the local player to be within one tile of the Pond (Chebyshev distance <= 1, i.e.
+     * the Pond's own tile plus its 8 neighbors) and on the same plane, same proximity rule the old
+     * right-click-driven catch loop used -- otherwise a player could stand anywhere on the board
+     * and Headbang for free catches with no relation to the Pond at all. No cooldown beyond the
+     * emote's own animation length -- unlike the old 2-second timer gate, there's nothing else here
+     * to rate-limit, since each catch now costs one full Headbang. */
+    private void performFishingCatchRoll()
+    {
+        if (!isFishingContestActive() || fishingCatchSubmitted) return;
+
+        Player selfPlayer = client.getLocalPlayer();
+        WorldPoint pos = selfPlayer == null ? null : selfPlayer.getWorldLocation();
+        WorldPoint anchor = findPondTilePoint();
+        if (pos == null || anchor == null || pos.getPlane() != anchor.getPlane()) return;
+        if (Math.max(Math.abs(pos.getX() - anchor.getX()), Math.abs(pos.getY() - anchor.getY())) > 1) return;
+
+        if (ThreadLocalRandom.current().nextInt(100) < 67) shrimpCount++; else anchovyCount++;
+    }
+
     /** Buys the Golden Gnome currently standing at {@code point} -- called from the in-world
      * "Purchase Golden Gnome" menu entry (see addGoldenGnomePurchaseMenuEntry). A free side-action
      * during the local player's own pending roll, same as useItem: doesn't touch pendingRoll or
@@ -1949,6 +2050,24 @@ public class RunePartyPlugin extends Plugin
             reportMinigamePosition(selfPlayer.getWorldLocation());
         }
 
+        // Also independent of the turn engine below -- the one-time end-of-round submission for
+        // the local player's own entirely client-local Fishing Contest tally (see
+        // performFishingCatchRoll/minigames/fishing_contest.py's own doc for why catches are
+        // decided here, never server-side, and never reported per-catch). Individual catches are
+        // rolled from onAnimationChanged instead, one per completed Headbang emote -- this just
+        // watches the local 30-second timer (anchored to MINIGAME_ROUND_BEGIN, see
+        // FISHING_CONTEST_DURATION_MS's own doc) and fires the single submission once it elapses,
+        // guarded by fishingCatchSubmitted so it can only ever fire once per round.
+        if (isFishingContestActive() && !fishingCatchSubmitted)
+        {
+            long endsAt = getFishingContestEndsAt();
+            if (endsAt != 0 && System.currentTimeMillis() >= endsAt)
+            {
+                fishingCatchSubmitted = true;
+                submitFishingCatch();
+            }
+        }
+
         // Also independent of the turn engine below -- unlike a rolled destination (pendingRoll,
         // only ever true on the local player's own turn), a Home Teleport arrival can still be
         // owed well after the turn it was armed on, whosever turn it currently is (see
@@ -2050,24 +2169,27 @@ public class RunePartyPlugin extends Plugin
 
     /** Rolls the dice once the local player's Spin emote finishes on their own turn -- replaces the
      * old "right-click your tile -> Roll Dice" menu entry with a gesture trigger -- and, the same
-     * way, responds to a pending Jad bow, a mini-game ready-check, or the current True or False
-     * round once the matching YES/NO emote finishes. Only reacts to the local player's own
-     * animation (every client sees every nearby player's AnimationChanged, so this would otherwise
-     * also fire for spectators watching someone else spin/nod/shake for fun). Waits for the *next*
+     * way, responds to a pending Jad bow, a mini-game ready-check, the current True or False round
+     * once the matching YES/NO emote finishes, or a Fishing Contest catch roll once a Headbang
+     * emote finishes (replacing that mini-game's own old "right-click the Pond -> Fish" menu entry
+     * the same way Spin replaced Roll Dice). Only reacts to the local player's own animation (every
+     * client sees every nearby player's AnimationChanged, so this would otherwise also fire for
+     * spectators watching someone else spin/nod/shake/headbang for fun). Waits for the *next*
      * animation change away from whichever emote ID matched -- i.e. the emote actually finishing,
      * not just starting -- so the roll (and the screen-centered dice reveal every client sees, see
-     * AnnouncementOverlay#renderDiceRoll) or whichever response fires never happens mid-emote;
-     * awaitingSpinFinish here, plus JadPresentation's own awaitingBowFinish
-     * and MinigamePresentation's own awaitingMinigameReadyFinish/awaitingTrueOrFalseYesFinish/
-     * awaitingTrueOrFalseNoFinish, are what carry that wait across the two AnimationChanged
-     * firings, exactly one set at a time (see awaitingSpinFinish's own doc for why none of the
-     * underlying situations can ever overlap). Gates the actual roll on
+     * AnnouncementOverlay#renderDiceRoll), catch, or whichever other response fires never happens
+     * mid-emote; awaitingSpinFinish and awaitingHeadbangFinish here, plus JadPresentation's own
+     * awaitingBowFinish and MinigamePresentation's own awaitingMinigameReadyFinish/
+     * awaitingTrueOrFalseYesFinish/awaitingTrueOrFalseNoFinish, are what carry that wait across the
+     * two AnimationChanged firings, exactly one set at a time (see awaitingSpinFinish's own doc for
+     * why none of the underlying situations can ever overlap). Gates the actual roll on
      * isLocalPlayerReadyToRoll() -- same check AnnouncementOverlay#renderSpinHint uses to decide
-     * whether to show the "Use the SPIN! emote" reminder -- and each response on its own matching
-     * isLocalPlayerAwaiting*() check, so no hint is ever showing when the matching emote wouldn't
-     * actually do anything. rollDice()/bowToJad()/confirmMinigameReady()/
-     * answerTrueOrFalse() each re-check their own state on top of this, this is just what decides
-     * *when* to call them. */
+     * whether to show the "Use the SPIN! emote" reminder -- the catch roll on isFishingContestActive()
+     * / fishingCatchSubmitted, and each other response on its own matching isLocalPlayerAwaiting*()
+     * check, so no hint is ever showing when the matching emote wouldn't actually do anything.
+     * rollDice()/bowToJad()/confirmMinigameReady()/answerTrueOrFalse()/performFishingCatchRoll()
+     * each re-check their own state on top of this, this is just what decides *when* to call
+     * them. */
     @Subscribe
     public void onAnimationChanged(AnimationChanged event)
     {
@@ -2114,6 +2236,13 @@ public class RunePartyPlugin extends Plugin
             return;
         }
 
+        if (anim == AnimationID.EMOTE_DANCE_HEADBANG)
+        {
+            if (!isFishingContestActive() || fishingCatchSubmitted) return;
+            awaitingHeadbangFinish = true;
+            return;
+        }
+
         if (awaitingSpinFinish)
         {
             awaitingSpinFinish = false;
@@ -2138,6 +2267,11 @@ public class RunePartyPlugin extends Plugin
         {
             minigamePresentation.clearAwaitingTrueOrFalseNoFinish();
             answerTrueOrFalse(false);
+        }
+        else if (awaitingHeadbangFinish)
+        {
+            awaitingHeadbangFinish = false;
+            performFishingCatchRoll();
         }
     }
 
@@ -3054,6 +3188,14 @@ public class RunePartyPlugin extends Plugin
                     // (see addGoldenGnomePurchaseMenuEntry, gated on pendingRoll) offering itself
                     // to that player well after their turn -- and the round -- was actually over.
                     pendingRoll = false;
+                    // Real state regardless of catch-up: a fresh mini-game instance never inherits
+                    // a previous round's own Fishing Contest tally/submission-guard/emote-wait, even
+                    // if that previous round somehow ended abnormally (host force-end) before its
+                    // own local 30-second timer got the chance to submit and clear this itself.
+                    shrimpCount = 0;
+                    anchovyCount = 0;
+                    fishingCatchSubmitted = false;
+                    awaitingHeadbangFinish = false;
                 }
                 minigamePresentation.apply(e, catchingUp);
                 break;
@@ -3067,6 +3209,11 @@ public class RunePartyPlugin extends Plugin
                 // getCurrentRound/StatsOverlay's "ROUND x/y" line, the only consumer -- so it stays
                 // inline rather than moving into MinigamePresentation with the rest of this case.
                 completedRounds++;
+                // Defensive guard against a stray late catch/submission -- covers a round ending
+                // (host force-end, or the server's own bounded wait simply timing out server-side)
+                // before this client's own local timer ever got the chance to submit this itself.
+                fishingCatchSubmitted = true;
+                awaitingHeadbangFinish = false;
                 minigamePresentation.handleMinigameEnded(e.payload, catchingUp, maxRounds, completedRounds);
                 break;
 
@@ -3271,6 +3418,18 @@ public class RunePartyPlugin extends Plugin
      * no round is active yet or the round hasn't actually become playable (see
      * coinRushRoundStartAt's own doc on when that gets stamped). */
     public long getCoinRushEndsAt() { return minigamePresentation.getCoinRushEndsAt(); }
+
+    public boolean isFishingContestActive() { return minigamePresentation.isFishingContestActive(); }
+    /** When the current Fishing Contest round's own local catch-timer should stop (see
+     * FISHING_CONTEST_DURATION_MS) -- 0 if no round is active yet or the round hasn't actually
+     * become playable (see MinigamePresentation#fishingRoundStartAt's own doc on when that gets
+     * stamped). */
+    public long getFishingContestEndsAt() { return minigamePresentation.getFishingContestEndsAt(); }
+    /** This round's own local catch counts so far -- see FishingCatchOverlay, the only consumer.
+     * Client-local only, per the Fishing Contest field block's own doc -- nobody but the local
+     * player ever sees these, there's no server-broadcast equivalent to read instead. */
+    public int getShrimpCount() { return shrimpCount; }
+    public int getAnchovyCount() { return anchovyCount; }
 
     public String getTrueOrFalseQuestion() { return minigamePresentation.getTrueOrFalseQuestion(); }
     public int getTrueOrFalseRoundNumber() { return minigamePresentation.getTrueOrFalseRoundNumber(); }
