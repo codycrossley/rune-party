@@ -27,11 +27,13 @@ import java.util.List;
  * tile renders individually as its own rounded-corner outline (see renderOutlinedTile), inset a
  * little inward from the tile's true boundary so adjacent tiles' outlines read as a clean grid
  * rather than doubled-up touching edges, with a connecting line drawn between consecutive path
- * indices to make the route itself legible. The one exception is the Fishing Contest platform's
- * FISHING_TILE block, which -- like Gnomeball's own zones -- genuinely is one connected region
- * rather than a walked path, so it renders as a single merged-area outline instead (see
- * renderFishingZoneOutline), sharing roundedInsetPolygon with every per-tile outline so its corners
- * read exactly the same. */
+ * indices to make the route itself legible. Two exceptions, both genuinely connected regions
+ * rather than a walked path (like Gnomeball's own zones): the Fishing Contest platform's
+ * FISHING_TILE block renders as a single merged-area outline (see renderFishingZoneOutline), and
+ * Turf Wars' own TURF_WARS_TILE grid renders as one merged arena outline (see
+ * renderTurfWarsArenaOutline) with each individual tile fill-only underneath it (see
+ * renderTurfWarsTile) -- both share roundedInsetPolygon with every per-tile outline so their
+ * corners read exactly the same. */
 @Slf4j
 public class TileOverlay extends Overlay
 {
@@ -53,6 +55,19 @@ public class TileOverlay extends Overlay
     // full opacity, this alpha is layered on top of it just for the merged zone outline so it reads
     // as a lighter boundary marker rather than as prominent as an individual tile's own outline.
     private static final int FISHING_ZONE_OUTLINE_ALPHA = 120;
+
+    // See renderTurfWarsTile -- a faint neutral wash while a tile's never been claimed
+    // (entry.color still null, falls through to the catalog's own default gray), a solid,
+    // opaque-reading fill once a team actually holds it.
+    private static final int TURF_WARS_FILL_ALPHA_UNCLAIMED = 60;
+    private static final int TURF_WARS_FILL_ALPHA_CLAIMED = 200;
+
+    // For Turf Wars' own single merged arena outline (see renderTurfWarsArenaOutline) --
+    // individual tiles are fill-only now (no per-tile outline), so this is the *only* outline the
+    // whole grid gets. A fixed neutral color, not derived from any one tile's own resolved color
+    // (unlike FISHING_ZONE_OUTLINE_ALPHA's platform, every Turf Wars tile has its own
+    // independently-changing color, there's no single "zone color" to borrow here).
+    private static final Color TURF_WARS_ARENA_OUTLINE_COLOR = new Color(255, 255, 255, 160);
 
     private static final Stroke SOLID_STROKE   = new BasicStroke(3.5f);
     private static final Stroke PREVIEW_STROKE = new BasicStroke(3.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 10f, new float[]{7f, 5f}, 0f);
@@ -149,11 +164,13 @@ public class TileOverlay extends Overlay
             if ("ARENA_TILE".equals(entry.tileType) && ArenaFireModel.isDead(entry.color)) continue; // rendered as a 3D model instead, see models/ArenaFireModel
             if ("POND_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see models/PondModel
             if ("FISHING_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderFishingZoneOutline
+            if ("TURF_WARS_TILE".equals(entry.tileType)) { renderTurfWarsTile(g, entry); continue; } // fill only, no per-tile outline, see renderTurfWarsTile
             Color base = resolveColor(entry.color, entry.tileType);
             renderOutlinedTile(g, entry.point, base, SOLID_STROKE);
         }
 
         renderFishingZoneOutline(g, entries);
+        renderTurfWarsArenaOutline(g, entries);
 
         goldenGnomeModel.update(entries);
         coinTrapModel.update(entries);
@@ -205,6 +222,47 @@ public class TileOverlay extends Overlay
         if (poly == null) return;
 
         g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), FISHING_ZONE_OUTLINE_ALPHA));
+        g.setStroke(SOLID_STROKE);
+        g.draw(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
+    }
+
+    /** Draws the whole Turf Wars grid as one merged-area outline, same "genuinely one connected
+     * region, not a walked path" reasoning renderFishingZoneOutline already gives -- individual
+     * tiles are fill-only now (see renderTurfWarsTile), so this is the grid's *only* outline.
+     * Unlike Fishing Contest's own platform, Turf Wars has no single "center" tile to anchor on
+     * (no POND_TILE-style modifier marking one) -- GRID_SIZE is even, so the true geometric center
+     * falls between four tiles, not on any one of them. Built directly from the bounding box's own
+     * min/max corner tiles' LocalPoints instead: averaging two tile-center LocalPoints gives
+     * exactly the midpoint between the low edge of the min corner and the high edge of the max
+     * corner (the +/-64 each tile's own half-width contributes cancels out), which is the region's
+     * true center -- constructed via LocalPoint's own plain (x, y) constructor, confirmed present
+     * on the real API. */
+    private void renderTurfWarsArenaOutline(Graphics2D g, List<TileReducer.TileEntry> entries)
+    {
+        Integer minX = null, maxX = null, minY = null, maxY = null;
+        int plane = 0;
+        for (TileReducer.TileEntry entry : entries)
+        {
+            if (!"TURF_WARS_TILE".equals(entry.tileType)) continue;
+            WorldPoint p = entry.point;
+            plane = p.getPlane();
+            minX = (minX == null) ? p.getX() : Math.min(minX, p.getX());
+            maxX = (maxX == null) ? p.getX() : Math.max(maxX, p.getX());
+            minY = (minY == null) ? p.getY() : Math.min(minY, p.getY());
+            maxY = (maxY == null) ? p.getY() : Math.max(maxY, p.getY());
+        }
+        if (minX == null) return;
+
+        LocalPoint minCorner = LocalPoint.fromWorld(client.getTopLevelWorldView(), new WorldPoint(minX, minY, plane));
+        LocalPoint maxCorner = LocalPoint.fromWorld(client.getTopLevelWorldView(), new WorldPoint(maxX, maxY, plane));
+        if (minCorner == null || maxCorner == null) return;
+
+        LocalPoint center = new LocalPoint((minCorner.getX() + maxCorner.getX()) / 2, (minCorner.getY() + maxCorner.getY()) / 2);
+
+        Polygon poly = Perspective.getCanvasTileAreaPoly(client, center, maxX - minX + 1, maxY - minY + 1, plane, 0);
+        if (poly == null) return;
+
+        g.setColor(TURF_WARS_ARENA_OUTLINE_COLOR);
         g.setStroke(SOLID_STROKE);
         g.draw(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
     }
@@ -574,6 +632,37 @@ public class TileOverlay extends Overlay
             g.setColor(color);
             g.setStroke(stroke);
             g.draw(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
+        }
+    }
+
+    /** Draws one Turf Wars tile as a fill only -- no per-tile outline any more (see this class's
+     * own doc and renderTurfWarsArenaOutline, the grid's one merged boundary now). Shares
+     * roundedInsetPolygon's own geometry with renderOutlinedTile -- same shape, just filled
+     * instead of stroked -- so a Turf Wars tile still lines up with the rest of the board's own
+     * inset/rounding, even though nothing draws its edge individually any more.
+     * <p>
+     * Alpha is a faint neutral wash (TURF_WARS_FILL_ALPHA_UNCLAIMED) while entry.color is still
+     * null -- nobody's ever stood here, resolveColor falls through to the catalog's own default
+     * gray -- or a solid, opaque-reading fill (TURF_WARS_FILL_ALPHA_CLAIMED) the moment a real
+     * team color lands. This *is* the game's own live "who controls what" map -- no periodic
+     * pulse/reshuffle warning any more, ownership just persists once claimed until someone else
+     * physically stands there and flips it. */
+    private void renderTurfWarsTile(Graphics2D g, TileReducer.TileEntry entry)
+    {
+        Color base = resolveColor(entry.color, entry.tileType);
+        int fillAlpha = entry.color == null ? TURF_WARS_FILL_ALPHA_UNCLAIMED : TURF_WARS_FILL_ALPHA_CLAIMED;
+
+        Collection<WorldPoint> localPoints = WorldPoint.toLocalInstance(client.getTopLevelWorldView(), entry.point);
+        for (WorldPoint local : localPoints)
+        {
+            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), local);
+            if (lp == null) continue;
+
+            Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+            if (poly == null) continue;
+
+            g.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), fillAlpha));
+            g.fill(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
         }
     }
 

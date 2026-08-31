@@ -59,6 +59,7 @@ public final class Events
     public static final String MINIGAME_RESULT_SUBMITTED = "MINIGAME_RESULT_SUBMITTED";
     public static final String MINIGAME_ROUND_BEGIN = "MINIGAME_ROUND_BEGIN";
     public static final String MINIGAME_STARTED = "MINIGAME_STARTED";
+    public static final String MINIGAME_TEAMS_ASSIGNED = "MINIGAME_TEAMS_ASSIGNED";
     public static final String PLAYER_JOINED = "PLAYER_JOINED";
     public static final String PLAYER_LEFT = "PLAYER_LEFT";
     public static final String PLAYER_MOVED = "PLAYER_MOVED";

@@ -269,9 +269,10 @@ public class AnnouncementOverlay extends Overlay
         renderMinigameBanner(g);
         renderMinigameSpinner(g);
         renderMinigameReadyCheck(g);
-        if (RunePartyPlugin.ARENA_KEY.equals(plugin.getMinigameKey()))
+        renderTeamAssignedBanner(g);
+        if (RunePartyPlugin.ARENA_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.TURF_WARS_KEY.equals(plugin.getMinigameKey()))
         {
-            renderArenaGatherMessage(g);
+            renderArrivalGatherMessage(g);
         }
         else
         {
@@ -712,6 +713,35 @@ public class AnnouncementOverlay extends Overlay
 
         g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
         drawCenteredRainbowText(g, "MINIGAME OVER!", RAINBOW_LETTER_COLORS, centerX, y, alpha);
+    }
+
+    /** Turf Wars' own once-per-round reveal -- "This is your team color!" drawn *in* that player's
+     * own assigned color, fired once right after MINIGAME_TEAMS_ASSIGNED lands (see
+     * MinigamePresentation#triggerTeamAssignedBanner, chained behind the "MINIGAME!" banner/
+     * spinner sequence via the shared turnEffectGateUntil so this never stomps on either). Same
+     * fade/size treatment as renderMinigameOverBanner, just not rainbow -- the color itself already
+     * carries the meaning here. Deliberately generic wording rather than naming the color (e.g.
+     * "You are on the RED team!") -- an odd-numbered round assigns each player their own existing
+     * seat color (see minigames/turf_wars.py's own doc), where naming it back to them would just
+     * be a slightly redundant restatement of something they already know; showing the colored text
+     * itself works identically for both the shared 2-team colors and an odd round's own solo seat
+     * colors, no per-mode wording needed. */
+    private void renderTeamAssignedBanner(Graphics2D g)
+    {
+        Float alpha = BannerAnim.fadeAlpha(plugin.getTeamAssignedBannerUntil(), MINIGAME_FADE_MS);
+        if (alpha == null) return;
+
+        String colorHex = plugin.getTeamAssignedBannerTeam();
+        if (colorHex == null) return;
+        Color color;
+        try { color = Color.decode(colorHex); }
+        catch (NumberFormatException e) { return; }
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 2;
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE));
+        drawCenteredText(g, "This is your team color!", centerX, y, color, alpha);
     }
 
     /** Draws the mini-game selection spinner -- a rainbow prize wheel (RAINBOW_LETTER_COLORS,
@@ -1159,18 +1189,22 @@ public class AnnouncementOverlay extends Overlay
         }
     }
 
-    /** Arena-specific replacement for renderMinigameCountdown -- the Arena's own round doesn't
-     * begin on a fixed clock, it begins the instant every seated player is standing inside the
-     * arena (see the server's minigames/arena.py, MinigameContext.get_positions), which can take
-     * more or less than the generic countdown's own fixed MINIGAME_COUNTDOWN_DURATION_MS. Showing
-     * "3...2...1...BEGIN!" here would either lie (claiming the round's begun before it has) or
-     * leave players confused once "BEGIN!" comes and goes with nothing actually happening yet, so
-     * this shows a persistent instruction instead, for exactly the same window
-     * renderMinigameCountdown would otherwise occupy: once the ready-check screen has hidden (see
-     * renderMinigameReadyCheck's own countdownRevealed, mirrored here so both a live and a
-     * catching-up client transition at the same moment) until MINIGAME_ROUND_BEGIN genuinely lands
-     * (isMinigameRoundBegun) -- no fixed duration, since there isn't one to have. */
-    private void renderArenaGatherMessage(Graphics2D g)
+    /** Replacement for renderMinigameCountdown for any mini-game whose round doesn't begin on a
+     * fixed clock, but the instant every seated player is standing inside its own arrival zone
+     * (see the server's MinigameContext.get_positions plus each mini-game's own
+     * _wait_for_everyone_to_arrive -- Arena's the original user, Turf Wars the second, both a
+     * fixed-duration contest where a player who's still walking in when a standard countdown
+     * expired would lose ground they can never make back). Showing "3...2...1...BEGIN!" here would
+     * either lie (claiming the round's begun before it has) or leave players confused once
+     * "BEGIN!" comes and goes with nothing actually happening yet, so this shows a persistent
+     * instruction instead, for exactly the same window renderMinigameCountdown would otherwise
+     * occupy: once the ready-check screen has hidden (see renderMinigameReadyCheck's own
+     * countdownRevealed, mirrored here so both a live and a catching-up client transition at the
+     * same moment) until MINIGAME_ROUND_BEGIN genuinely lands (isMinigameRoundBegun) -- no fixed
+     * duration, since there isn't one to have. Same message for every caller ("stand within the
+     * arena" reads fine for Turf Wars' own grid too, which this codebase already calls "the
+     * arena" elsewhere -- see TileOverlay#renderTurfWarsArenaOutline). */
+    private void renderArrivalGatherMessage(Graphics2D g)
     {
         boolean countdownRevealed = plugin.isMinigameCountdownStarted()
             && (plugin.isMinigameCountdownSkippedForClient() || plugin.getMinigameCountdownBannerUntil() != 0);

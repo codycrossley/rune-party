@@ -11,24 +11,27 @@ import java.util.List;
  */
 public final class Minigames
 {
-    // PlaceholderMinigame registered 4 times under different keys, matching the server's own
-    // REGISTRY (see minigames/__init__.py), alongside the real mini-games (CoinRushMinigame,
-    // TrueOrFalseMinigame, ArenaMinigame, FishingContestMinigame) so the selection wheel has more
-    // than a few options to actually cycle through. Dropping any of them would silently break that
-    // server's actual rounds by falling back to a mini-game with no matching UI for what the
-    // server thinks is happening.
-    private static final KeyedRegistry<Minigame> REGISTRY = new KeyedRegistry<>("placeholder-1");
+    // Every real mini-game, matching the server's own REGISTRY (see minigames/__init__.py) key
+    // for key. Dropping any of these would silently break that server's actual rounds by falling
+    // back to a mini-game with no matching UI for what the server thinks is happening.
+    //
+    // fallbackKey is "coin-rush" -- see KeyedRegistry#get's own doc on what this is for (a server
+    // running a key this client build was never updated to know about, e.g. version skew). Was
+    // "placeholder-1" back when PlaceholderMinigame's neutral "just submit a score" UI existed
+    // specifically to be an honest, harmless fallback for that case; now that it's gone, this
+    // falls back to showing Coin Rush's own control panel instead, which is a less obviously-a-
+    // fallback degradation but still functional -- no client build has actually shipped without
+    // Turf Wars (or a future minigame) registered, so this path is a defensive backstop, not a
+    // live concern in practice.
+    private static final KeyedRegistry<Minigame> REGISTRY = new KeyedRegistry<>("coin-rush");
 
     static
     {
-        REGISTRY.register(new PlaceholderMinigame("placeholder-1", "Placeholder Mini-Game #1"));
-        REGISTRY.register(new PlaceholderMinigame("placeholder-2", "Placeholder Mini-Game #2"));
-        REGISTRY.register(new PlaceholderMinigame("placeholder-3", "Placeholder Mini-Game #3"));
-        REGISTRY.register(new PlaceholderMinigame("placeholder-4", "Placeholder Mini-Game #4"));
         REGISTRY.register(new CoinRushMinigame());
         REGISTRY.register(new TrueOrFalseMinigame());
         REGISTRY.register(new ArenaMinigame());
         REGISTRY.register(new FishingContestMinigame());
+        REGISTRY.register(new TurfWarsMinigame());
     }
 
     public static Minigame get(String key)

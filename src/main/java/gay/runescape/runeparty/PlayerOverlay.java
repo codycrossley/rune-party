@@ -23,7 +23,12 @@ import net.runelite.client.util.Text;
  * TimerOverlay#renderPauseGlow) while it's their turn to roll, and a floating coin popup after a
  * standard/penalty tile reward. The retro dice-roll reveal lives in AnnouncementOverlay instead --
  * screen-centered so everyone can see it, not anchored to the roller's head. Spectators are left
- * unaltered. */
+ * unaltered.
+ * <p>
+ * While a Turf Wars round is active, both the outline and the token switch to that player's own
+ * assigned color (RunePartyPlugin#getPlayerTeamColor) instead of their usual seat color, for every
+ * seated player -- makes "who's on which team" readable at a glance for the whole round, not just
+ * a banner shown once at the start (see AnnouncementOverlay's own team-assigned reveal). */
 public class PlayerOverlay extends Overlay
 {
     private static final int OUTLINE_WIDTH = 2;
@@ -89,6 +94,18 @@ public class PlayerOverlay extends Overlay
             if (seatColor == null) continue;
 
             Color c = seatColor.awt;
+            if (plugin.isTurfWarsActive())
+            {
+                // Recolors every seated player's own outline/token to their Turf Wars assigned
+                // color instead of their usual per-seat one, for the whole round (not just a
+                // start-of-round flash) -- makes "who's on which team" a glance at anyone's
+                // model, not just something you might have missed in the round-start banner (see
+                // AnnouncementOverlay's own team-assigned reveal, which only shows once, only to
+                // the local player). Falls back to the seat color if this player's own assignment
+                // hasn't landed yet (MINIGAME_TEAMS_ASSIGNED not replayed for them somehow).
+                Color teamColor = plugin.getPlayerTeamColor(rsn);
+                if (teamColor != null) c = teamColor;
+            }
             modelOutlineRenderer.drawOutline(p, OUTLINE_WIDTH,
                 new Color(c.getRed(), c.getGreen(), c.getBlue(), OUTLINE_ALPHA), OUTLINE_FEATHER);
 

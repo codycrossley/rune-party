@@ -17,8 +17,8 @@ import javax.swing.JComponent;
 public interface Minigame extends WheelEntry
 {
     /** Builds the interactive control(s) shown in the panel's mini-game section while this
-     * mini-game is active -- e.g. the placeholder's score spinner + submit button. Called once
-     * each time this mini-game becomes active (see RunePartyPanel#refresh), not on every repaint,
+     * mini-game is active. Called once each time this mini-game becomes active (see
+     * RunePartyPanel#refresh), not on every repaint,
      * so implementations are free to hold their own Swing state across that activation. Never
      * actually invoked for a mini-game whose own hasSidePanelPresence() is false -- RunePartyPanel
      * hides the whole instructions/control section before ever calling this, so an

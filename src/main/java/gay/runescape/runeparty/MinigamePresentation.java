@@ -1,10 +1,12 @@
 package gay.runescape.runeparty;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import net.runelite.api.Player;
 import net.runelite.api.coords.WorldPoint;
 
+import java.awt.Color;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
@@ -95,6 +97,17 @@ final class MinigamePresentation
     // and triggerMinigameRewardsBanner). Shown *before* the round-complete recap above, via
     // scheduleRoundCompleteBanner deferring that one behind this banner's own gate extension. ----
     private final TimedBanner<List<MinigameReward>> minigameRewardsBanner = new TimedBanner<>();
+    // ---- Turf Wars' own team-assigned reveal (server-driven -- see triggerTeamAssignedBanner/
+    // MINIGAME_TEAMS_ASSIGNED handling). Payload is the local player's own color hex, snapshotted
+    // at trigger time -- fires once per round, local-player-only (every other client sees its own
+    // color's reveal from its own copy of this same event). ----
+    private final TimedBanner<String> teamAssignedBanner = new TimedBanner<>();
+    // ---- Turf Wars' own end-of-round confetti (see triggerTurfWarsConfetti, called from
+    // handleMinigameEnded before minigameKey gets touched) -- independent of CeremonyPresentation's
+    // own whole-game confetti (ConfettiOverlay polls both separately). Skips entirely (banner never
+    // armed) on a tie -- there's no single winning color to burst in that case.
+    // Payload is the winning color itself. ----
+    private final TimedBanner<Color> turfWarsConfettiBanner = new TimedBanner<>();
 
     // ---- Coin Rush (server-driven spawns/collections -- see COIN_RUSH_SPAWN/COIN_RUSH_COLLECTED
     // handling). coinRushSpawns is real state, applied catch-up or not: every currently-live
@@ -124,6 +137,22 @@ final class MinigamePresentation
     // already uses. Catch counts themselves are never reported to the server mid-round, so they
     // have no counterpart here -- only RunePartyPlugin's own local fields track those. ----
     private volatile long fishingRoundStartAt = 0;
+
+    // ---- Turf Wars (server-driven team-color assignment -- see MINIGAME_TEAMS_ASSIGNED handling;
+    // tile ownership itself is never folded here at all, see RunePartyPlugin#getTurfWarsTileCounts,
+    // which tallies TileReducer's own already-broadcast tile colors directly -- a claim is just an
+    // ordinary tiles_marked update, the exact same generic mechanism every tile-coloring minigame
+    // already uses, so there's nothing dedicated to fold). minigameTeamColors is real state,
+    // applied catch-up or not: lowercase rsn -> "#RRGGBB" color hex for the round's own once-per-
+    // round assignment (two shared colors for an even seated-PLAYER count, one unshared per-player
+    // seat color each for an odd one -- see minigames/turf_wars.py's own doc), read by
+    // getPlayerColor to know which color a given player was assigned (both the local player's own
+    // reveal banner and every seated player's own PlayerOverlay indicator). turfWarsRoundStartAt
+    // is the wall-clock moment the round itself began -- stamped once off MINIGAME_ROUND_BEGIN,
+    // exactly coinRushRoundStartAt's own single-stamp shape (there's no more per-epoch re-stamp,
+    // this is a single fixed-duration round now, same as Coin Rush). ----
+    private final Map<String, String> minigameTeamColors = new ConcurrentHashMap<>(); // lowercase rsn -> "#RRGGBB"
+    private volatile long turfWarsRoundStartAt = 0;
 
     // ---- True or False (server-driven rounds -- see TRUE_OR_FALSE_ROUND_STARTED/ANSWERED/
     // ROUND_ENDED handling). All real state, applied catch-up or not: trueOrFalseQuestion/
@@ -197,6 +226,15 @@ final class MinigamePresentation
                 if (RunePartyPlugin.FISHING_CONTEST_KEY.equals(minigameKey))
                 {
                     fishingRoundStartAt = 0;
+                }
+                // Same reasoning as Coin Rush's own reset above -- turfWarsRoundStartAt
+                // deliberately isn't set here either (see MINIGAME_ROUND_BEGIN below, its only
+                // writer). minigameTeamColors starts fresh too -- a new round's assignment hasn't
+                // been announced yet (see MINIGAME_TEAMS_ASSIGNED below).
+                if (RunePartyPlugin.TURF_WARS_KEY.equals(minigameKey))
+                {
+                    minigameTeamColors.clear();
+                    turfWarsRoundStartAt = 0;
                 }
                 // Same reasoning as Coin Rush's own reset just above -- a fresh True or False
                 // instance starts with no question/answers/reveal, regardless of catch-up.
@@ -285,6 +323,10 @@ final class MinigamePresentation
                 if (RunePartyPlugin.FISHING_CONTEST_KEY.equals(minigameKey))
                 {
                     fishingRoundStartAt = System.currentTimeMillis();
+                }
+                if (RunePartyPlugin.TURF_WARS_KEY.equals(minigameKey))
+                {
+                    turfWarsRoundStartAt = System.currentTimeMillis();
                 }
                 // Unconditional, unlike the Coin-Rush-specific stamp above -- every mini-game fires
                 // this event (see events.minigame_round_begin's own doc), so this flips true
@@ -395,6 +437,44 @@ final class MinigamePresentation
                 break;
             }
 
+            case Events.MINIGAME_TEAMS_ASSIGNED:
+            {
+                // Real state, applied catch-up or not -- a catching-up client still needs to know
+                // its own color the instant it starts rendering anything (see getPlayerColor).
+                // Fired once per round, before the board even swaps in (see the server's
+                // minigames/turf_wars.py, its first user), so this always lands well before
+                // there's anything to stand on yet. General-purpose (see events.py's own
+                // minigame_teams_assigned doc): a flat list of (player, color) pairs, not named
+                // team buckets -- two players sharing a color *are* a team, any number of groups
+                // of any size (Turf Wars' own even-count 2-team split, or its odd-count
+                // free-for-all, one solo "team" per player) falls out of this one shape.
+                JsonArray assignments = Json.safeArray(e.payload, "assignments");
+                for (int i = 0; i < assignments.size(); i++)
+                {
+                    try
+                    {
+                        JsonObject entry = assignments.get(i).getAsJsonObject();
+                        String rsn = Json.safeStr(entry, "player");
+                        String color = Json.safeStr(entry, "color");
+                        if (rsn != null && color != null) minigameTeamColors.put(rsn.toLowerCase(Locale.ROOT), color);
+                    }
+                    catch (Exception ignored) { /* skip malformed entry */ }
+                }
+                // Skipped when the local player's own assigned color is identical to their
+                // existing seat color -- an odd-numbered round's own free-for-all mode assigns
+                // everyone their own already-existing seat color (see minigames/turf_wars.py's
+                // own doc), so nothing about how they're rendered actually changed; the reveal
+                // would just be announcing a "new" color that isn't new. An even-numbered round's
+                // shared TEAM_A_COLOR/TEAM_B_COLOR pair is never identical to any seat color (see
+                // RunePartyPlugin#TEAM_A_COLOR's own doc), so this never suppresses the genuine
+                // 2-team reveal.
+                if (!catchingUp && localColorDiffersFromSeatColor())
+                {
+                    triggerTeamAssignedBanner();
+                }
+                break;
+            }
+
             default:
                 break;
         }
@@ -409,6 +489,12 @@ final class MinigamePresentation
      * since they're core fields this presenter doesn't otherwise touch. */
     void handleMinigameEnded(JsonObject payload, boolean catchingUp, int maxRounds, int completedRoundsAfterIncrement)
     {
+        // Reads minigameKey before anything below touches it -- see triggerTurfWarsConfetti's own
+        // doc for why this has to happen first.
+        if (!catchingUp && RunePartyPlugin.TURF_WARS_KEY.equals(minigameKey))
+        {
+            triggerTurfWarsConfetti();
+        }
         minigameActive = false;
         minigameInstructions = null;
         minigameKey = null;
@@ -561,6 +647,83 @@ final class MinigamePresentation
         plugin.armBanner(minigameRewardsBanner, RunePartyPlugin.MINIGAME_REWARDS_BANNER_DURATION_MS, () -> rewards, true);
     }
 
+    /** Arms AnnouncementOverlay's team-assigned reveal -- fired once, right when
+     * MINIGAME_TEAMS_ASSIGNED lands (well before the board even swaps in, see the server's
+     * minigames/turf_wars.py), chained via armBanner behind whatever's already reserving
+     * turnEffectGateUntil (typically the "MINIGAME!" banner/spinner sequence armed moments earlier
+     * by MINIGAME_STARTED) so the reveal never stomps on it. Reads the local player's own color
+     * back out of minigameTeamColors (already folded in by the caller, immediately above) rather
+     * than re-parsing the event payload. */
+    private void triggerTeamAssignedBanner()
+    {
+        plugin.armBanner(teamAssignedBanner, RunePartyPlugin.TEAM_ASSIGNED_BANNER_DURATION_MS, () ->
+        {
+            String self = plugin.localRsn();
+            return self != null ? minigameTeamColors.get(self.toLowerCase(Locale.ROOT)) : null;
+        }, true);
+    }
+
+    /** Whether the local player's own just-assigned color (minigameTeamColors, already folded in
+     * by the MINIGAME_TEAMS_ASSIGNED case immediately above) is actually different from their own
+     * existing RunePartyColor seat color -- see that case's own doc for why this gates
+     * triggerTeamAssignedBanner. False (suppressing the banner) whenever either side can't be
+     * resolved at all -- no assigned color yet, or no seat color to compare against -- since
+     * there's nothing meaningful to announce either way in that case. */
+    private boolean localColorDiffersFromSeatColor()
+    {
+        String self = plugin.localRsn();
+        if (self == null) return false;
+        String assigned = minigameTeamColors.get(self.toLowerCase(Locale.ROOT));
+        if (assigned == null) return false;
+
+        RunePartyColor seat = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(self));
+        if (seat == null) return false;
+        String seatHex = String.format("#%02X%02X%02X", seat.awt.getRed(), seat.awt.getGreen(), seat.awt.getBlue());
+        return !assigned.equalsIgnoreCase(seatHex);
+    }
+
+    /** Arms ConfettiOverlay's Turf Wars burst -- called from handleMinigameEnded, before that
+     * method clears minigameKey, in whichever color currently holds strictly more tiles than every
+     * other color in play (see RunePartyPlugin#getTurfWarsTileCounts, tallied fresh from
+     * TileReducer's own live board -- there's no dedicated score field to read here at all, the
+     * board's own current colors are the score). Never armed on a tie for the top spot -- whether
+     * that's the classic 2-color even-mode tie or an N-way tie among free-for-all solo colors,
+     * there's no single winning color to burst in that case, same "nobody wins" shape
+     * turf_wars.py's own pay_out_top-driven ending already gives (pays everyone tied for the top
+     * tally, same story, just no confetti to go with it). Independent of CeremonyPresentation's own
+     * whole-game confetti (a different TimedBanner, polled separately by ConfettiOverlay) -- this
+     * is the first minigame-*round*-level confetti burst in this codebase, not just a whole-game
+     * one. */
+    private void triggerTurfWarsConfetti()
+    {
+        Map<String, Integer> counts = plugin.getTurfWarsTileCounts();
+        String winnerHex = null;
+        int winnerCount = 0;
+        boolean tied = false;
+        for (Map.Entry<String, Integer> entry : counts.entrySet())
+        {
+            int count = entry.getValue();
+            if (count > winnerCount)
+            {
+                winnerHex = entry.getKey();
+                winnerCount = count;
+                tied = false;
+            }
+            else if (count == winnerCount && count > 0)
+            {
+                tied = true;
+            }
+        }
+        if (winnerHex == null || winnerCount == 0 || tied) return;
+
+        Color winnerColor;
+        try { winnerColor = Color.decode(winnerHex); }
+        catch (NumberFormatException e) { return; }
+
+        turfWarsConfettiBanner.payload = winnerColor;
+        turfWarsConfettiBanner.until = System.currentTimeMillis() + RunePartyPlugin.CONFETTI_DURATION_MS;
+    }
+
     /** Schedules AnnouncementOverlay's post-round "ROUND x" / "Current Standings" recap via
      * scheduleAfterTurnEffects, so it waits behind the mini-game rewards recap
      * (triggerMinigameRewardsBanner) that always fires first on the same MINIGAME_ENDED event,
@@ -582,6 +745,8 @@ final class MinigamePresentation
         if (minigameSpinnerTask != null) { minigameSpinnerTask.cancel(false); minigameSpinnerTask = null; }
         roundCompleteBanner.reset();
         minigameRewardsBanner.reset();
+        teamAssignedBanner.reset();
+        turfWarsConfettiBanner.reset();
         awaitingMinigameReadyFinish = false;
         awaitingTrueOrFalseYesFinish = false;
         awaitingTrueOrFalseNoFinish = false;
@@ -601,6 +766,8 @@ final class MinigamePresentation
         coinRushCollectSubmitted.clear();
         coinRushRoundStartAt = 0;
         fishingRoundStartAt = 0;
+        minigameTeamColors.clear();
+        turfWarsRoundStartAt = 0;
         trueOrFalseQuestion = null;
         trueOrFalseRoundNumber = 0;
         trueOrFalseAnsweredRsns.clear();
@@ -642,6 +809,12 @@ final class MinigamePresentation
     int getRoundCompleteRoundNumber() { return roundCompleteBanner.payload != null ? roundCompleteBanner.payload : 0; }
     long getMinigameRewardsBannerUntil() { return minigameRewardsBanner.until; }
     List<MinigameReward> getMinigameRewards() { return minigameRewardsBanner.payload != null ? minigameRewardsBanner.payload : Collections.emptyList(); }
+    long getTeamAssignedBannerUntil() { return teamAssignedBanner.until; }
+    /** The local player's own color hex, snapshotted when the reveal was armed, or null if no
+     * reveal is currently armed/showing. */
+    String getTeamAssignedBannerTeam() { return teamAssignedBanner.payload; }
+    long getTurfWarsConfettiUntil() { return turfWarsConfettiBanner.until; }
+    Color getTurfWarsConfettiColor() { return turfWarsConfettiBanner.payload; }
 
     Map<Integer, WorldPoint> getCoinRushSpawns() { return coinRushSpawns; }
     Map<String, Integer> getCoinRushScores() { return coinRushScores; }
@@ -658,6 +831,22 @@ final class MinigamePresentation
      * against this to decide when to submit the local player's final tally, same "stamped instant
      * + fixed duration" shape getCoinRushEndsAt already uses. */
     long getFishingContestEndsAt() { return fishingRoundStartAt != 0 ? fishingRoundStartAt + RunePartyPlugin.FISHING_CONTEST_DURATION_MS : 0; }
+
+    boolean isTurfWarsActive() { return minigameActive && RunePartyPlugin.TURF_WARS_KEY.equals(minigameKey); }
+    /** This player's own assigned color hex, or null if minigameTeamColors hasn't been populated
+     * yet for them (no Turf Wars round active, or MINIGAME_TEAMS_ASSIGNED hasn't landed yet this
+     * round) -- takes an arbitrary rsn (not just the local player's own) so both
+     * AnnouncementOverlay's team-assigned banner (local player only) and PlayerOverlay's own
+     * per-player indicator recoloring (every seated player) can share this one lookup. */
+    String getPlayerColor(String rsn)
+    {
+        return rsn != null ? minigameTeamColors.get(rsn.toLowerCase(Locale.ROOT)) : null;
+    }
+    /** When the round's own fixed-duration clock (see TURF_WARS_ROUND_MS) runs out -- 0 if no
+     * round is active yet or the round hasn't actually become playable (see
+     * turfWarsRoundStartAt's own doc on when that gets stamped). Same "stamped instant + fixed
+     * duration" shape getCoinRushEndsAt/getFishingContestEndsAt already use. */
+    long getTurfWarsEndsAt() { return turfWarsRoundStartAt != 0 ? turfWarsRoundStartAt + RunePartyPlugin.TURF_WARS_ROUND_MS : 0; }
 
     String getTrueOrFalseQuestion() { return trueOrFalseQuestion; }
     int getTrueOrFalseRoundNumber() { return trueOrFalseRoundNumber; }

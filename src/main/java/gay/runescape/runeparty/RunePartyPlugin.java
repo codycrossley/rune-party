@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.inject.Provides;
 import gay.runescape.runeparty.items.Items;
 import gay.runescape.runeparty.models.JadEncounter;
+import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -13,6 +14,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -218,6 +220,36 @@ public class RunePartyPlugin extends Plugin
      * individual player happens to right-click the pond -- everyone's local timer runs out at the
      * same moment, matching what the server's own bounded wait (submit-fishing-catch) expects. */
     public static final long FISHING_CONTEST_DURATION_MS = 30000;
+
+    /** Client-side key for the Turf Wars mini-game -- must match the server's own registration
+     * (see minigames/turf_wars.py), same role ARENA_KEY/FISHING_CONTEST_KEY play for their own
+     * mini-games. */
+    public static final String TURF_WARS_KEY = "turf-wars";
+
+    /** How long a whole Turf Wars round lasts -- must match the server's own ROUND_SECONDS
+     * (minigames/turf_wars.py). Measured from MINIGAME_ROUND_BEGIN (see MinigamePresentation#
+     * turfWarsRoundStartAt/getTurfWarsEndsAt), same "stamped instant + fixed duration" shape
+     * COIN_RUSH_DURATION_MS already uses. */
+    public static final long TURF_WARS_ROUND_MS = 60000;
+
+    /** Turf Wars' two fixed team colors, used for an even seated-PLAYER count's round (an odd
+     * count instead gives every player their own individual, existing RunePartyColor seat color --
+     * see minigames/turf_wars.py's own doc) -- same hex the server's own TEAM_A_COLOR/TEAM_B_COLOR
+     * (minigames/turf_wars.py) pushes as each tile's own color, so a tile's server-driven fill and
+     * this client's own scoreboard/banner always agree. Local constants rather than reusing
+     * RunePartyColor for the 2-team case -- that enum is a per-seat roster palette (one color per
+     * player, individually reassignable), not a fixed team identity, same reasoning ArenaMinigame's
+     * own local ARENA_RED/ARENA_GREEN constants already follow -- deliberately chosen to be
+     * visually distinct from every RunePartyColor entry too, so a team-recolored player never
+     * reads as "that's just their normal seat color". */
+    public static final Color TEAM_A_COLOR = new Color(0xE6, 0x1E, 0x96);
+    public static final Color TEAM_B_COLOR = new Color(0x00, 0xAA, 0xAA);
+
+    /** How long AnnouncementOverlay's team-assigned reveal banner stays up -- fired once, right
+     * after MINIGAME_TEAMS_ASSIGNED lands for the local player (see MinigamePresentation#
+     * triggerTeamAssignedBanner), same duration as MINIGAME_OVER_BANNER_DURATION_MS above (both
+     * are a single beat of context, not something a player needs to read at length). */
+    public static final long TEAM_ASSIGNED_BANNER_DURATION_MS = 3000;
 
     /** How long the question sits on screen before the answer countdown starts ticking, measured
      * from the moment TRUE_OR_FALSE_ROUND_STARTED lands (see trueOrFalseRoundStartedAt/
@@ -489,6 +521,7 @@ public class RunePartyPlugin extends Plugin
     private ConfettiOverlay confettiOverlay;
     private JadEncounter jadEncounter;
     private FishingCatchOverlay fishingCatchOverlay;
+    private TurfWarsScoreOverlay turfWarsScoreOverlay;
     private RosterReducer rosterReducer;
     ApiClient apiClient; // package-private: presenters (MinigamePresentation) issue their own requests
     private EventSocket eventSocket;
@@ -847,6 +880,9 @@ public class RunePartyPlugin extends Plugin
         fishingCatchOverlay = new FishingCatchOverlay(this);
         overlayManager.add(fishingCatchOverlay);
 
+        turfWarsScoreOverlay = new TurfWarsScoreOverlay(this);
+        overlayManager.add(turfWarsScoreOverlay);
+
         panel = new RunePartyPanel(this);
         navButton = NavigationButton.builder()
             .tooltip("Rune Party")
@@ -879,6 +915,7 @@ public class RunePartyPlugin extends Plugin
         if (confettiOverlay != null) overlayManager.remove(confettiOverlay);
         if (jadEncounter != null) { jadEncounter.clear(); overlayManager.remove(jadEncounter); }
         if (fishingCatchOverlay != null) overlayManager.remove(fishingCatchOverlay);
+        if (turfWarsScoreOverlay != null) overlayManager.remove(turfWarsScoreOverlay);
         if (navButton != null) clientToolbar.removeNavigation(navButton);
         if (mapDialog != null) { mapDialog.dispose(); mapDialog = null; }
         resetState();
@@ -3177,6 +3214,7 @@ public class RunePartyPlugin extends Plugin
             case Events.TRUE_OR_FALSE_ROUND_STARTED:
             case Events.TRUE_OR_FALSE_ANSWERED:
             case Events.TRUE_OR_FALSE_ROUND_ENDED:
+            case Events.MINIGAME_TEAMS_ASSIGNED:
             {
                 if (Events.MINIGAME_STARTED.equals(type))
                 {
@@ -3431,6 +3469,43 @@ public class RunePartyPlugin extends Plugin
     public int getShrimpCount() { return shrimpCount; }
     public int getAnchovyCount() { return anchovyCount; }
 
+    public boolean isTurfWarsActive() { return minigamePresentation.isTurfWarsActive(); }
+    /** This round's own live tile tally, keyed by whatever color hex each tile is currently
+     * claimed in (2 keys for an even-count 2-team round, up to 8 for an odd-count free-for-all --
+     * see minigames/turf_wars.py's own doc), tallied fresh from TileReducer's own already-
+     * broadcast TURF_WARS_TILE snapshot -- see TurfWarsScoreOverlay (the live scoreboard) and
+     * MinigamePresentation#triggerTurfWarsConfetti (the end-of-round winner), the two consumers.
+     * There's no dedicated score event at all -- a claim is just an ordinary tiles_marked update,
+     * so the board's own current colors already *are* the score. */
+    public Map<String, Integer> getTurfWarsTileCounts()
+    {
+        Map<String, Integer> counts = new HashMap<>();
+        for (TileReducer.TileEntry entry : tileReducer.snapshot())
+        {
+            if (!"TURF_WARS_TILE".equals(entry.tileType) || entry.color == null) continue;
+            counts.merge(entry.color.toUpperCase(Locale.ROOT), 1, Integer::sum);
+        }
+        return counts;
+    }
+    /** The color hex `rsn` is currently assigned for Turf Wars, or null if they're not on a team
+     * right now (no Turf Wars round active, or the assignment hasn't landed yet this round) -- see
+     * PlayerOverlay, which recolors every seated player's own outline/token this way, not just the
+     * local player's own. */
+    public String getTurfWarsColorHex(String rsn) { return minigamePresentation.getPlayerColor(rsn); }
+    /** {@link #getTurfWarsColorHex(String)} decoded to an AWT {@link Color}, or null under the
+     * same conditions that returns null. */
+    public Color getPlayerTeamColor(String rsn)
+    {
+        String hex = getTurfWarsColorHex(rsn);
+        if (hex == null) return null;
+        try { return Color.decode(hex); }
+        catch (NumberFormatException e) { return null; }
+    }
+    /** When the round's own fixed-duration clock (see TURF_WARS_ROUND_MS) runs out -- 0 if no
+     * round is active yet or the round hasn't actually become playable (see MinigamePresentation#
+     * turfWarsRoundStartAt's own doc on when that gets stamped). */
+    public long getTurfWarsEndsAt() { return minigamePresentation.getTurfWarsEndsAt(); }
+
     public String getTrueOrFalseQuestion() { return minigamePresentation.getTrueOrFalseQuestion(); }
     public int getTrueOrFalseRoundNumber() { return minigamePresentation.getTrueOrFalseRoundNumber(); }
     /** Who's answered the *current* round so far -- see renderTrueOrFalseQuestion's own
@@ -3487,6 +3562,10 @@ public class RunePartyPlugin extends Plugin
     public int getRoundCompleteRoundNumber() { return minigamePresentation.getRoundCompleteRoundNumber(); }
     public long getMinigameRewardsBannerUntil() { return minigamePresentation.getMinigameRewardsBannerUntil(); }
     public List<MinigameReward> getMinigameRewards() { return minigamePresentation.getMinigameRewards(); }
+    public long getTeamAssignedBannerUntil() { return minigamePresentation.getTeamAssignedBannerUntil(); }
+    public String getTeamAssignedBannerTeam() { return minigamePresentation.getTeamAssignedBannerTeam(); }
+    public long getTurfWarsConfettiUntil() { return minigamePresentation.getTurfWarsConfettiUntil(); }
+    public Color getTurfWarsConfettiColor() { return minigamePresentation.getTurfWarsConfettiColor(); }
     // Delegating facade -- CeremonyPresentation owns the actual state (see
     // ARCHITECTURE_REVIEW.md's C1 finding, step 2). Every name/signature below is unchanged, so no
     // external caller (AnnouncementOverlay, ConfettiOverlay) needs to change.
