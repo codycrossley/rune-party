@@ -3,11 +3,17 @@ package gay.runescape.runeparty.models;
 import gay.runescape.runeparty.RunePartyPlugin;
 import gay.runescape.runeparty.SceneObjectSet;
 import gay.runescape.runeparty.TileReducer;
+import java.awt.Shape;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
 import net.runelite.api.Client;
+import net.runelite.api.Model;
+import net.runelite.api.Perspective;
+import net.runelite.api.Point;
+import net.runelite.api.RuneLiteObject;
+import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 
 /** Keeps one {@link net.runelite.api.RuneLiteObject} (model {@link #GOLDEN_GNOME_MODEL_ID})
@@ -66,6 +72,32 @@ public final class GoldenGnomeModel
         }
 
         objects.sync(current, Function.identity(), point -> client.loadModel(GOLDEN_GNOME_MODEL_ID));
+    }
+
+    /** Whether {@code canvasPoint} is over the real screen-space clickbox of whichever Golden
+     * Gnome model is currently spawned at {@code point} -- real per-model hit-testing via
+     * Perspective#getClickbox, not a fixed ground-tile square, same technique
+     * HardcodedCourseLauncherOverlay#hoveredCourse uses for its own launcher model (see that
+     * class's own doc for why Perspective.getClickbox is the only way a RuneLiteObject gets a
+     * clickbox at all). Height comes from Perspective#getTileHeight, not the object's own getZ()
+     * -- that field is never populated by setLocation, see RuneLiteObjectController's own source.
+     * False if nothing's actually spawned at point (e.g. update() hasn't run yet, or it's mid a
+     * relocation's own hide/show window). */
+    public boolean isUnderMouse(WorldPoint point, Point canvasPoint)
+    {
+        if (canvasPoint == null) return false;
+
+        RuneLiteObject obj = objects.get(point);
+        if (obj == null || !obj.isActive()) return false;
+
+        Model model = obj.getModel();
+        LocalPoint lp = obj.getLocation();
+        if (model == null || lp == null) return false;
+
+        int height = Perspective.getTileHeight(client, lp, point.getPlane());
+        Shape clickbox = Perspective.getClickbox(client, client.getTopLevelWorldView(), model,
+            obj.getOrientation(), lp.getX(), lp.getY(), height);
+        return clickbox != null && clickbox.contains(canvasPoint.getX(), canvasPoint.getY());
     }
 
     /** Despawns and forgets every Golden Gnome RuneLiteObject -- called whenever TileOverlay stops

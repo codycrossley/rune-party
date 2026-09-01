@@ -39,6 +39,8 @@ public class RunePartyPanel extends PluginPanel
     private final JLabel joinCodeValueLabel = new JLabel("—");
     private final JButton copyJoinCodeBtn = new JButton("Copy");
     private final JLabel statusLabel = new JLabel(" ");
+    // Label toggles between "Show Map"/"Hide Map" based on plugin.isMapShowing() -- see refresh(),
+    // the only place that flips it.
     private final JButton showMapBtn = new JButton("Show Map");
     // Label toggles between "View Board"/"Return to Normal View" based on
     // plugin.isBoardViewActive() -- see refresh(), the only place that flips it.
@@ -209,7 +211,7 @@ public class RunePartyPanel extends PluginPanel
 
         showMapBtn.setAlignmentX(LEFT_ALIGNMENT);
         showMapBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-        showMapBtn.addActionListener(e -> plugin.showMap());
+        showMapBtn.addActionListener(e -> plugin.toggleMap());
 
         viewBoardBtn.setAlignmentX(LEFT_ALIGNMENT);
         viewBoardBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
@@ -459,6 +461,7 @@ public class RunePartyPanel extends PluginPanel
         statusLabel.setText(statusText(phase));
 
         showMapBtn.setVisible(phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE || phase == GamePhase.ENDED);
+        showMapBtn.setText(plugin.isMapShowing() ? "Hide Map" : "Show Map");
 
         // Only LOBBY/ACTIVE, matching toggleBoardView's own phase guard -- unlike showMapBtn,
         // not offered in ENDED (toggling would just no-op there). If board view somehow was still

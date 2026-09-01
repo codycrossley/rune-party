@@ -243,6 +243,12 @@ public class AnnouncementOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
+        // RunePartyMapOverlay's own full-screen course map covers the same screen real estate
+        // these banners would occupy -- reported: no message should compete with/draw over it
+        // while it's up. Every banner here is purely cosmetic and re-arms itself once its own
+        // until-timestamp is still in the future, so simply skipping a frame (or several, for as
+        // long as the map's up) loses nothing -- nothing here has a "missed it" state to recover.
+        if (plugin.isMapShowing()) return null;
         if (!config.showOverlay()) return null;
         GamePhase phase = plugin.getPhase();
         // ENDED is included alongside the usual ACTIVE/LOBBY here specifically for the end-game

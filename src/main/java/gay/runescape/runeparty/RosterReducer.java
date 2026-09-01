@@ -136,7 +136,7 @@ public class RosterReducer
     /** Every roster entry that's actually seated and playing right now -- role == PLAYER and
      * joined == true -- unsorted (callers each want a different order, see their own .sort()
      * calls). Collapses the identical filter loop over snapshot() repeated at 8 call sites across
-     * RunePartyPlugin/AnnouncementOverlay/StatsOverlay/RunePartyMapDialog. */
+     * RunePartyPlugin/AnnouncementOverlay/StatsOverlay/RunePartyMapOverlay. */
     public List<RosterEntry> seatedPlayers()
     {
         List<RosterEntry> out = new ArrayList<>();

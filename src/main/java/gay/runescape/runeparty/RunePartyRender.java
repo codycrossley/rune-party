@@ -11,8 +11,7 @@ import net.runelite.api.coords.WorldPoint;
 /** Small rendering helpers every overlay/dialog previously kept its own copy of (see
  * ARCHITECTURE_REVIEW.md's C3) -- {@code withAlpha} existed 5 times, and the "black shadow offset
  * one pixel, then the real color on top" idiom 3 of those same times. Two copies of a 3-line color
- * helper would be a fine judgment call (see RunePartyMapDialog's own small independent copies of
- * this kind of thing elsewhere); five was worth collapsing.
+ * helper would be a fine judgment call; five was worth collapsing.
  * <p>
  * {@code loadNpcModel}/{@code orientationFacing} were added for JadEncounter (the Jad Tile's
  * spawned-model effect) but don't belong to Jad specifically -- both are generic enough for any

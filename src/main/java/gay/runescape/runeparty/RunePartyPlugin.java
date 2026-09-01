@@ -36,11 +36,14 @@ import net.runelite.api.Menu;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.Player;
+import net.runelite.api.Point;
 import net.runelite.api.Tile;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.AnimationChanged;
+import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.MenuEntryAdded;
+import net.runelite.api.events.MenuOpened;
 import net.runelite.api.gameval.AnimationID;
 import net.runelite.api.gameval.SpotanimID;
 import net.runelite.client.callback.ClientThread;
@@ -53,6 +56,7 @@ import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.ui.overlay.outline.ModelOutlineRenderer;
+import net.runelite.client.ui.overlay.tooltip.TooltipManager;
 import net.runelite.client.util.Text;
 import okhttp3.OkHttpClient;
 import lombok.extern.slf4j.Slf4j;
@@ -136,7 +140,7 @@ public class RunePartyPlugin extends Plugin
      * value that was actually confirmed to look correctly top-down. */
     public static final int BOARD_VIEW_PITCH = 4160;
     /** Game-north "up" on screen once board view snaps to BOARD_VIEW_PITCH -- matches
-     * RunePartyMapDialog's own north-up 2D map, so the two board-viewing tools agree on
+     * RunePartyMapOverlay's own north-up 2D map, so the two board-viewing tools agree on
      * orientation. */
     public static final int BOARD_VIEW_YAW = 0;
     /** Live-tested, confirmed-by-eye zoom-out level for board view -- see VARC_CAMERA_ZOOM. */
@@ -509,6 +513,7 @@ public class RunePartyPlugin extends Plugin
     @Inject private ClientToolbar clientToolbar;
     @Inject private OverlayManager overlayManager;
     @Inject private ModelOutlineRenderer modelOutlineRenderer;
+    @Inject private TooltipManager tooltipManager;
     @Inject private OkHttpClient okHttpClient;
     @Inject private Gson gson;
 
@@ -522,6 +527,7 @@ public class RunePartyPlugin extends Plugin
     private JadEncounter jadEncounter;
     private FishingCatchOverlay fishingCatchOverlay;
     private TurfWarsScoreOverlay turfWarsScoreOverlay;
+    private HardcodedCourseLauncherOverlay hardcodedCourseLauncherOverlay;
     private RosterReducer rosterReducer;
     ApiClient apiClient; // package-private: presenters (MinigamePresentation) issue their own requests
     private EventSocket eventSocket;
@@ -537,12 +543,16 @@ public class RunePartyPlugin extends Plugin
     private JadPresentation jadPresentation;
     private RunePartyPanel panel;
     private NavigationButton navButton;
-    private RunePartyMapDialog mapDialog; // lazily created on the first "Show Map" click, see showMap()
+    private RunePartyMapOverlay mapOverlay;
+    // Toggled by the panel's "Show Map"/"Hide Map" button (see toggleMap) -- read by
+    // RunePartyMapOverlay#render (whether to draw at all) and AnnouncementOverlay#render (which
+    // suppresses every banner/announcement while this is true, see that class's own doc).
+    private volatile boolean mapShowing = false;
 
     // Server-wide, not game-scoped -- fetched once at startup (see loadTileTypeCatalog) rather
     // than per-game like the roster, since the tiles/ registry it mirrors never changes at
     // runtime. Empty until the fetch completes (or forever, if it fails) -- every consumer
-    // (TileOverlay, RunePartyMapDialog) already falls back to a default color/label on a miss.
+    // (TileOverlay, RunePartyMapOverlay) already falls back to a default color/label on a miss.
     private volatile Map<String, ApiClient.TileTypeOut> tileTypeCatalog = new LinkedHashMap<>();
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r ->
@@ -652,7 +662,7 @@ public class RunePartyPlugin extends Plugin
     private volatile List<Integer> pendingTargetIndices = Collections.emptyList();
     // The wider "everywhere this roll passes within reach of" set (see DICE_ROLLED's own
     // reachableIndices field and _reachable_within's doc) -- at most `value` steps out, not just
-    // exactly `value` like pendingTargetIndices. Used to gate addGoldenGnomePurchaseMenuEntry so
+    // exactly `value` like pendingTargetIndices. Used to gate hoveredPurchasableGoldenGnomePoint so
     // the menu entry only ever offers a Golden Gnome that's genuinely reachable this roll, rather
     // than relying on the server's own 409 to find that out only after attempting the purchase.
     // Never null, only ever empty.
@@ -899,6 +909,12 @@ public class RunePartyPlugin extends Plugin
         turfWarsScoreOverlay = new TurfWarsScoreOverlay(this);
         overlayManager.add(turfWarsScoreOverlay);
 
+        hardcodedCourseLauncherOverlay = new HardcodedCourseLauncherOverlay(client, this);
+        overlayManager.add(hardcodedCourseLauncherOverlay);
+
+        mapOverlay = new RunePartyMapOverlay(client, this, tooltipManager);
+        overlayManager.add(mapOverlay);
+
         panel = new RunePartyPanel(this);
         navButton = NavigationButton.builder()
             .tooltip("Rune Party")
@@ -932,22 +948,27 @@ public class RunePartyPlugin extends Plugin
         if (jadEncounter != null) { jadEncounter.clear(); overlayManager.remove(jadEncounter); }
         if (fishingCatchOverlay != null) overlayManager.remove(fishingCatchOverlay);
         if (turfWarsScoreOverlay != null) overlayManager.remove(turfWarsScoreOverlay);
+        if (hardcodedCourseLauncherOverlay != null) { hardcodedCourseLauncherOverlay.clear(); overlayManager.remove(hardcodedCourseLauncherOverlay); }
+        if (mapOverlay != null) overlayManager.remove(mapOverlay);
         if (navButton != null) clientToolbar.removeNavigation(navButton);
-        if (mapDialog != null) { mapDialog.dispose(); mapDialog = null; }
         resetState();
     }
 
-    /** Opens (or brings to front) the course map dialog -- see RunePartyMapDialog, which is a
-     * non-modal Swing window so it doesn't block actually playing the game while it's up. Lazily
-     * created once and reused rather than a fresh dialog per click, same as navButton/panel above. */
-    public void showMap()
+    /** Flips whether RunePartyMapOverlay draws its full-screen course map -- see RunePartyPanel's
+     * "Show Map"/"Hide Map" button (that label swap is refresh()'s own job, reading isMapShowing()
+     * back), the only caller. Nothing to lazily create/dispose of anymore -- unlike the Swing
+     * dialog this replaced, the overlay's already registered for the plugin's whole lifetime (see
+     * startUp()) and simply skips drawing while mapShowing is false, same as every other overlay's
+     * own early-return convention. */
+    public void toggleMap()
     {
-        if (mapDialog == null)
-        {
-            mapDialog = new RunePartyMapDialog(SwingUtilities.getWindowAncestor(panel), this);
-        }
-        mapDialog.setVisible(true);
-        mapDialog.toFront();
+        mapShowing = !mapShowing;
+        refreshPanel();
+    }
+
+    public boolean isMapShowing()
+    {
+        return mapShowing;
     }
 
     /** Toggles between the normal player-driven camera and a steep, near-straight-down "board
@@ -1030,7 +1051,7 @@ public class RunePartyPlugin extends Plugin
     public boolean isBoardViewActive() { return boardViewActive; }
 
     /** The local player's own RSN, or null if unresolvable -- same lookup localRsn() already does
-     * for every action method here, just exposed for RunePartyMapDialog to tell "you" apart from
+     * for every action method here, just exposed for RunePartyMapOverlay to tell "you" apart from
      * everyone else on the map. */
     public String getLocalRsn()
     {
@@ -1104,17 +1125,44 @@ public class RunePartyPlugin extends Plugin
         submitAction("Create game", () ->
         {
             ApiClient.CreateGameResult result = apiClient.createGame(host);
-            gameId = result.gameId;
-            joinCode = result.joinCode;
-            writeKey = result.writeKey;
-            playerToken = result.playerToken;
-            hostRsn = host;
-            phase = GamePhase.LOBBY;
-            persistSession();
-            connectEventStream(gameId, host);
+            applyCreateGameResult(result, host);
             addChatMessage("Created Rune Party game. Join code: " + result.joinCode);
             triggerWelcomeBanner();
         }, e -> addChatMessage("Failed to create game: " + e.getMessage()), this::refreshPanel);
+    }
+
+    /** Same as createGame(), but for a hard-coded course's own launcher (see
+     * addHardcodedCourseLauncherMenuEntry) -- creates the game exactly the same way, then commits
+     * that course's whole tile set (including its GOLDEN_GNOME_TILE stacked on START, see
+     * HardcodedCourse's own doc) in one extra mark-tiles call before announcing success, so the
+     * host lands in LOBBY with the course already built rather than an empty one. */
+    public void createGameFromHardcodedCourse(HardcodedCourse course)
+    {
+        String host = localRsn();
+        if (host == null) return;
+
+        submitAction("Create game", () ->
+        {
+            ApiClient.CreateGameResult result = apiClient.createGame(host);
+            applyCreateGameResult(result, host);
+            apiClient.markTiles(gameId, writeKey, course.tiles);
+            addChatMessage("Created Rune Party game (" + course.name + "). Join code: " + result.joinCode);
+            triggerWelcomeBanner();
+        }, e -> addChatMessage("Failed to create game: " + e.getMessage()), this::refreshPanel);
+    }
+
+    /** The session field-assignment shared by createGame()/createGameFromHardcodedCourse() --
+     * factored out purely so the hard-coded-course path can't drift from the ordinary one. */
+    private void applyCreateGameResult(ApiClient.CreateGameResult result, String host)
+    {
+        gameId = result.gameId;
+        joinCode = result.joinCode;
+        writeKey = result.writeKey;
+        playerToken = result.playerToken;
+        hostRsn = host;
+        phase = GamePhase.LOBBY;
+        persistSession();
+        connectEventStream(gameId, host);
     }
 
     public void joinGame(String code)
@@ -1687,12 +1735,15 @@ public class RunePartyPlugin extends Plugin
             .onClick(me -> placeCoinTrapAt(point));
     }
 
-    /** Same "Walk here" -> custom RUNELITE entry idiom as addPresetMenuEntries/
-     * addItemPlacementMenuEntries -- only offered on the exact tile the cursor's currently over,
-     * only for the local player's own turn while a roll is pending (see purchaseGoldenGnomeAt,
-     * the opposite gating rollDice/isLocalPlayerReadyToRoll use -- this is only reachable *during*
-     * a pending roll, not before one), only when that tile is genuinely the Golden Gnome's own
-     * current spot AND genuinely reachable this roll (see pendingReachableIndices's own doc --
+    private static final String GOLDEN_GNOME_PURCHASE_OPTION = "<col=00FF00>Purchase Golden Gnome</col>";
+
+    /** The Golden Gnome's own point if the mouse is genuinely over its model's real clickbox (see
+     * TileOverlay#isGoldenGnomeUnderMouse, same technique HardcodedCourseLauncherOverlay uses for
+     * its own launcher model -- superseded ground-tile-square gating, reported: clicking the exact
+     * tile underneath a model this small/off-center was fiddly), only for the local player's own
+     * turn while a roll is pending (see purchaseGoldenGnomeAt, the opposite gating rollDice/
+     * isLocalPlayerReadyToRoll use -- this is only reachable *during* a pending roll, not before
+     * one), only when it's genuinely reachable this roll (see pendingReachableIndices's own doc --
      * reported: this used to offer the option for a Golden Gnome that merely happened to be under
      * the cursor, out of range or not, only for the server to 409 once actually attempted), and
      * only once per turn -- see goldenGnomePurchasedThisTurn's own doc for why that's set
@@ -1700,29 +1751,109 @@ public class RunePartyPlugin extends Plugin
      * re-check affordability client-side -- the server already 409s on that (see
      * purchase-golden-gnome's own doc), same as this guard's siblings only keeping the menu from
      * *offering* an option the server would reject anyway, never being the actual authority on
-     * whether it would succeed. */
-    private void addGoldenGnomePurchaseMenuEntry()
+     * whether it would succeed. Called from onClientTick/onMenuOpened, the only two callers. */
+    private WorldPoint hoveredPurchasableGoldenGnomePoint(Point canvasPoint)
     {
         String self = localRsn();
-        if (self == null || currentTurnRsn == null || !self.equalsIgnoreCase(currentTurnRsn) || !pendingRoll) return;
-        if (goldenGnomePurchasedThisTurn) return;
-
-        Tile tile = client.getTopLevelWorldView().getSelectedSceneTile();
-        if (tile == null) return;
-        WorldPoint point = tile.getWorldLocation();
-        if (point == null) return;
+        if (self == null || currentTurnRsn == null || !self.equalsIgnoreCase(currentTurnRsn) || !pendingRoll) return null;
+        if (goldenGnomePurchasedThisTurn) return null;
 
         WorldPoint goldenGnomePoint = findGoldenGnomeTilePoint();
-        if (goldenGnomePoint == null || !goldenGnomePoint.equals(point)) return;
+        if (goldenGnomePoint == null || !tileOverlay.isGoldenGnomeUnderMouse(goldenGnomePoint, canvasPoint)) return null;
 
         Integer goldenGnomePathIndex = tileReducer.pathIndexAt(goldenGnomePoint);
-        if (goldenGnomePathIndex == null || !pendingReachableIndices.contains(goldenGnomePathIndex)) return;
+        if (goldenGnomePathIndex == null || !pendingReachableIndices.contains(goldenGnomePathIndex)) return null;
 
+        return goldenGnomePoint;
+    }
+
+    private void addGoldenGnomePurchaseMenuEntry(WorldPoint point)
+    {
         client.createMenuEntry(-1)
-            .setOption("<col=00FF00>Purchase Golden Gnome</col>")
+            .setOption(GOLDEN_GNOME_PURCHASE_OPTION)
             .setTarget("")
             .setType(MenuAction.RUNELITE)
             .onClick(me -> purchaseGoldenGnomeAt(point));
+    }
+
+    private static final String HARDCODED_COURSE_LAUNCHER_OPTION = "<col=00FF00>Create Game</col>";
+
+    /** Every client tick the mouse rests on a clickbox-hit-tested RuneLiteObject this plugin cares
+     * about -- a hard-coded course's own launcher Golden Gnome (see
+     * HardcodedCourseLauncherOverlay#hoveredCourse) or the real in-game Golden Gnome mid-purchase
+     * (see hoveredPurchasableGoldenGnomePoint) -- speculatively injects whichever entry
+     * onMenuOpened would commit for real, purely so the client's own native top-left hover hint
+     * shows it before the player's even right-clicked -- same "the client always labels the
+     * topmost menu entry" technique the Follower Buddy plugin uses for its own clickable
+     * RuneLiteObject. Skipped while a menu's already open, same guard that plugin's own
+     * onClientTick uses -- nothing to speculatively add once a real menu build is already
+     * underway. */
+    @Subscribe
+    public void onClientTick(ClientTick event)
+    {
+        if (client.isMenuOpen()) return;
+        addHoveredClickboxMenuEntry(client.getMouseCanvasPosition());
+    }
+
+    /** The definitive, click-time version of onClientTick's own speculative injection -- a
+     * RuneLiteObject has no native menu at all (see Perspective#getClickbox's own @ApiStatus.
+     * Internal doc), so this is the only way right-clicking one can actually work, same
+     * MenuOpened-based technique Follower Buddy uses for its own clickable RuneLiteObject. Strips
+     * whatever onClientTick's own speculative entry left in this exact menu snapshot first (it
+     * persists into the live menu, see that handler's own doc) so hovering never shows either
+     * entry twice. Reads/writes via client.getMenu() -- {@code MenuOpened} is a plain event POJO
+     * (see its own @Data/getMenuEntries doc); its own setMenuEntries only mutates that event
+     * instance's own field, never the actual live menu client.createMenuEntry appends to, so
+     * stripping through it was a silent no-op (the reported "two Create Game options" bug) -- see
+     * Menu#setMenuEntries's own doc, which says outright this is "typically... used in the context
+     * of the MenuOpened event," i.e. this method, not the event object's own same-named setter. */
+    @Subscribe
+    public void onMenuOpened(MenuOpened event)
+    {
+        List<MenuEntry> kept = new ArrayList<>();
+        for (MenuEntry entry : client.getMenu().getMenuEntries())
+        {
+            if (entry.getType() != MenuAction.RUNELITE
+                || (!HARDCODED_COURSE_LAUNCHER_OPTION.equals(entry.getOption()) && !GOLDEN_GNOME_PURCHASE_OPTION.equals(entry.getOption())))
+            {
+                kept.add(entry);
+            }
+        }
+        client.getMenu().setMenuEntries(kept.toArray(new MenuEntry[0]));
+
+        addHoveredClickboxMenuEntry(client.getMouseCanvasPosition());
+    }
+
+    /** Shared by onClientTick/onMenuOpened so the two clickbox-hit-tested candidates -- a
+     * hard-coded course's launcher, the in-game Golden Gnome -- never drift out of sync between
+     * the speculative and definitive injection sites. At most one entry per call: a launcher and a
+     * purchasable Golden Gnome can never both apply at once (the launcher only shows with no
+     * active game, the purchase option only during one). */
+    private void addHoveredClickboxMenuEntry(Point canvasPoint)
+    {
+        HardcodedCourse course = hardcodedCourseLauncherOverlay.hoveredCourse(canvasPoint);
+        if (course != null)
+        {
+            addHardcodedCourseLauncherMenuEntry(course);
+            return;
+        }
+
+        WorldPoint goldenGnomePoint = hoveredPurchasableGoldenGnomePoint(canvasPoint);
+        if (goldenGnomePoint != null)
+        {
+            addGoldenGnomePurchaseMenuEntry(goldenGnomePoint);
+        }
+    }
+
+    /** Clicking it both creates a game and commits {@code course}'s whole tile set in one go --
+     * see createGameFromHardcodedCourse. */
+    private void addHardcodedCourseLauncherMenuEntry(HardcodedCourse course)
+    {
+        client.createMenuEntry(-1)
+            .setOption(HARDCODED_COURSE_LAUNCHER_OPTION)
+            .setTarget("")
+            .setType(MenuAction.RUNELITE)
+            .onClick(me -> createGameFromHardcodedCourse(course));
     }
 
     /** The Golden Gnome's own current tile, if one is currently marked -- see
@@ -2016,7 +2147,7 @@ public class RunePartyPlugin extends Plugin
 
     /** Unmarks a single course tile -- called from the "Remove Tile" menu entry. Deliberately
      * doesn't rewrite anyone else's nextIndices to route around the gap it leaves behind: a
-     * dangling edge (explicit or default) is left for the host to notice -- RunePartyMapDialog's
+     * dangling edge (explicit or default) is left for the host to notice -- RunePartyMapOverlay's
      * own route lines make this visible immediately -- and fix by hand, rather than this guessing
      * at which rewrite is "correct" when the removed tile was itself a fork point or a merge
      * target. */
@@ -2269,10 +2400,6 @@ public class RunePartyPlugin extends Plugin
         if (phase == GamePhase.ACTIVE && itemPlacementKey != null)
         {
             addItemPlacementMenuEntries();
-        }
-        if (phase == GamePhase.ACTIVE)
-        {
-            addGoldenGnomePurchaseMenuEntry();
         }
     }
 
@@ -3553,6 +3680,7 @@ public class RunePartyPlugin extends Plugin
         phase = GamePhase.DISCONNECTED;
         coursePlacementMode = false; selectedPreset = null; presetRotationSteps = 0;
         customCourseBuildMode = false; courseConnectFromIndex = null;
+        mapShowing = false;
         currentTurnRsn = null; lastDiceRoll = null; pendingRoll = false; rollRequestSubmitted = false;
         awaitingSpinFinish = false;
         pendingTargetIndices = Collections.emptyList();

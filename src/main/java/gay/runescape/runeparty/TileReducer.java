@@ -173,6 +173,42 @@ public class TileReducer
         return entry.nextIndices;
     }
 
+    /** BFS shortest number of forward steps from fromPathIndex to toPathIndex along this course's
+     * own graph (see resolveNextIndices) -- for RunePartyMapOverlay's own "N tiles away" hover
+     * detail, the client-side mirror of the same forward-walk server's own _reachable_within does
+     * for a dice roll. Null if toPathIndex genuinely isn't reachable at all (a dead end, or a gap
+     * in the course) -- every visited pathIndex is remembered so a looping course (the common case)
+     * can't spin forever re-treading ground it's already covered. 0 if the two indices are the
+     * same tile. */
+    public Integer stepsBetween(int fromPathIndex, int toPathIndex)
+    {
+        if (fromPathIndex == toPathIndex) return 0;
+
+        Set<Integer> visited = new HashSet<>();
+        visited.add(fromPathIndex);
+        List<Integer> frontier = new ArrayList<>();
+        frontier.add(fromPathIndex);
+
+        int steps = 0;
+        while (!frontier.isEmpty())
+        {
+            steps++;
+            List<Integer> next = new ArrayList<>();
+            for (int idx : frontier)
+            {
+                TileEntry entry = tileAtIndex(idx);
+                if (entry == null) continue;
+                for (int nxt : resolveNextIndices(entry))
+                {
+                    if (nxt == toPathIndex) return steps;
+                    if (visited.add(nxt)) next.add(nxt);
+                }
+            }
+            frontier = next;
+        }
+        return null;
+    }
+
     private static String key(int x, int y, int plane, String tileType)
     {
         return x + ":" + y + ":" + plane + ":" + tileType;

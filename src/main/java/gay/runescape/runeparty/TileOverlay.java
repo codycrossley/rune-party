@@ -278,6 +278,19 @@ public class TileOverlay extends Overlay
         goldenGnomeModel.clear();
     }
 
+    /** Whether {@code canvasPoint} is currently over the Golden Gnome model spawned at {@code
+     * point}'s own real screen-space clickbox -- see GoldenGnomeModel#isUnderMouse, and
+     * RunePartyPlugin#onClientTick/#onMenuOpened, the only callers (same clickbox-hit-testing
+     * technique HardcodedCourseLauncherOverlay#hoveredCourse uses for its own launcher model). */
+    // Fully qualified rather than imported -- this file's own bare "Point" already means
+    // java.awt.Point everywhere else (via the java.awt.* import above, this file's own established
+    // canvas-coordinate type, public x/y fields), and an explicit net.runelite.api.Point import
+    // would shadow that for the whole file, not just this one method.
+    public boolean isGoldenGnomeUnderMouse(WorldPoint point, net.runelite.api.Point canvasPoint)
+    {
+        return goldenGnomeModel.isUnderMouse(point, canvasPoint);
+    }
+
     /** Despawns and forgets every Coin Trap RuneLiteObject -- same reasoning/call sites as
      * clearGoldenGnomeModels. */
     public void clearCoinTrapModels()
@@ -470,8 +483,9 @@ public class TileOverlay extends Overlay
     }
 
     /** "Purchase!" arrow over the Golden Gnome's own current tile while the local player has a
-     * roll pending on their own turn -- see RunePartyPlugin#addGoldenGnomePurchaseMenuEntry, the
-     * right-click entry this arrow is pointing at. Local-only, same reasoning
+     * roll pending on their own turn -- see RunePartyPlugin#hoveredPurchasableGoldenGnomePoint,
+     * the right-click entry (offered on the model's own real clickbox now, not this tile -- see
+     * that method's own doc) this arrow is pointing at. Local-only, same reasoning
      * renderItemPlacementArrows gives: nobody but the current roller can actually act on the menu
      * entry it's advertising. Gated on exactly the same conditions that menu entry itself checks
      * (already-purchased-this-turn, reachability) -- reported: this used to skip both, so the
