@@ -13,8 +13,8 @@ import java.util.concurrent.TimeUnit;
 
 public class ApiClient
 {
-    // static final String BASE_URL = "http://localhost:8005/runeparty";
-    static final String BASE_URL = "https://runeparty.shrunk.studio/runeparty";
+    static final String BASE_URL = "http://localhost:8005/runeparty";
+    // static final String BASE_URL = "https://runeparty.shrunk.studio/runeparty";
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
@@ -406,6 +406,22 @@ public class ApiClient
         }
     }
 
+    public void collectSandwichItem(String gameId, String playerRsn, String playerToken, int spawnId, int x, int y, int plane) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("spawnId", spawnId);
+        body.addProperty("x", x);
+        body.addProperty("y", y);
+        body.addProperty("plane", plane);
+
+        try (Response resp = post("/v1/games/" + gameId + "/collect-sandwich-item", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Collect Sandwich Rush item failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     /** Reports the local player's YES ("True")/NO ("False") emote answering the current True or
      * False round -- see the server's own true-or-false-answer endpoint, which 409s a second
      * attempt for the same round (an answer, once landed, is final) or if no question is
@@ -482,6 +498,23 @@ public class ApiClient
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Unmark tiles failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** Locks this game to a Standard Course (see HardcodedCourse.java/
+     * RunePartyPlugin#createGameFromHardcodedCourse) -- called once, right after that course's own
+     * tiles are committed via markTiles above. Once locked, the server refuses every future
+     * mark-tiles/unmark-tiles call for this game (see app.py's own standard_course_key checks),
+     * matching this course no longer having any client-side build tools offered either. */
+    public void lockStandardCourse(String gameId, String writeKey, String courseKey) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("courseKey", courseKey);
+
+        try (Response resp = post("/v1/games/" + gameId + "/lock-standard-course", body, writeKey))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Lock standard course failed (" + resp.code() + "): " + raw);
         }
     }
 

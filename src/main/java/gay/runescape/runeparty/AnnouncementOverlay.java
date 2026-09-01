@@ -276,7 +276,8 @@ public class AnnouncementOverlay extends Overlay
         renderMinigameSpinner(g);
         renderMinigameReadyCheck(g);
         renderTeamAssignedBanner(g);
-        if (RunePartyPlugin.ARENA_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.TURF_WARS_KEY.equals(plugin.getMinigameKey()))
+        if (RunePartyPlugin.ARENA_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.TURF_WARS_KEY.equals(plugin.getMinigameKey())
+            || RunePartyPlugin.SANDWICH_RUSH_KEY.equals(plugin.getMinigameKey()))
         {
             renderArrivalGatherMessage(g);
         }
@@ -1198,18 +1199,19 @@ public class AnnouncementOverlay extends Overlay
     /** Replacement for renderMinigameCountdown for any mini-game whose round doesn't begin on a
      * fixed clock, but the instant every seated player is standing inside its own arrival zone
      * (see the server's MinigameContext.get_positions plus each mini-game's own
-     * _wait_for_everyone_to_arrive -- Arena's the original user, Turf Wars the second, both a
-     * fixed-duration contest where a player who's still walking in when a standard countdown
-     * expired would lose ground they can never make back). Showing "3...2...1...BEGIN!" here would
-     * either lie (claiming the round's begun before it has) or leave players confused once
-     * "BEGIN!" comes and goes with nothing actually happening yet, so this shows a persistent
-     * instruction instead, for exactly the same window renderMinigameCountdown would otherwise
-     * occupy: once the ready-check screen has hidden (see renderMinigameReadyCheck's own
-     * countdownRevealed, mirrored here so both a live and a catching-up client transition at the
-     * same moment) until MINIGAME_ROUND_BEGIN genuinely lands (isMinigameRoundBegun) -- no fixed
-     * duration, since there isn't one to have. Same message for every caller ("stand within the
-     * arena" reads fine for Turf Wars' own grid too, which this codebase already calls "the
-     * arena" elsewhere -- see TileOverlay#renderTurfWarsArenaOutline). */
+     * _wait_for_everyone_to_arrive -- Arena's the original user, Turf Wars the second, Sandwich
+     * Rush the third, all a fixed-duration contest where a player who's still walking in when a
+     * standard countdown expired would lose ground they can never make back). Showing
+     * "3...2...1...BEGIN!" here would either lie (claiming the round's begun before it has) or
+     * leave players confused once "BEGIN!" comes and goes with nothing actually happening yet, so
+     * this shows a persistent instruction instead, for exactly the same window
+     * renderMinigameCountdown would otherwise occupy: once the ready-check screen has hidden (see
+     * renderMinigameReadyCheck's own countdownRevealed, mirrored here so both a live and a
+     * catching-up client transition at the same moment) until MINIGAME_ROUND_BEGIN genuinely
+     * lands (isMinigameRoundBegun) -- no fixed duration, since there isn't one to have. Same
+     * message for every caller ("stand within the arena" reads fine for Turf Wars'/Sandwich
+     * Rush's own grids too, which this codebase already calls "the arena" elsewhere -- see
+     * TileOverlay#renderArenaOutline). */
     private void renderArrivalGatherMessage(Graphics2D g)
     {
         boolean countdownRevealed = plugin.isMinigameCountdownStarted()

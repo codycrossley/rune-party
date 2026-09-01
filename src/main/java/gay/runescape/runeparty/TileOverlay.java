@@ -5,6 +5,7 @@ import gay.runescape.runeparty.models.CoinRushModel;
 import gay.runescape.runeparty.models.CoinTrapModel;
 import gay.runescape.runeparty.models.GoldenGnomeModel;
 import gay.runescape.runeparty.models.PondModel;
+import gay.runescape.runeparty.models.SandwichItemModel;
 import gay.runescape.runeparty.models.TableModel;
 import net.runelite.api.Client;
 import net.runelite.api.Perspective;
@@ -27,13 +28,15 @@ import java.util.List;
  * tile renders individually as its own rounded-corner outline (see renderOutlinedTile), inset a
  * little inward from the tile's true boundary so adjacent tiles' outlines read as a clean grid
  * rather than doubled-up touching edges, with a connecting line drawn between consecutive path
- * indices to make the route itself legible. Two exceptions, both genuinely connected regions
+ * indices to make the route itself legible. Several exceptions, all genuinely connected regions
  * rather than a walked path (like Gnomeball's own zones): the Fishing Contest platform's
- * FISHING_TILE block renders as a single merged-area outline (see renderFishingZoneOutline), and
- * Turf Wars' own TURF_WARS_TILE grid renders as one merged arena outline (see
- * renderTurfWarsArenaOutline) with each individual tile fill-only underneath it (see
- * renderTurfWarsTile) -- both share roundedInsetPolygon with every per-tile outline so their
- * corners read exactly the same. */
+ * FISHING_TILE block and Sandwich Rush's own SANDWICH_RUSH_TILE grid each render as a single
+ * merged-area outline only, no per-tile fill underneath (see renderFishingZoneOutline/
+ * renderArenaOutline) -- Sandwich Rush's tiles never change color (see minigames/sandwich_rush.py's
+ * own doc), so an individual fill per tile would just be noise. Turf Wars' own TURF_WARS_TILE grid
+ * also gets that same merged arena outline, but keeps an individual fill-only tile underneath it
+ * (renderTurfWarsTile) since each tile's own color is real, meaningful state (which team claimed
+ * it) -- all outlines still share roundedInsetPolygon so their corners read exactly the same. */
 @Slf4j
 public class TileOverlay extends Overlay
 {
@@ -62,12 +65,16 @@ public class TileOverlay extends Overlay
     private static final int TURF_WARS_FILL_ALPHA_UNCLAIMED = 60;
     private static final int TURF_WARS_FILL_ALPHA_CLAIMED = 200;
 
-    // For Turf Wars' own single merged arena outline (see renderTurfWarsArenaOutline) --
-    // individual tiles are fill-only now (no per-tile outline), so this is the *only* outline the
-    // whole grid gets. A fixed neutral color, not derived from any one tile's own resolved color
-    // (unlike FISHING_ZONE_OUTLINE_ALPHA's platform, every Turf Wars tile has its own
-    // independently-changing color, there's no single "zone color" to borrow here).
+    // For Turf Wars' own single merged arena outline (see renderArenaOutline) -- individual tiles
+    // are fill-only now (no per-tile outline), so this is the *only* outline the whole grid gets.
+    // A fixed neutral color, not derived from any one tile's own resolved color (unlike
+    // FISHING_ZONE_OUTLINE_ALPHA's platform, every Turf Wars tile has its own independently-
+    // changing color, there's no single "zone color" to borrow here).
     private static final Color TURF_WARS_ARENA_OUTLINE_COLOR = new Color(255, 255, 255, 160);
+    // Sandwich Rush's own arena outline -- a warm gold rather than Turf Wars' neutral white, so
+    // the two arenas read as visually distinct at a glance (matches SANDWICH_RUSH_TILE's own
+    // served color_hex, see tiles/sandwich_rush.py).
+    private static final Color SANDWICH_RUSH_ARENA_OUTLINE_COLOR = new Color(232, 163, 61, 180);
 
     private static final Stroke SOLID_STROKE   = new BasicStroke(3.5f);
     private static final Stroke PREVIEW_STROKE = new BasicStroke(3.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 10f, new float[]{7f, 5f}, 0f);
@@ -91,6 +98,7 @@ public class TileOverlay extends Overlay
     private final ArenaFireModel arenaFireModel;
     private final PondModel pondModel;
     private final TableModel tableModel;
+    private final SandwichItemModel sandwichItemModel;
 
     public TileOverlay(Client client, RunePartyConfig config, RunePartyPlugin plugin, TileReducer tileReducer)
     {
@@ -105,6 +113,7 @@ public class TileOverlay extends Overlay
         this.arenaFireModel = new ArenaFireModel(client);
         this.pondModel = new PondModel(client);
         this.tableModel = new TableModel(client);
+        this.sandwichItemModel = new SandwichItemModel(client);
 
         setPosition(OverlayPosition.DYNAMIC);
         setLayer(OverlayLayer.ABOVE_SCENE);
@@ -121,6 +130,7 @@ public class TileOverlay extends Overlay
             clearArenaFireModels();
             clearPondModels();
             clearTableModels();
+            clearSandwichItemModels();
             return null;
         }
         GamePhase phase = plugin.getPhase();
@@ -132,6 +142,7 @@ public class TileOverlay extends Overlay
             clearArenaFireModels();
             clearPondModels();
             clearTableModels();
+            clearSandwichItemModels();
             return null;
         }
 
@@ -139,6 +150,7 @@ public class TileOverlay extends Overlay
 
         renderCommittedCourse(g);
         coinRushModel.update();
+        sandwichItemModel.update(plugin.getSandwichRushSpawns());
 
         if (plugin.isCoursePlacementMode())
         {
@@ -166,13 +178,15 @@ public class TileOverlay extends Overlay
             if ("ARENA_TILE".equals(entry.tileType) && ArenaFireModel.isDead(entry.color)) continue; // rendered as a 3D model instead, see models/ArenaFireModel
             if ("POND_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see models/PondModel
             if ("FISHING_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderFishingZoneOutline
+            if ("SANDWICH_RUSH_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- these tiles never change color (see minigames/sandwich_rush.py's own doc), so an individual fill per tile is just noise
             if ("TURF_WARS_TILE".equals(entry.tileType)) { renderTurfWarsTile(g, entry); continue; } // fill only, no per-tile outline, see renderTurfWarsTile
             Color base = resolveColor(entry.color, entry.tileType);
             renderOutlinedTile(g, entry.point, base, SOLID_STROKE);
         }
 
         renderFishingZoneOutline(g, entries);
-        renderTurfWarsArenaOutline(g, entries);
+        renderArenaOutline(g, entries, "TURF_WARS_TILE", TURF_WARS_ARENA_OUTLINE_COLOR);
+        renderArenaOutline(g, entries, "SANDWICH_RUSH_TILE", SANDWICH_RUSH_ARENA_OUTLINE_COLOR);
 
         goldenGnomeModel.update(entries);
         coinTrapModel.update(entries);
@@ -228,24 +242,27 @@ public class TileOverlay extends Overlay
         g.draw(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
     }
 
-    /** Draws the whole Turf Wars grid as one merged-area outline, same "genuinely one connected
-     * region, not a walked path" reasoning renderFishingZoneOutline already gives -- individual
-     * tiles are fill-only now (see renderTurfWarsTile), so this is the grid's *only* outline.
-     * Unlike Fishing Contest's own platform, Turf Wars has no single "center" tile to anchor on
-     * (no POND_TILE-style modifier marking one) -- GRID_SIZE is even, so the true geometric center
-     * falls between four tiles, not on any one of them. Built directly from the bounding box's own
+    /** Draws a whole board-swapped arena grid (Turf Wars' TURF_WARS_TILE, Sandwich Rush's
+     * SANDWICH_RUSH_TILE) as one merged-area outline, same "genuinely one connected region, not a
+     * walked path" reasoning renderFishingZoneOutline already gives -- individual tiles are
+     * fill-only (Turf Wars' own colored claims via renderTurfWarsTile, Sandwich Rush's plain
+     * catalog color via the generic per-tile loop above), so this is each grid's *only* outline.
+     * Neither arena has a single "center" tile to anchor on the way Fishing Contest's own
+     * POND_TILE-marked platform does -- GRID_SIZE is even, so the true geometric center falls
+     * between four tiles, not on any one of them. Built directly from the bounding box's own
      * min/max corner tiles' LocalPoints instead: averaging two tile-center LocalPoints gives
      * exactly the midpoint between the low edge of the min corner and the high edge of the max
      * corner (the +/-64 each tile's own half-width contributes cancels out), which is the region's
      * true center -- constructed via LocalPoint's own plain (x, y) constructor, confirmed present
-     * on the real API. */
-    private void renderTurfWarsArenaOutline(Graphics2D g, List<TileReducer.TileEntry> entries)
+     * on the real API. Generalized from a Turf-Wars-only version once Sandwich Rush needed the
+     * identical shape for its own arena, rather than a second copy of this same scan/outline. */
+    private void renderArenaOutline(Graphics2D g, List<TileReducer.TileEntry> entries, String tileType, Color outlineColor)
     {
         Integer minX = null, maxX = null, minY = null, maxY = null;
         int plane = 0;
         for (TileReducer.TileEntry entry : entries)
         {
-            if (!"TURF_WARS_TILE".equals(entry.tileType)) continue;
+            if (!tileType.equals(entry.tileType)) continue;
             WorldPoint p = entry.point;
             plane = p.getPlane();
             minX = (minX == null) ? p.getX() : Math.min(minX, p.getX());
@@ -264,7 +281,7 @@ public class TileOverlay extends Overlay
         Polygon poly = Perspective.getCanvasTileAreaPoly(client, center, maxX - minX + 1, maxY - minY + 1, plane, 0);
         if (poly == null) return;
 
-        g.setColor(TURF_WARS_ARENA_OUTLINE_COLOR);
+        g.setColor(outlineColor);
         g.setStroke(SOLID_STROKE);
         g.draw(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
     }
@@ -303,6 +320,13 @@ public class TileOverlay extends Overlay
     public void clearCoinRushModels()
     {
         coinRushModel.clear();
+    }
+
+    /** Despawns and forgets every Sandwich Rush ingredient RuneLiteObject -- same reasoning/call
+     * sites as clearGoldenGnomeModels/clearCoinRushModels. */
+    public void clearSandwichItemModels()
+    {
+        sandwichItemModel.clear();
     }
 
     /** Despawns and forgets every Arena Fire RuneLiteObject -- same reasoning/call sites as
@@ -665,7 +689,7 @@ public class TileOverlay extends Overlay
     }
 
     /** Draws one Turf Wars tile as a fill only -- no per-tile outline any more (see this class's
-     * own doc and renderTurfWarsArenaOutline, the grid's one merged boundary now). Shares
+     * own doc and renderArenaOutline, the grid's one merged boundary now). Shares
      * roundedInsetPolygon's own geometry with renderOutlinedTile -- same shape, just filled
      * instead of stroked -- so a Turf Wars tile still lines up with the rest of the board's own
      * inset/rounding, even though nothing draws its edge individually any more.

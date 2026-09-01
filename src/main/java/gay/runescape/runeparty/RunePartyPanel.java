@@ -501,7 +501,7 @@ public class RunePartyPanel extends PluginPanel
         }
 
         hostControlsCard.setVisible(isHost && (phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE));
-        courseToolsPanel.setVisible(isHost && phase == GamePhase.LOBBY);
+        courseToolsPanel.setVisible(isHost && phase == GamePhase.LOBBY && !plugin.isStandardCourseLocked());
         refreshCourseBuildButton();
         gameSettingsRow.setVisible(isHost && phase == GamePhase.LOBBY);
         startGameBtn.setVisible(isHost && phase == GamePhase.LOBBY);

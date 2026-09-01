@@ -249,6 +249,46 @@ public class RunePartyPlugin extends Plugin
     public static final Color TEAM_A_COLOR = new Color(0xE6, 0x1E, 0x96);
     public static final Color TEAM_B_COLOR = new Color(0x00, 0xAA, 0xAA);
 
+    /** Client-side key for the Sandwich Rush mini-game -- must match the server's own registration
+     * (see minigames/sandwich_rush.py), same role TURF_WARS_KEY/COIN_RUSH_KEY play for their own
+     * mini-games. Used by AnnouncementOverlay to swap the generic "3...2...1...BEGIN!" countdown
+     * for the same arrival-gated "All players must stand within the arena!" gather message Arena/
+     * Turf Wars already use -- Sandwich Rush's own round is arrival-gated the identical way. */
+    public static final String SANDWICH_RUSH_KEY = "sandwich-rush";
+
+    /** How long a whole Sandwich Rush round lasts -- must match the server's own ROUND_SECONDS
+     * (minigames/sandwich_rush.py). Measured from MINIGAME_ROUND_BEGIN (see MinigamePresentation#
+     * sandwichRushRoundStartAt/getSandwichRushEndsAt), same "stamped instant + fixed duration"
+     * shape COIN_RUSH_DURATION_MS/TURF_WARS_ROUND_MS already use. */
+    public static final long SANDWICH_RUSH_DURATION_MS = 60000;
+
+    /** One entry per Sandwich Rush ingredient key (must match the server's own INGREDIENTS list,
+     * minigames/sandwich_rush.py) -- the real 3D model id models/SandwichItemModel spawns for it
+     * (client.loadModel(...), same "just a raw model id" call every other spawned object in this
+     * codebase already uses) paired with the raster icon SandwichRushHudOverlay draws for it (the
+     * exact filenames already added under minigame_resources/, same convention FishingCatchOverlay
+     * already uses for raw_shrimps.png/raw_anchovies.png). LinkedHashMap so both consumers iterate
+     * in one fixed, deliberate order (tomato, cheese, cabbage, bread) rather than whatever order a
+     * plain HashMap happens to produce. */
+    public static final Map<String, Integer> SANDWICH_RUSH_ITEM_MODEL_IDS;
+    public static final Map<String, String> SANDWICH_RUSH_ITEM_ICON_RESOURCES;
+    static
+    {
+        Map<String, Integer> models = new LinkedHashMap<>();
+        models.put("tomato", 2632);
+        models.put("cheese", 2365);
+        models.put("cabbage", 8195);
+        models.put("bread", 2409);
+        SANDWICH_RUSH_ITEM_MODEL_IDS = Collections.unmodifiableMap(models);
+
+        Map<String, String> icons = new LinkedHashMap<>();
+        icons.put("tomato", "minigame_resources/tomato.png");
+        icons.put("cheese", "minigame_resources/cheese.png");
+        icons.put("cabbage", "minigame_resources/cabbage.png");
+        icons.put("bread", "minigame_resources/bread.png");
+        SANDWICH_RUSH_ITEM_ICON_RESOURCES = Collections.unmodifiableMap(icons);
+    }
+
     /** How long AnnouncementOverlay's team-assigned reveal banner stays up -- fired once, right
      * after MINIGAME_TEAMS_ASSIGNED lands for the local player (see MinigamePresentation#
      * triggerTeamAssignedBanner), same duration as MINIGAME_OVER_BANNER_DURATION_MS above (both
@@ -527,6 +567,7 @@ public class RunePartyPlugin extends Plugin
     private JadEncounter jadEncounter;
     private FishingCatchOverlay fishingCatchOverlay;
     private TurfWarsScoreOverlay turfWarsScoreOverlay;
+    private SandwichRushHudOverlay sandwichRushHudOverlay;
     private HardcodedCourseLauncherOverlay hardcodedCourseLauncherOverlay;
     private RosterReducer rosterReducer;
     ApiClient apiClient; // package-private: presenters (MinigamePresentation) issue their own requests
@@ -597,6 +638,13 @@ public class RunePartyPlugin extends Plugin
     volatile String playerToken = null; // package-private: MinigamePresentation's collectCoinRushCoin reads this
     private volatile String joinCode = null;
     private volatile String hostRsn = null;
+    // Non-null only once this game has been permanently locked to a Standard Course (see
+    // RunePartyPlugin#createGameFromHardcodedCourse/ApiClient#lockStandardCourse and the
+    // STANDARD_COURSE_LOCKED handling below) -- HardcodedCourse#key, not its display name. Once
+    // set, it never goes back to null for the life of this game (the server itself never
+    // reverses a lock, see app.py's own lock_standard_course). Gates course-building tool
+    // visibility in RunePartyPanel (see courseToolsPanel's own isStandardCourseLocked() check).
+    private volatile String standardCourseKey = null;
 
     // Persisted copy of the above (minus hostRsn, which the server always hands back fresh), so a
     // plugin restart -- a client update, a crash, ./gradlew run during dev -- doesn't strand
@@ -909,6 +957,9 @@ public class RunePartyPlugin extends Plugin
         turfWarsScoreOverlay = new TurfWarsScoreOverlay(this);
         overlayManager.add(turfWarsScoreOverlay);
 
+        sandwichRushHudOverlay = new SandwichRushHudOverlay(this);
+        overlayManager.add(sandwichRushHudOverlay);
+
         hardcodedCourseLauncherOverlay = new HardcodedCourseLauncherOverlay(client, this);
         overlayManager.add(hardcodedCourseLauncherOverlay);
 
@@ -939,7 +990,7 @@ public class RunePartyPlugin extends Plugin
         if (eventSocket != null) eventSocket.shutdown();
         executor.shutdownNow();
         uiTimerExec.shutdownNow();
-        if (tileOverlay != null) { tileOverlay.clearGoldenGnomeModels(); tileOverlay.clearCoinRushModels(); tileOverlay.clearPondModels(); tileOverlay.clearTableModels(); overlayManager.remove(tileOverlay); }
+        if (tileOverlay != null) { tileOverlay.clearGoldenGnomeModels(); tileOverlay.clearCoinRushModels(); tileOverlay.clearSandwichItemModels(); tileOverlay.clearPondModels(); tileOverlay.clearTableModels(); overlayManager.remove(tileOverlay); }
         if (statsOverlay != null) overlayManager.remove(statsOverlay);
         if (coinRushTimerOverlay != null) overlayManager.remove(coinRushTimerOverlay);
         if (playerOverlay != null) overlayManager.remove(playerOverlay);
@@ -948,6 +999,7 @@ public class RunePartyPlugin extends Plugin
         if (jadEncounter != null) { jadEncounter.clear(); overlayManager.remove(jadEncounter); }
         if (fishingCatchOverlay != null) overlayManager.remove(fishingCatchOverlay);
         if (turfWarsScoreOverlay != null) overlayManager.remove(turfWarsScoreOverlay);
+        if (sandwichRushHudOverlay != null) overlayManager.remove(sandwichRushHudOverlay);
         if (hardcodedCourseLauncherOverlay != null) { hardcodedCourseLauncherOverlay.clear(); overlayManager.remove(hardcodedCourseLauncherOverlay); }
         if (mapOverlay != null) overlayManager.remove(mapOverlay);
         if (navButton != null) clientToolbar.removeNavigation(navButton);
@@ -1135,7 +1187,10 @@ public class RunePartyPlugin extends Plugin
      * addHardcodedCourseLauncherMenuEntry) -- creates the game exactly the same way, then commits
      * that course's whole tile set (including its GOLDEN_GNOME_TILE stacked on START, see
      * HardcodedCourse's own doc) in one extra mark-tiles call before announcing success, so the
-     * host lands in LOBBY with the course already built rather than an empty one. */
+     * host lands in LOBBY with the course already built rather than an empty one. A third call,
+     * lockStandardCourse, then permanently locks this game to that course -- see
+     * ApiClient#lockStandardCourse's own doc for why this has to be a separate call after
+     * markTiles rather than folded into game creation. */
     public void createGameFromHardcodedCourse(HardcodedCourse course)
     {
         String host = localRsn();
@@ -1146,6 +1201,7 @@ public class RunePartyPlugin extends Plugin
             ApiClient.CreateGameResult result = apiClient.createGame(host);
             applyCreateGameResult(result, host);
             apiClient.markTiles(gameId, writeKey, course.tiles);
+            apiClient.lockStandardCourse(gameId, writeKey, course.key);
             addChatMessage("Created Rune Party game (" + course.name + "). Join code: " + result.joinCode);
             triggerWelcomeBanner();
         }, e -> addChatMessage("Failed to create game: " + e.getMessage()), this::refreshPanel);
@@ -1619,6 +1675,7 @@ public class RunePartyPlugin extends Plugin
 
     public void enterCoursePlacementMode()
     {
+        if (isStandardCourseLocked()) return;
         customCourseBuildMode = false; // mutually exclusive -- see that field's own doc
         courseConnectFromIndex = null;
         coursePlacementMode = true;
@@ -1643,7 +1700,7 @@ public class RunePartyPlugin extends Plugin
 
     public void enterCustomCourseBuildMode()
     {
-        if (!isHost()) return;
+        if (!isHost() || isStandardCourseLocked()) return;
         coursePlacementMode = false; // mutually exclusive -- see customCourseBuildMode's own doc
         customCourseBuildMode = true;
         courseConnectFromIndex = null;
@@ -2267,6 +2324,13 @@ public class RunePartyPlugin extends Plugin
         if (isCoinRushActive() && isMinigamePlayable())
         {
             minigamePresentation.checkCoinRushCollection(selfPlayer);
+        }
+
+        // Same reasoning as the Coin Rush check just above -- Sandwich Rush also has no "whose
+        // turn is it," every seated player can be racing for the same ingredient at once.
+        if (isSandwichRushActive() && isMinigamePlayable())
+        {
+            minigamePresentation.checkSandwichRushCollection(selfPlayer);
         }
 
         // Generic (not Coin-Rush/Arena-specific) live position heartbeat -- any mini-game whose
@@ -3152,6 +3216,13 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
+            case Events.STANDARD_COURSE_LOCKED:
+                // Real state, applied catch-up or not -- a client that only caught up on an
+                // already-locked game still needs its course-building tools hidden, same as one
+                // that watched the lock happen live.
+                standardCourseKey = Json.requiredStr(e.payload, type, "courseKey");
+                break;
+
             case Events.GAME_ENDED:
                 phase = GamePhase.ENDED;
                 if (!catchingUp)
@@ -3528,6 +3599,8 @@ public class RunePartyPlugin extends Plugin
             case Events.MINIGAME_ROUND_BEGIN:
             case Events.COIN_RUSH_SPAWN:
             case Events.COIN_RUSH_COLLECTED:
+            case Events.SANDWICH_RUSH_ITEM_SPAWNED:
+            case Events.SANDWICH_RUSH_ITEM_COLLECTED:
             case Events.TRUE_OR_FALSE_ROUND_STARTED:
             case Events.TRUE_OR_FALSE_ANSWERED:
             case Events.TRUE_OR_FALSE_ROUND_ENDED:
@@ -3677,6 +3750,7 @@ public class RunePartyPlugin extends Plugin
         itemPresentation.reset();
         turnEffectGateUntil = 0;
         gameId = null; writeKey = null; playerToken = null; joinCode = null; hostRsn = null;
+        standardCourseKey = null;
         phase = GamePhase.DISCONNECTED;
         coursePlacementMode = false; selectedPreset = null; presetRotationSteps = 0;
         customCourseBuildMode = false; courseConnectFromIndex = null;
@@ -3716,6 +3790,10 @@ public class RunePartyPlugin extends Plugin
     public String getJoinCode() { return joinCode; }
     public String getHostRsn() { return hostRsn; }
     public boolean isHost() { return writeKey != null; }
+    /** True once this game has been permanently locked to a Standard Course -- see
+     * standardCourseKey's own field doc. Course-building tools (RunePartyPanel's own
+     * courseToolsPanel) stay hidden for the rest of this game's life once this flips true. */
+    public boolean isStandardCourseLocked() { return standardCourseKey != null; }
     public boolean isCoursePlacementMode() { return coursePlacementMode; }
     public CoursePreset getSelectedPreset() { return selectedPreset; }
     public int getPresetRotationSteps() { return presetRotationSteps; }
@@ -3774,6 +3852,20 @@ public class RunePartyPlugin extends Plugin
      * no round is active yet or the round hasn't actually become playable (see
      * coinRushRoundStartAt's own doc on when that gets stamped). */
     public long getCoinRushEndsAt() { return minigamePresentation.getCoinRushEndsAt(); }
+
+    /** Every currently-live Sandwich Rush ingredient spawn, keyed by the server's own spawn id --
+     * see models/SandwichItemModel, the only consumer. */
+    public Map<Integer, SandwichSpawn> getSandwichRushSpawns() { return Collections.unmodifiableMap(minigamePresentation.getSandwichRushSpawns()); }
+    /** The LOCAL player's own currently-held ingredient keys this round -- deliberately self-only
+     * (see MinigamePresentation's own field doc) -- see SandwichRushHudOverlay, the only
+     * consumer. */
+    public Set<String> getSandwichHeld() { return Collections.unmodifiableSet(minigamePresentation.getSandwichHeld()); }
+    public int getSandwichCount() { return minigamePresentation.getSandwichCount(); }
+    public boolean isSandwichRushActive() { return minigamePresentation.isSandwichRushActive(); }
+    /** When the current Sandwich Rush round's own clock (see SANDWICH_RUSH_DURATION_MS) runs out
+     * -- 0 if no round is active yet or the round hasn't actually become playable (see
+     * MinigamePresentation#sandwichRushRoundStartAt's own doc on when that gets stamped). */
+    public long getSandwichRushEndsAt() { return minigamePresentation.getSandwichRushEndsAt(); }
 
     public boolean isFishingContestActive() { return minigamePresentation.isFishingContestActive(); }
     /** When the current Fishing Contest round's own local catch-timer should stop (see

@@ -24,12 +24,18 @@ import java.util.List;
 public final class HardcodedCourse
 {
     public final String name;
+    /** Stable identifier sent to the server via ApiClient#lockStandardCourse -- distinct from
+     * {@link #name} (a display string that could change) so a rename here never silently breaks
+     * anything keyed off of it server-side (see minigames/course_offset.py's own ARENA_OFFSETS
+     * table). Never changes once a course ships -- treat it the same as a database primary key. */
+    public final String key;
     public final WorldPoint launcherPoint;
     public final List<ApiClient.TileSpec> tiles;
 
-    private HardcodedCourse(String name, WorldPoint launcherPoint, List<ApiClient.TileSpec> tiles)
+    private HardcodedCourse(String name, String key, WorldPoint launcherPoint, List<ApiClient.TileSpec> tiles)
     {
         this.name = name;
+        this.key = key;
         this.launcherPoint = launcherPoint;
         this.tiles = tiles;
     }
@@ -118,7 +124,7 @@ public final class HardcodedCourse
             t(3012, 3370, "PENALTY_TILE", 65, 32),
             new ApiClient.TileSpec(start.getX(), start.getY(), start.getPlane(), "GOLDEN_GNOME_TILE", null, null, null, new int[0])
         );
-        return new HardcodedCourse("Fally Park", start, tiles);
+        return new HardcodedCourse("Fally Park", "fally_park", start, tiles);
     }
 
     public static final HardcodedCourse FALLY_PARK_COURSE = buildFallyParkCourse();

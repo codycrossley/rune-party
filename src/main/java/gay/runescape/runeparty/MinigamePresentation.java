@@ -131,6 +131,25 @@ final class MinigamePresentation
     // confirms it).
     private final Set<Integer> coinRushCollectSubmitted = ConcurrentHashMap.newKeySet();
     private volatile long coinRushRoundStartAt = 0;
+
+    // ---- Sandwich Rush (server-driven spawns/collections -- see SANDWICH_RUSH_ITEM_SPAWNED/
+    // _COLLECTED handling). sandwichRushSpawns is real state, applied catch-up or not: every
+    // currently-live spawn's point+ingredient keyed by the server's own spawn id, mirrored into a
+    // 3D model per spawn by models/SandwichItemModel the same "diff against the live set" pattern
+    // CoinRushModel already uses. sandwichHeld/sandwichCount are the LOCAL player's own held
+    // ingredients/completed-sandwich count this round -- unlike Coin Rush's shared scoreboard,
+    // this is deliberately self-only (see SandwichRushHudOverlay's own doc), so there's nothing to
+    // track for anyone but the local player. sandwichRushRoundStartAt is the wall-clock moment the
+    // round actually began, same single-stamp-off-MINIGAME_ROUND_BEGIN shape coinRushRoundStartAt/
+    // turfWarsRoundStartAt already use. ----
+    private final Map<Integer, SandwichSpawn> sandwichRushSpawns = new ConcurrentHashMap<>();
+    private final Set<String> sandwichHeld = ConcurrentHashMap.newKeySet(); // lowercase ingredient keys
+    private volatile int sandwichCount = 0;
+    // Guards one spawn's own collect report against firing every tick while it's in flight -- same
+    // role coinRushCollectSubmitted plays for Coin Rush.
+    private final Set<Integer> sandwichCollectSubmitted = ConcurrentHashMap.newKeySet();
+    private volatile long sandwichRushRoundStartAt = 0;
+
     // ---- Fishing Contest (client-local catches, see RunePartyPlugin#onGameTick's own fishing
     // section -- this class only tracks the round's own start, exactly the same "wall-clock moment
     // the round actually began, stamped from MINIGAME_ROUND_BEGIN" shape coinRushRoundStartAt
@@ -236,6 +255,18 @@ final class MinigamePresentation
                     minigameTeamColors.clear();
                     turfWarsRoundStartAt = 0;
                 }
+                // Same reasoning as Coin Rush's own reset above -- sandwichRushRoundStartAt
+                // deliberately isn't set here either (see MINIGAME_ROUND_BEGIN below, its only
+                // writer). sandwichHeld/sandwichCount reset too -- a fresh round means nobody's
+                // holding anything and nobody's made a sandwich yet, regardless of catch-up.
+                if (RunePartyPlugin.SANDWICH_RUSH_KEY.equals(minigameKey))
+                {
+                    sandwichRushSpawns.clear();
+                    sandwichHeld.clear();
+                    sandwichCount = 0;
+                    sandwichCollectSubmitted.clear();
+                    sandwichRushRoundStartAt = 0;
+                }
                 // Same reasoning as Coin Rush's own reset just above -- a fresh True or False
                 // instance starts with no question/answers/reveal, regardless of catch-up.
                 if (RunePartyPlugin.TRUE_OR_FALSE_KEY.equals(minigameKey))
@@ -328,6 +359,10 @@ final class MinigamePresentation
                 {
                     turfWarsRoundStartAt = System.currentTimeMillis();
                 }
+                if (RunePartyPlugin.SANDWICH_RUSH_KEY.equals(minigameKey))
+                {
+                    sandwichRushRoundStartAt = System.currentTimeMillis();
+                }
                 // Unconditional, unlike the Coin-Rush-specific stamp above -- every mini-game fires
                 // this event (see events.minigame_round_begin's own doc), so this flips true
                 // regardless of which one is active. See its own field doc for why this exists
@@ -373,6 +408,57 @@ final class MinigamePresentation
                 {
                     plugin.enqueueCoinPopup(collector, RunePartyPlugin.COIN_RUSH_REWARD, 0, RunePartyPlugin.COIN_RUSH_BUMP_POPUP_DURATION_MS, true);
                     plugin.addChatMessage(collector + " grabbed a coin!");
+                }
+                break;
+            }
+
+            case Events.SANDWICH_RUSH_ITEM_SPAWNED:
+            {
+                // Real state, applied catch-up or not: an ingredient genuinely exists on the board
+                // at this point the instant the server says so, regardless of whether this client
+                // watched it appear live -- see models/SandwichItemModel, which just mirrors
+                // sandwichRushSpawns's own current keys every frame.
+                Integer spawnId = Json.requiredInt(e.payload, type, "id");
+                WorldPoint point = Json.safeWorldPoint(e.payload, "point");
+                String item = Json.requiredStr(e.payload, type, "item");
+                if (spawnId != null && point != null && item != null)
+                {
+                    sandwichRushSpawns.put(spawnId, new SandwichSpawn(point, item));
+                }
+                break;
+            }
+
+            case Events.SANDWICH_RUSH_ITEM_COLLECTED:
+            {
+                // The spawn itself is gone regardless of who collected it -- real state, applied
+                // catch-up or not. sandwichHeld/sandwichCount only ever track the LOCAL player's
+                // own progress (see this class's own field doc -- deliberately self-only, per the
+                // reported ask), so nothing past this point touches them, or shows any feedback,
+                // unless the collector *is* the local player -- another player's own pickup simply
+                // isn't this client's business to know about at all.
+                Integer spawnId = Json.requiredInt(e.payload, type, "id");
+                if (spawnId != null)
+                {
+                    sandwichRushSpawns.remove(spawnId);
+                    sandwichCollectSubmitted.remove(spawnId);
+                }
+                String collector = Json.requiredStr(e.payload, type, "player");
+                String item = Json.requiredStr(e.payload, type, "item");
+                Integer newSandwichCount = Json.requiredInt(e.payload, type, "sandwichCount");
+                String self = plugin.localRsn();
+                if (collector != null && item != null && self != null && collector.equalsIgnoreCase(self))
+                {
+                    boolean completedSandwich = newSandwichCount != null && newSandwichCount > sandwichCount;
+                    if (completedSandwich) sandwichHeld.clear();
+                    else sandwichHeld.add(item);
+                    if (newSandwichCount != null) sandwichCount = newSandwichCount;
+
+                    if (!catchingUp)
+                    {
+                        plugin.addChatMessage(completedSandwich
+                            ? "Sandwich complete! (" + sandwichCount + " total)"
+                            : "Picked up a " + item + "!");
+                    }
                 }
                 break;
             }
@@ -513,6 +599,13 @@ final class MinigamePresentation
         // MINIGAME_STARTED resets it fresh regardless.
         coinRushSpawns.clear();
         coinRushCollectSubmitted.clear();
+        // Same reasoning as the Coin Rush cleanup just above -- any ingredient still floating when
+        // the round ends shouldn't keep rendering (see models/SandwichItemModel). sandwichHeld/
+        // sandwichCount are deliberately left as-is, same "the overlay's own gate already stops
+        // rendering it, the next MINIGAME_STARTED resets it fresh regardless" reasoning
+        // coinRushScores's own comment gives.
+        sandwichRushSpawns.clear();
+        sandwichCollectSubmitted.clear();
         // Same reasoning as the Coin Rush cleanup just above -- no question/reveal should keep
         // rendering once the mini-game itself has ended.
         trueOrFalseQuestion = null;
@@ -572,6 +665,41 @@ final class MinigamePresentation
 
         plugin.submitAction("Collect Coin Rush coin", () -> plugin.apiClient.collectCoinRushCoin(gid, self, token, spawnId, pos.getX(), pos.getY(), pos.getPlane()),
             e -> coinRushCollectSubmitted.remove(spawnId));
+    }
+
+    /** Checks the local player's current position against every currently-live Sandwich Rush
+     * ingredient spawn (see sandwichRushSpawns) and reports a claim the instant it matches one --
+     * called every tick while a Sandwich Rush round is playable (see RunePartyPlugin#onGameTick).
+     * Verbatim same guard shape checkCoinRushCollection uses -- sandwichCollectSubmitted stops a
+     * spawn id from being reported more than once while its first report is still in flight. */
+    void checkSandwichRushCollection(Player selfPlayer)
+    {
+        WorldPoint pos = selfPlayer != null ? selfPlayer.getWorldLocation() : null;
+        if (pos == null) return;
+
+        for (Map.Entry<Integer, SandwichSpawn> entry : sandwichRushSpawns.entrySet())
+        {
+            if (!entry.getValue().point.equals(pos)) continue;
+            int spawnId = entry.getKey();
+            if (!sandwichCollectSubmitted.add(spawnId)) continue; // already reported, awaiting the echo
+            collectSandwichItem(spawnId, pos);
+        }
+    }
+
+    /** Reports the local player reaching a still-live Sandwich Rush ingredient's tile -- verbatim
+     * same report-then-wait-for-the-echo shape collectCoinRushCoin uses (see that method's own
+     * doc). A failed request (network blip, not a "someone else already got it"/"already holding
+     * that ingredient" 409) clears the guard so checkSandwichRushCollection retries it on a later
+     * tick. */
+    private void collectSandwichItem(int spawnId, WorldPoint pos)
+    {
+        String self = plugin.localRsn();
+        final String gid = plugin.gameId;
+        final String token = plugin.playerToken;
+        if (self == null || gid == null || token == null) { sandwichCollectSubmitted.remove(spawnId); return; }
+
+        plugin.submitAction("Collect Sandwich Rush item", () -> plugin.apiClient.collectSandwichItem(gid, self, token, spawnId, pos.getX(), pos.getY(), pos.getPlane()),
+            e -> sandwichCollectSubmitted.remove(spawnId));
     }
 
     /** Schedules AnnouncementOverlay's "MINIGAME!" banner via scheduleAfterTurnEffects, so it never
@@ -765,6 +893,11 @@ final class MinigamePresentation
         coinRushScores.clear();
         coinRushCollectSubmitted.clear();
         coinRushRoundStartAt = 0;
+        sandwichRushSpawns.clear();
+        sandwichHeld.clear();
+        sandwichCount = 0;
+        sandwichCollectSubmitted.clear();
+        sandwichRushRoundStartAt = 0;
         fishingRoundStartAt = 0;
         minigameTeamColors.clear();
         turfWarsRoundStartAt = 0;
@@ -823,6 +956,18 @@ final class MinigamePresentation
      * no round is active yet or the round hasn't actually become playable (see
      * coinRushRoundStartAt's own doc on when that gets stamped). */
     long getCoinRushEndsAt() { return coinRushRoundStartAt != 0 ? coinRushRoundStartAt + RunePartyPlugin.COIN_RUSH_DURATION_MS : 0; }
+
+    Map<Integer, SandwichSpawn> getSandwichRushSpawns() { return sandwichRushSpawns; }
+    /** The LOCAL player's own currently-held ingredient keys this round -- deliberately self-only,
+     * see this class's own field doc. */
+    Set<String> getSandwichHeld() { return sandwichHeld; }
+    int getSandwichCount() { return sandwichCount; }
+    boolean isSandwichRushActive() { return minigameActive && RunePartyPlugin.SANDWICH_RUSH_KEY.equals(minigameKey); }
+    /** When the current Sandwich Rush round's own clock (see SANDWICH_RUSH_DURATION_MS) runs out
+     * -- 0 if no round is active yet or the round hasn't actually become playable (see
+     * sandwichRushRoundStartAt's own doc on when that gets stamped), same "stamped instant + fixed
+     * duration" shape getCoinRushEndsAt already uses. */
+    long getSandwichRushEndsAt() { return sandwichRushRoundStartAt != 0 ? sandwichRushRoundStartAt + RunePartyPlugin.SANDWICH_RUSH_DURATION_MS : 0; }
 
     boolean isFishingContestActive() { return minigameActive && RunePartyPlugin.FISHING_CONTEST_KEY.equals(minigameKey); }
     /** When the current Fishing Contest round's own local catch-timer should stop -- 0 if no round

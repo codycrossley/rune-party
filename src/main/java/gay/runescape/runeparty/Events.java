@@ -66,6 +66,9 @@ public final class Events
     public static final String PLAYER_READY = "PLAYER_READY";
     public static final String ROLE_ASSIGNED = "ROLE_ASSIGNED";
     public static final String ROLL_BONUS_GRANTED = "ROLL_BONUS_GRANTED";
+    public static final String SANDWICH_RUSH_ITEM_COLLECTED = "SANDWICH_RUSH_ITEM_COLLECTED";
+    public static final String SANDWICH_RUSH_ITEM_SPAWNED = "SANDWICH_RUSH_ITEM_SPAWNED";
+    public static final String STANDARD_COURSE_LOCKED = "STANDARD_COURSE_LOCKED";
     public static final String TELE_BLOCK_APPLIED = "TELE_BLOCK_APPLIED";
     public static final String TILE_EFFECT = "TILE_EFFECT";
     public static final String TILE_MARKED = "TILE_MARKED";
