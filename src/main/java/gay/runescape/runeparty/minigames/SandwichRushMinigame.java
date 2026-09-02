@@ -7,16 +7,11 @@ import java.awt.Polygon;
 import javax.swing.JComponent;
 import javax.swing.JPanel;
 
-/** Client-side counterpart to the server's SandwichRushMinigame (see
- * minigames/sandwich_rush.py) -- a Turf-Wars-shaped arena in which up to 4 floating ingredients
- * (see models/SandwichItemModel) spawn/respawn continuously; walking onto one collects it, and
- * holding one of each completes a sandwich (see RunePartyPlugin#checkSandwichRushCollection/
- * ApiClient#collectSandwichItem). Entirely screen/world-driven -- the round's own instructions/
- * arrival-gather message render center-screen the same way Turf Wars' own do, and the local
- * player's own held-ingredients/sandwich-count status renders via a dedicated corner overlay (see
- * SandwichRushHudOverlay) -- so this has no side-panel presence, same shape
- * FishingContestMinigame's own doc explains. Key must match the server's own SandwichRushMinigame
- * registration exactly, see that file. */
+/** A Turf-Wars-shaped arena in which up to 4 floating ingredients (see models/SandwichItemModel)
+ * spawn/respawn continuously; walking onto one collects it, and holding one of each completes a
+ * sandwich. Entirely screen/world-driven -- instructions and arrival-gather messages render
+ * center-screen, and the local player's held-ingredients/sandwich-count status renders via a
+ * dedicated corner overlay (see SandwichRushHudOverlay) -- so this has no side-panel presence. */
 public class SandwichRushMinigame implements Minigame
 {
     private static final Color BREAD_COLOR = new Color(222, 168, 92);
@@ -38,11 +33,8 @@ public class SandwichRushMinigame implements Minigame
     }
 
     /** A triangle sandwich, sliced diagonally the way the real OSRS item is -- a bread outline
-     * with cheese/tomato/lettuce bands layered inside, reading as "sandwich" at wheel-icon size,
-     * distinct from every other icon on the wheel. Purely programmatic per this interface's own
-     * contract (see WheelEntry's own doc) -- the raster ingredient icons are reserved for
-     * SandwichRushHudOverlay instead, same reasoning FishingContestMinigame's own drawIcon doc
-     * gives for its bowl vs FishingCatchOverlay's raster shrimp/anchovy. */
+     * with cheese/tomato/lettuce bands layered inside. Purely programmatic -- the raster ingredient
+     * icons are reserved for SandwichRushHudOverlay instead. */
     @Override
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
@@ -81,8 +73,7 @@ public class SandwichRushMinigame implements Minigame
         return new Color(c.getRed(), c.getGreen(), c.getBlue(), a);
     }
 
-    /** Never actually called -- see hasSidePanelPresence, same "minimal rather than unreachable"
-     * shape FishingContestMinigame's own doc explains. */
+    /** Never actually called -- see hasSidePanelPresence. */
     @Override
     public JComponent createControlPanel(RunePartyPlugin plugin)
     {

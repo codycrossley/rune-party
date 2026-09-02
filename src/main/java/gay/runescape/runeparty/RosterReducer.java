@@ -17,19 +17,15 @@ public class RosterReducer
     private final ConcurrentHashMap<String, Integer> coinsByPlayer = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Integer> goldenGnomeCountByPlayer = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Map<String, Integer>> itemsByPlayer = new ConcurrentHashMap<>(); // itemKey -> count held
-    // How many turns this player still owes skipping, from Tele Block(s) landed on them -- see
-    // Events.TELE_BLOCK_APPLIED/TURN_SKIPPED below. Unlike coinsByPlayer/goldenGnomeCountByPlayer,
-    // this has no counterpart in ApiClient.RosterPlayerOut/the roster REST snapshot yet (see
-    // syncFromRoster/loadSnapshot) -- a client that resyncs via that snapshot rather than replaying
-    // the full event log would briefly show 0 here for an already-stacked player until the next
-    // TELE_BLOCK_APPLIED/TURN_SKIPPED arrives. Purely cosmetic gap (the server's own enforcement in
-    // _start_next_eligible_turn never reads this client-side copy), left as a known V1 gap rather
-    // than plumbing a new roster-endpoint field for it.
+    // How many turns this player still owes skipping, from Tele Block(s) landed on them. Unlike
+    // coinsByPlayer/goldenGnomeCountByPlayer, this has no counterpart in the roster REST snapshot
+    // yet -- a client that resyncs via that snapshot rather than replaying the full event log would
+    // briefly show 0 here for an already-stacked player until the next TELE_BLOCK_APPLIED/
+    // TURN_SKIPPED arrives. Purely cosmetic gap, left as a known V1 gap.
     private final ConcurrentHashMap<String, Integer> teleblockedByPlayer = new ConcurrentHashMap<>();
-    // Canonical keys of players currently owed a Home Teleport arrival bonus -- see
-    // Events.HOME_TELEPORT_ARMED/HOME_TELEPORT_ARRIVED below. Not threaded through RosterEntry/
-    // snapshot() the way teleblockedByPlayer is -- nothing needs to *display* this per player, it's
-    // purely read by RunePartyPlugin's own onGameTick to decide whether to auto-fire
+    // Canonical keys of players currently owed a Home Teleport arrival bonus. Not threaded through
+    // RosterEntry/snapshot() the way teleblockedByPlayer is -- nothing needs to display this per
+    // player, it's purely read by RunePartyPlugin's own onGameTick to decide whether to auto-fire
     // confirmHomeTeleportArrival for the local player (see isHomeTeleportPending, the only reader).
     private final Set<String> homeTeleportPendingByPlayer = ConcurrentHashMap.newKeySet();
 
@@ -39,12 +35,10 @@ public class RosterReducer
         public final RunePartyRole role;
         public final boolean online;
         public final String number;
-        /** This player's host-chosen seat color while a PLAYER (see RunePartyColor#forNumber and
-         * RunePartyPlugin#addToGameMenuEntry/RunePartyPanel#buildAddToGamePopup, the "Add to Game"
-         * submenus that let the host pick it) -- blank once removed, freeing that color for a new
-         * player (see app.py's PLAYER_LEFT handling). Unlike {@link #number} (live turn order,
-         * always recomputed), this is genuinely per-instance state carried on the ROLE_ASSIGNED
-         * event itself, not derived. */
+        /** This player's host-chosen seat color while a PLAYER (see RunePartyColor#forNumber) --
+         * blank once removed, freeing that color for a new player. Unlike {@link #number} (live
+         * turn order, always recomputed), this is genuinely per-instance state carried on the
+         * ROLE_ASSIGNED event itself, not derived. */
         public final String colorNumber;
         public final boolean joined;
         public final int coins;
@@ -101,11 +95,9 @@ public class RosterReducer
 
     /** Authoritative resync against the server's own roster (unlike apply(), which only folds
      * incremental events) -- upserts every field including role and roster membership, so it can
-     * actually repair drift left behind by an incremental apply(), e.g. resurrecting a row
-     * PLAYER_LEFT once deleted outright. Never removes a player who's since dropped out of the
-     * server's response -- the server's own roster is append-only for the life of a game (see
-     * app.py's PLAYER_LEFT handling, which demotes rather than deletes), so there's nothing to
-     * prune here. */
+     * repair drift left behind by an incremental apply(). Never removes a player who's since
+     * dropped out of the server's response -- the server's own roster is append-only for the life
+     * of a game, so there's nothing to prune here. */
     public void syncFromRoster(List<ApiClient.RosterPlayerOut> players)
     {
         if (players == null) return;
@@ -135,8 +127,7 @@ public class RosterReducer
 
     /** Every roster entry that's actually seated and playing right now -- role == PLAYER and
      * joined == true -- unsorted (callers each want a different order, see their own .sort()
-     * calls). Collapses the identical filter loop over snapshot() repeated at 8 call sites across
-     * RunePartyPlugin/AnnouncementOverlay/StatsOverlay/RunePartyMapOverlay. */
+     * calls). */
     public List<RosterEntry> seatedPlayers()
     {
         List<RosterEntry> out = new ArrayList<>();
@@ -242,16 +233,12 @@ public class RosterReducer
             case Events.PLAYER_LEFT:
             {
                 // Demoted to SPECTATOR, not deleted -- matches the server's own PLAYER_LEFT
-                // handling (see _apply_roster_event in app.py), which deliberately keeps the
-                // player's dict entry so join_order survives a later re-add via assignRole (their
-                // turn-order slot stays stable relative to everyone else's, even though the actual
-                // "number" is always recomputed fresh). Deleting the row here (the old behavior)
-                // meant a departed player could vanish from this client's roster entirely, with
-                // nothing to bring them back except a full syncFromRoster -- see that method's own
-                // doc. numberByPlayer is cleared since their old turn-order slot is now stale;
-                // colorNumberByPlayer is also cleared -- removing a player frees their seat color
-                // for a new player (see app.py's own PLAYER_LEFT handling), rather than the old
-                // behavior of preserving it for an eventual return.
+                // handling, which keeps the player's entry so a later re-add via assignRole isn't
+                // starting from nothing. Deleting the row here would mean a departed player could
+                // vanish from this client's roster entirely, with nothing to bring them back
+                // except a full syncFromRoster. numberByPlayer is cleared since their old
+                // turn-order slot is now stale; colorNumberByPlayer is also cleared -- removing a
+                // player frees their seat color for a new player.
                 String playerRaw = Json.requiredStr(e.payload, type, "player");
                 if (playerRaw == null) return;
                 String key = canonicalKey(playerRaw);
@@ -276,12 +263,10 @@ public class RosterReducer
             case Events.GOLDEN_GNOME_LOST:
             {
                 // Both carry the exact same {player, goldenGnomeCount} shape -- a purchase's own
-                // +1 and a Jad smash penalty's own -1 (see app.py's golden_gnome_lost) both just
-                // overwrite with the new running total, identically. Without this case, a lost
-                // Golden Gnome would decrement the real server-side count (see
-                // GoldenGnomePresentation's own popup, which *does* handle both) while the
-                // roster/stats overlay kept showing the stale pre-loss total forever, since nothing
-                // else here ever re-applies GOLDEN_GNOME_LOST.
+                // +1 and a Jad smash penalty's own -1 both just overwrite with the new running
+                // total, identically. Without this case, a lost Golden Gnome would decrement the
+                // real server-side count while the roster/stats overlay kept showing the stale
+                // pre-loss total forever.
                 String playerRaw = Json.requiredStr(e.payload, type, "player");
                 if (playerRaw == null) return;
                 String key = canonicalKey(playerRaw);
@@ -314,9 +299,8 @@ public class RosterReducer
             }
             case Events.TELE_BLOCK_APPLIED:
             {
-                // `player` is who got blocked (the target), not who cast it -- see events.py's own
-                // doc. `stacks` is the new total, not a delta, same "real total, not a delta" shape
-                // COINS_CHANGED/GOLDEN_GNOME_PURCHASED already carry.
+                // `player` is who got blocked (the target), not who cast it. `stacks` is the new
+                // total, not a delta, same shape COINS_CHANGED/GOLDEN_GNOME_PURCHASED already carry.
                 String playerRaw = Json.requiredStr(e.payload, type, "player");
                 if (playerRaw == null) return;
                 String key = canonicalKey(playerRaw);

@@ -4,14 +4,9 @@ import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.Polygon;
 
-/** Client-side counterpart to the server's CoinTrapItem (see items/coin_trap.py) -- placed on a
- * tile rather than resolved instantly, see requiresPlacement/RunePartyPlugin#beginItemPlacement.
- * No bundled icon asset (unlike EnergyPotionItem's PNG), so the wheel/inventory icon here is
- * procedural like PlaceholderItem's -- a dark jaw-trap glyph with a gold coin caught in it, distinct
- * enough at wheel-icon size to read as "trap" rather than a generic placeholder. The actual
- * in-world model once placed is object 8972 ("Net trap"), rendered by TileOverlay#
- * updateCoinTrapModels, not this icon. Key must match the server's own CoinTrapItem registration
- * exactly, see that file. */
+/** Placed on a tile rather than resolved instantly (see requiresPlacement). No bundled icon asset,
+ * so the wheel/inventory icon is procedural -- a dark jaw-trap glyph with a gold coin caught in it.
+ * The in-world model once placed is rendered separately by TileOverlay. */
 public class CoinTrapItem implements Item
 {
     private static final Color JAW_COLOR = new Color(90, 60, 40);

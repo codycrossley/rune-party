@@ -61,12 +61,10 @@ import net.runelite.client.util.Text;
 import okhttp3.OkHttpClient;
 import lombok.extern.slf4j.Slf4j;
 
-/** Entry point and state hub for Rune Party -- mirrors GnomeballPlugin's role in the sibling
- * gnomeball repo (see that repo's README for the architecture this is modeled on). The turn
- * engine talks to a real server (../rune-party server skeleton) over the same
- * report-then-wait-for-the-echo pattern Gnomeball's client uses: action methods below only ever
- * *request* something (roll, arrival, purchase, minigame result); the authoritative outcome
- * always comes back through handleEvent(). */
+/** Entry point and state hub for Rune Party. The turn engine talks to a real server over a
+ * report-then-wait-for-the-echo pattern: action methods below only ever request something (roll,
+ * arrival, purchase, minigame result); the authoritative outcome always comes back through
+ * handleEvent(). */
 @Slf4j
 @PluginDescriptor(name = "Rune Party")
 public class RunePartyPlugin extends Plugin
@@ -75,9 +73,8 @@ public class RunePartyPlugin extends Plugin
      * distinct color and the host never has to decide who shares one. */
     public static final int MAX_PLAYERS = 8;
 
-    /** How long AnnouncementOverlay's "<player>'s Turn" banner stays up after TURN_STARTED -- a
-     * purely client-side timer (like Gnomeball's goal-flash duration), not anything the server
-     * tracks. */
+    /** How long AnnouncementOverlay's "<player>'s Turn" banner stays up after TURN_STARTED --
+     * purely a client-side timer, not anything the server tracks. */
     public static final long TURN_ANNOUNCE_DURATION_MS = 2500;
 
     /** How long AnnouncementOverlay's "Welcome to Rune Party Showdown" title card stays up after
@@ -173,11 +170,11 @@ public class RunePartyPlugin extends Plugin
      * which delays arming minigameCountdownBannerUntil by this long. */
     public static final long MINIGAME_COUNTDOWN_START_DELAY_MS = 1500;
 
-    /** Client-side key for the Coin Rush mini-game -- must match the server's own registration
-     * (see minigames/coin_rush.py), the same "key" MINIGAME_STARTED's payload carries for every
-     * mini-game. Compared directly against minigameKey wherever coin-rush-specific behavior
-     * (spawn tracking, the live scoreboard, the auto-collect check in onGameTick) needs to gate on
-     * "is this round actually Coin Rush," rather than going through Minigames#get. */
+    /** Client-side key for the Coin Rush mini-game -- must match the server's own registration,
+     * the same "key" MINIGAME_STARTED's payload carries for every mini-game. Compared directly
+     * against minigameKey wherever coin-rush-specific behavior (spawn tracking, the live
+     * scoreboard, the auto-collect check in onGameTick) needs to gate on "is this round actually
+     * Coin Rush," rather than going through Minigames#get. */
     public static final String COIN_RUSH_KEY = "coin-rush";
 
     /** Wall-clock length of one Coin Rush round, measured from the moment the round actually
@@ -186,8 +183,7 @@ public class RunePartyPlugin extends Plugin
      * via MINIGAME_ENDED regardless of what this says. */
     public static final long COIN_RUSH_DURATION_MS = 30000;
 
-    /** Coins a single Coin Rush pickup is worth -- must match the server's own REWARD_PER_COIN
-     * (minigames/coin_rush.py).
+    /** Coins a single Coin Rush pickup is worth -- must match the server's own reward-per-coin.
      * The server never actually credits this to the player's real balance until the round ends (a
      * single lump sum, see the "coin_rush" COINS_CHANGED case) -- this constant only exists so the
      * mid-round "+2" flash (see COIN_RUSH_COLLECTED handling) has a number to show immediately,
@@ -201,75 +197,63 @@ public class RunePartyPlugin extends Plugin
      * long enough to read "+2" before fading. */
     public static final long COIN_RUSH_BUMP_POPUP_DURATION_MS = 1300;
 
-    /** Client-side key for the True or False mini-game -- must match the server's own registration
-     * (see minigames/true_or_false.py), same role COIN_RUSH_KEY plays for Coin Rush. */
+    /** Client-side key for the True or False mini-game -- must match the server's own
+     * registration, same role COIN_RUSH_KEY plays for Coin Rush. */
     public static final String TRUE_OR_FALSE_KEY = "true-or-false";
 
-    /** Client-side key for the Arena mini-game -- must match the server's own registration (see
-     * minigames/arena.py), same role COIN_RUSH_KEY/TRUE_OR_FALSE_KEY play for their own mini-games.
-     * Used by AnnouncementOverlay to swap the generic "3...2...1...BEGIN!" countdown for Arena's
-     * own "All players must stand within the arena!" gather message -- see
-     * renderArenaGatherMessage's own doc for why Arena can't use the generic countdown at all. */
+    /** Client-side key for the Arena mini-game -- must match the server's own registration, same
+     * role COIN_RUSH_KEY/TRUE_OR_FALSE_KEY play for their own mini-games. Used by
+     * AnnouncementOverlay to swap the generic "3...2...1...BEGIN!" countdown for Arena's own "All
+     * players must stand within the arena!" gather message. */
     public static final String ARENA_KEY = "arena";
 
     /** Client-side key for the Fishing Contest mini-game -- must match the server's own
-     * registration (see minigames/fishing_contest.py), same role ARENA_KEY/COIN_RUSH_KEY play for
-     * their own mini-games. */
+     * registration, same role ARENA_KEY/COIN_RUSH_KEY play for their own mini-games. */
     public static final String FISHING_CONTEST_KEY = "fishing-contest";
 
     /** How long a Fishing Contest round's own local catch loop runs before the local player's
-     * final tally gets submitted -- must match the server's own FISHING_DURATION_SECONDS
-     * (minigames/fishing_contest.py). Measured from MINIGAME_ROUND_BEGIN (see
-     * MinigamePresentation#fishingRoundStartAt/getFishingContestEndsAt), not from whenever an
-     * individual player happens to right-click the pond -- everyone's local timer runs out at the
-     * same moment, matching what the server's own bounded wait (submit-fishing-catch) expects. */
+     * final tally gets submitted -- must match the server's own fishing duration. Measured from
+     * MINIGAME_ROUND_BEGIN, not from whenever an individual player happens to right-click the pond
+     * -- everyone's local timer runs out at the same moment, matching what the server's own
+     * bounded wait expects. */
     public static final long FISHING_CONTEST_DURATION_MS = 30000;
 
-    /** Client-side key for the Turf Wars mini-game -- must match the server's own registration
-     * (see minigames/turf_wars.py), same role ARENA_KEY/FISHING_CONTEST_KEY play for their own
-     * mini-games. */
+    /** Client-side key for the Turf Wars mini-game -- must match the server's own registration,
+     * same role ARENA_KEY/FISHING_CONTEST_KEY play for their own mini-games. */
     public static final String TURF_WARS_KEY = "turf-wars";
 
-    /** How long a whole Turf Wars round lasts -- must match the server's own ROUND_SECONDS
-     * (minigames/turf_wars.py). Measured from MINIGAME_ROUND_BEGIN (see MinigamePresentation#
-     * turfWarsRoundStartAt/getTurfWarsEndsAt), same "stamped instant + fixed duration" shape
+    /** How long a whole Turf Wars round lasts -- must match the server's own round length.
+     * Measured from MINIGAME_ROUND_BEGIN, same "stamped instant + fixed duration" shape
      * COIN_RUSH_DURATION_MS already uses. */
     public static final long TURF_WARS_ROUND_MS = 60000;
 
     /** Turf Wars' two fixed team colors, used for an even seated-PLAYER count's round (an odd
-     * count instead gives every player their own individual, existing RunePartyColor seat color --
-     * see minigames/turf_wars.py's own doc) -- same hex the server's own TEAM_A_COLOR/TEAM_B_COLOR
-     * (minigames/turf_wars.py) pushes as each tile's own color, so a tile's server-driven fill and
+     * count instead gives every player their own individual, existing RunePartyColor seat color)
+     * -- same hex the server pushes as each tile's own color, so a tile's server-driven fill and
      * this client's own scoreboard/banner always agree. Local constants rather than reusing
-     * RunePartyColor for the 2-team case -- that enum is a per-seat roster palette (one color per
-     * player, individually reassignable), not a fixed team identity, same reasoning ArenaMinigame's
-     * own local ARENA_RED/ARENA_GREEN constants already follow -- deliberately chosen to be
-     * visually distinct from every RunePartyColor entry too, so a team-recolored player never
-     * reads as "that's just their normal seat color". */
+     * RunePartyColor for the 2-team case -- that enum is a per-seat roster palette, not a fixed
+     * team identity -- deliberately chosen to be visually distinct from every RunePartyColor
+     * entry too, so a team-recolored player never reads as "that's just their normal seat color". */
     public static final Color TEAM_A_COLOR = new Color(0xE6, 0x1E, 0x96);
     public static final Color TEAM_B_COLOR = new Color(0x00, 0xAA, 0xAA);
 
-    /** Client-side key for the Sandwich Rush mini-game -- must match the server's own registration
-     * (see minigames/sandwich_rush.py), same role TURF_WARS_KEY/COIN_RUSH_KEY play for their own
-     * mini-games. Used by AnnouncementOverlay to swap the generic "3...2...1...BEGIN!" countdown
-     * for the same arrival-gated "All players must stand within the arena!" gather message Arena/
-     * Turf Wars already use -- Sandwich Rush's own round is arrival-gated the identical way. */
+    /** Client-side key for the Sandwich Rush mini-game -- must match the server's own
+     * registration, same role TURF_WARS_KEY/COIN_RUSH_KEY play for their own mini-games. Used by
+     * AnnouncementOverlay to swap the generic "3...2...1...BEGIN!" countdown for the same
+     * arrival-gated "All players must stand within the arena!" gather message Arena/Turf Wars
+     * already use. */
     public static final String SANDWICH_RUSH_KEY = "sandwich-rush";
 
-    /** How long a whole Sandwich Rush round lasts -- must match the server's own ROUND_SECONDS
-     * (minigames/sandwich_rush.py). Measured from MINIGAME_ROUND_BEGIN (see MinigamePresentation#
-     * sandwichRushRoundStartAt/getSandwichRushEndsAt), same "stamped instant + fixed duration"
-     * shape COIN_RUSH_DURATION_MS/TURF_WARS_ROUND_MS already use. */
+    /** How long a whole Sandwich Rush round lasts -- must match the server's own round length.
+     * Measured from MINIGAME_ROUND_BEGIN, same "stamped instant + fixed duration" shape
+     * COIN_RUSH_DURATION_MS/TURF_WARS_ROUND_MS already use. */
     public static final long SANDWICH_RUSH_DURATION_MS = 60000;
 
-    /** One entry per Sandwich Rush ingredient key (must match the server's own INGREDIENTS list,
-     * minigames/sandwich_rush.py) -- the real 3D model id models/SandwichItemModel spawns for it
-     * (client.loadModel(...), same "just a raw model id" call every other spawned object in this
-     * codebase already uses) paired with the raster icon SandwichRushHudOverlay draws for it (the
-     * exact filenames already added under minigame_resources/, same convention FishingCatchOverlay
-     * already uses for raw_shrimps.png/raw_anchovies.png). LinkedHashMap so both consumers iterate
-     * in one fixed, deliberate order (tomato, cheese, cabbage, bread) rather than whatever order a
-     * plain HashMap happens to produce. */
+    /** One entry per Sandwich Rush ingredient key (must match the server's own ingredient list) --
+     * the real 3D model id models/SandwichItemModel spawns for it, paired with the raster icon
+     * SandwichRushHudOverlay draws for it. LinkedHashMap so both consumers iterate in one fixed,
+     * deliberate order (tomato, cheese, cabbage, bread) rather than whatever order a plain
+     * HashMap happens to produce. */
     public static final Map<String, Integer> SANDWICH_RUSH_ITEM_MODEL_IDS;
     public static final Map<String, String> SANDWICH_RUSH_ITEM_ICON_RESOURCES;
     static
@@ -358,10 +342,9 @@ public class RunePartyPlugin extends Plugin
     public static final long GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS = 2600;
 
     /** How long AnnouncementOverlay's Jad encounter countdown counts down from -- purely cosmetic,
-     * loosely paired with the server's own JAD_BOW_WINDOW_SECONDS (app.py) the same "close enough,
-     * not protocol-coupled" way every other client/server cosmetic-vs-real timing pair in this
-     * codebase already is (see ARCHITECTURE_REVIEW.md's X2(b)) -- the server's own clock is what
-     * actually enforces the window, this is just what the countdown number displays. */
+     * loosely paired with the server's own bow window, not protocol-coupled to it -- the server's
+     * own clock is what actually enforces the window, this is just what the countdown number
+     * displays. */
     public static final long JAD_BOW_WINDOW_MS = 5000;
 
     // "lordmagmus_smash" -- played once on the Jad model when JAD_SMASH_TRIGGERED lands (see
@@ -394,13 +377,12 @@ public class RunePartyPlugin extends Plugin
     public static final long JAD_BOW_ACKNOWLEDGE_IDLE_HOLD_MS = 3000;
 
     // Flat coin toll bowing costs (see AnnouncementOverlay's "Your loyalty will cost you..." banner
-    // and the COINS_CHANGED reason="jad_bow" popup) -- must match app.py's own JAD_BOW_COIN_COST.
-    // Only needed client-side as display text: the banner announces the *nominal* cost before the
-    // real COINS_CHANGED (already floored at 0 server-side by apply_coins_delta, same as any other
-    // debit) has even arrived, so unlike JAD_SMASH's own chat line -- which just echoes back
-    // whatever real delta the event already carried -- there's no event payload to read this from
-    // yet at the point the banner needs it. Loosely paired with the server constant, not
-    // protocol-coupled, same "close enough" idiom JAD_BOW_WINDOW_MS's own doc explains.
+    // and the COINS_CHANGED reason="jad_bow" popup) -- must match the server's own bow coin cost.
+    // Only needed client-side as display text: the banner announces the nominal cost before the
+    // real COINS_CHANGED (already floored at 0 server-side, same as any other debit) has even
+    // arrived, so unlike JAD_SMASH's own chat line -- which just echoes back whatever real delta
+    // the event already carried -- there's no event payload to read this from yet at the point the
+    // banner needs it. Loosely paired with the server constant, not protocol-coupled.
     public static final int JAD_BOW_COIN_COST = 15;
 
     /** How long AnnouncementOverlay's Jad outcome banner stays up -- "Your loyalty will cost you N
@@ -573,10 +555,10 @@ public class RunePartyPlugin extends Plugin
     ApiClient apiClient; // package-private: presenters (MinigamePresentation) issue their own requests
     private EventSocket eventSocket;
 
-    // Per-feature presenter objects (see ARCHITECTURE_REVIEW.md's C1 finding, step 2) -- each owns
-    // its own fields, folds its own event types via apply()/a dedicated method, and clears itself
-    // via reset(). Constructed once in startUp() (same convention as apiClient above), not
-    // reconstructed per game -- resetState() calls each one's reset() instead.
+    // Per-feature presenter objects -- each owns its own fields, folds its own event types via
+    // apply()/a dedicated method, and clears itself via reset(). Constructed once in startUp()
+    // (same convention as apiClient above), not reconstructed per game -- resetState() calls each
+    // one's reset() instead.
     private GoldenGnomePresentation goldenGnomePresentation;
     private CeremonyPresentation ceremonyPresentation;
     private ItemPresentation itemPresentation;
@@ -639,11 +621,9 @@ public class RunePartyPlugin extends Plugin
     private volatile String joinCode = null;
     private volatile String hostRsn = null;
     // Non-null only once this game has been permanently locked to a Standard Course (see
-    // RunePartyPlugin#createGameFromHardcodedCourse/ApiClient#lockStandardCourse and the
-    // STANDARD_COURSE_LOCKED handling below) -- HardcodedCourse#key, not its display name. Once
-    // set, it never goes back to null for the life of this game (the server itself never
-    // reverses a lock, see app.py's own lock_standard_course). Gates course-building tool
-    // visibility in RunePartyPanel (see courseToolsPanel's own isStandardCourseLocked() check).
+    // createGameFromHardcodedCourse/ApiClient#lockStandardCourse and the STANDARD_COURSE_LOCKED
+    // handling below) -- HardcodedCourse#key, not its display name. Once set, it never goes back
+    // to null for the life of this game. Gates course-building tool visibility in RunePartyPanel.
     private volatile String standardCourseKey = null;
 
     // Persisted copy of the above (minus hostRsn, which the server always hands back fresh), so a
@@ -727,9 +707,9 @@ public class RunePartyPlugin extends Plugin
     // cleared unconditionally in submitAction's own finallyAction the instant each call resolves,
     // not selectively on success/failure. See onGameTick's own reportMinigamePosition check.
     private final AtomicBoolean minigamePositionReportInFlight = new AtomicBoolean(false);
-    // ---- Fishing Contest (entirely client-local until the one final submission -- see
-    // minigames/fishing_contest.py's own doc for why catches are never reported per-catch). Every
-    // completed Headbang emote near the Fish bowl rolls one catch (see onAnimationChanged's
+    // ---- Fishing Contest (entirely client-local until the one final submission -- catches are
+    // never reported per-catch). Every completed Headbang emote near the Fish bowl rolls one
+    // catch (see onAnimationChanged's
     // EMOTE_DANCE_HEADBANG branch / performFishingCatchRoll) -- there's no "start fishing" state,
     // catching is just however many Headbangs land within a round. shrimpCount/anchovyCount are
     // owned solely by the client thread (performFishingCatchRoll, onGameTick's submission check),
@@ -743,7 +723,7 @@ public class RunePartyPlugin extends Plugin
     private int anchovyCount = 0;
     // Real state, applied catch-up or not: whether the current turn's player has already spent
     // their one-item-per-turn allowance -- reset on every TURN_STARTED, set by ITEM_USED. Mirrors
-    // the server's own itemUsedThisTurn (see app.py's use_item).
+    // the server's own itemUsedThisTurn.
     private volatile boolean itemUsedThisTurn = false;
     // Whether the current turn's player has already made a Golden Gnome purchase attempt this
     // turn -- reset on every TURN_STARTED, same shape as itemUsedThisTurn, but set the instant an
@@ -784,10 +764,10 @@ public class RunePartyPlugin extends Plugin
     private int boardViewSavedPitch;
     private int boardViewSavedYaw;
     private int boardViewSavedZoom;
-    // Mini-game (selection/ready-check/countdown), Coin Rush, and True or False state now lives in
-    // MinigamePresentation (see ARCHITECTURE_REVIEW.md's C1 finding, step 2) -- minigamePresentation
-    // field is declared with the other presenters above, constructed in startUp(). Item wheel/cap/
-    // used-announcement and Coin Trap trigger state likewise now lives in ItemPresentation.
+    // Mini-game (selection/ready-check/countdown), Coin Rush, and True or False state lives in
+    // MinigamePresentation -- minigamePresentation field is declared with the other presenters
+    // above, constructed in startUp(). Item wheel/cap/used-announcement and Coin Trap trigger
+    // state likewise lives in ItemPresentation.
     // Host-set at start (see GAME_STARTED's maxRounds) and incremented once per completed round
     // (see MINIGAME_ENDED) -- together these are what StatsOverlay's "ROUND x/y" line reads via
     // getCurrentRound/getMaxRounds. 0 until GAME_STARTED actually lands.
@@ -820,48 +800,38 @@ public class RunePartyPlugin extends Plugin
     // ---- welcome title card (client-side, local-player-only -- see triggerWelcomeBanner) ----
     private final TimedBanner<Void> welcomeBanner = new TimedBanner<>();
 
-    // minigameBanner/roundCompleteBanner/minigameRewardsBanner now live on MinigamePresentation,
-    // along with the mini-game fields/handleEvent cases/getters they back -- see
-    // ARCHITECTURE_REVIEW.md's C1 finding, step 2.
+    // minigameBanner/roundCompleteBanner/minigameRewardsBanner live on MinigamePresentation, along
+    // with the mini-game fields/handleEvent cases/getters they back.
 
     // ---- game-start banner (server-driven, everyone sees it -- see GAME_STARTED handling) ----
     private final TimedBanner<Void> gameStartBanner = new TimedBanner<>();
 
-    // MinigameReward, TrueOrFalseResult, and TimedBanner<T> now live in their own top-level files
-    // (same package) -- hoisted out so the new presenter classes (see ARCHITECTURE_REVIEW.md's C1
-    // finding, step 2) can reference them without a qualified RunePartyPlugin.X name. Every
-    // existing field declaration/getter here keeps compiling unchanged, same package + same simple
-    // name.
+    // MinigameReward, TrueOrFalseResult, and TimedBanner<T> live in their own top-level files
+    // (same package) so the presenter classes can reference them without a qualified
+    // RunePartyPlugin.X name.
 
-    // ItemSpinnerPayload/ItemCapBlockedPayload/ItemUsedAnnouncePayload now live nested inside
-    // ItemPresentation, along with the fields/handleEvent cases/getters they back -- see
-    // ARCHITECTURE_REVIEW.md's C1 finding, step 2.
+    // ItemSpinnerPayload/ItemCapBlockedPayload/ItemUsedAnnouncePayload live nested inside
+    // ItemPresentation, along with the fields/handleEvent cases/getters they back.
 
-    // GoldenGnomeOutcomePayload/GoldenGnomePopupPayload now live nested inside
-    // GoldenGnomePresentation, along with the fields/handleEvent cases/getters they back -- see
-    // ARCHITECTURE_REVIEW.md's C1 finding, step 2.
+    // GoldenGnomeOutcomePayload/GoldenGnomePopupPayload live nested inside GoldenGnomePresentation,
+    // along with the fields/handleEvent cases/getters they back.
 
-    // PlaceRevealPayload now lives nested inside CeremonyPresentation, along with the end-game
-    // ceremony fields/GAME_ENDED handling/getters it backs -- see ARCHITECTURE_REVIEW.md's C1
-    // finding, step 2.
+    // PlaceRevealPayload lives nested inside CeremonyPresentation, along with the end-game
+    // ceremony fields/GAME_ENDED handling/getters it backs.
 
-    // Golden Gnome offer/outcome/popup/relocation state now lives in GoldenGnomePresentation (see
-    // ARCHITECTURE_REVIEW.md's C1 finding, step 2) -- goldenGnomePresentation field is declared
-    // with the other presenters below, constructed in startUp().
+    // Golden Gnome offer/outcome/popup/relocation state lives in GoldenGnomePresentation --
+    // goldenGnomePresentation field is declared with the other presenters below, constructed in
+    // startUp().
 
     // ---- coin popup (client-side timer -- see PlayerOverlay#drawCoinPopup). Keyed per player
     // (player_lower -> an ordered queue of not-yet-expired popups for them) rather than one global
-    // slot, so two different players' coins changing out of the same landing -- see
-    // COIN_TRAP_TRIGGERED's paired COINS_CHANGED events, victim and owner both -- can show at once
-    // instead of the second clobbering the first before it's even rendered a frame. A *queue*, not
-    // a single latest-value slot, for the same reason within one player: a Coin Trap steal's own
+    // slot, so two different players' coins changing out of the same landing can show at once
+    // instead of the second clobbering the first before it's even rendered a frame. A queue, not a
+    // single latest-value slot, for the same reason within one player: a Coin Trap steal's own
     // COINS_CHANGED is immediately followed by the underlying tile's own standard-tile payout for
-    // that same victim (see _resolve_tile_effect_and_advance's steal-then-fall-through-to-normal-
-    // effect shape) -- two popups for one player, back-to-back, both needing their own full
-    // display window. A single-slot design here previously meant the second one's arrival
-    // overwrote the first in the map before it had rendered even one frame, silently discarding it
-    // -- getCoinPopup below instead peeks the head of this queue and only advances past an entry
-    // once its own `until` has actually passed, so every queued popup gets its turn. See the
+    // that same victim -- two popups for one player, back-to-back, both needing their own full
+    // display window. getCoinPopup below peeks the head of this queue and only advances past an
+    // entry once its own `until` has actually passed, so every queued popup gets its turn. See the
     // COINS_CHANGED handler for how a new popup's start gets computed against the queue's current
     // tail (queuing behind it) rather than against "now". ----
     private final Map<String, Deque<CoinPopup>> coinPopups = new ConcurrentHashMap<>();
@@ -1025,25 +995,16 @@ public class RunePartyPlugin extends Plugin
 
     /** Toggles between the normal player-driven camera and a steep, near-straight-down "board
      * view" -- see RunePartyPanel's "View Board" button, the only caller. Only ever adjusts
-     * pitch/yaw *target* (Client#setCameraPitchTarget/setCameraYawTarget) plus zoom
-     * (Client#setVarcIntValue) and the pitch relaxer that lifts the vanilla ~383-unit pitch cap
-     * (Client#setCameraPitchRelaxerEnabled -- the exact mechanism RuneLite's own bundled Camera
-     * plugin uses to let a player manually drag past that same cap) -- all three live-tested and
-     * confirmed, see BOARD_VIEW_PITCH/YAW/ZOOM's own docs. Deliberately does NOT touch
-     * Client#setCameraMode or Client#setCameraFocalPointX/Y/Z -- see the abandoned-camera-detach
-     * note next to VARC_CAMERA_ZOOM for why. That means this pans/tilts to look straight down from
-     * wherever the local player already stands (the camera's normal focal point, left untouched)
-     * rather than pinning over
-     * the board's own true center regardless of player position -- close enough for a course
-     * that's normally small and directly underfoot during a turn, but not literally "locked to the
-     * board" if the player wanders off it.
+     * pitch/yaw target plus zoom and the pitch relaxer that lifts the vanilla pitch cap -- all
+     * live-tested and confirmed, see BOARD_VIEW_PITCH/YAW/ZOOM's own docs. Deliberately does not
+     * touch the camera mode or focal point, so this pans/tilts to look straight down from wherever
+     * the local player already stands rather than pinning over the board's own true center --
+     * close enough for a course that's normally small and directly underfoot during a turn.
      * <p>
-     * The pitch/yaw *target* setters are believed (from their own naming/getter pairing, not
-     * independently verified) to write the same internal value the game's native mouse-drag
+     * The pitch/yaw target setters write the same internal value the game's native mouse-drag
      * control already targets and eases toward every frame on its own, so this only ever needs to
-     * set that target once per toggle rather than animate anything itself -- and the player's own
-     * mouse can still freely drag away from it at any time even while "board view" is nominally
-     * on, since nothing here disables normal input. */
+     * set that target once per toggle -- and the player's own mouse can still freely drag away
+     * from it at any time, since nothing here disables normal input. */
     public void toggleBoardView()
     {
         if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE) return;
@@ -1183,14 +1144,11 @@ public class RunePartyPlugin extends Plugin
         }, e -> addChatMessage("Failed to create game: " + e.getMessage()), this::refreshPanel);
     }
 
-    /** Same as createGame(), but for a hard-coded course's own launcher (see
-     * addHardcodedCourseLauncherMenuEntry) -- creates the game exactly the same way, then commits
-     * that course's whole tile set (including its GOLDEN_GNOME_TILE stacked on START, see
-     * HardcodedCourse's own doc) in one extra mark-tiles call before announcing success, so the
-     * host lands in LOBBY with the course already built rather than an empty one. A third call,
-     * lockStandardCourse, then permanently locks this game to that course -- see
-     * ApiClient#lockStandardCourse's own doc for why this has to be a separate call after
-     * markTiles rather than folded into game creation. */
+    /** Same as createGame(), but for a hard-coded course's own launcher -- creates the game
+     * exactly the same way, then commits that course's whole tile set (including its
+     * GOLDEN_GNOME_TILE stacked on START, see HardcodedCourse's own doc) in one extra mark-tiles
+     * call before announcing success, so the host lands in LOBBY with the course already built. A
+     * third call, lockStandardCourse, then permanently locks this game to that course. */
     public void createGameFromHardcodedCourse(HardcodedCourse course)
     {
         String host = localRsn();
@@ -1311,16 +1269,12 @@ public class RunePartyPlugin extends Plugin
         {
             addChatMessage("Failed to confirm arrival: " + e.getMessage());
             // A definitive 4xx (e.g. 409 "No roll is pending") means the server has already
-            // looked at this exact claim and rejected it -- arrivalSubmitted staying true
-            // deliberately blocks checkPendingArrival from resubmitting the identical claim
-            // every tick forever, which is what used to happen here (this exact call, this
-            // exact 409, once a game tick, spamming the log until something else eventually
-            // changed pendingRoll). The client's own pendingRoll is corrected the normal way
-            // instead -- by the next real TURN_STARTED or DICE_ROLLED event (see handleEvent),
-            // both of which also reset arrivalSubmitted, resyncing to the server's actual
-            // state rather than blindly retrying against it. A genuine transient failure
-            // (a real network-level IOException, or a 5xx server error) is different -- the
-            // claim itself was never actually rejected, so retrying it is still worth doing.
+            // rejected this exact claim -- arrivalSubmitted staying true blocks
+            // checkPendingArrival from resubmitting it every tick forever. The client's own
+            // pendingRoll is corrected the normal way instead -- by the next real TURN_STARTED
+            // or DICE_ROLLED event, which also resets arrivalSubmitted. A genuine transient
+            // failure (a real network-level IOException, or a 5xx) is different -- the claim
+            // itself was never rejected, so retrying it is still worth doing.
             if (!(e instanceof ApiClient.ApiHttpException) || ((ApiClient.ApiHttpException) e).code >= 500)
             {
                 arrivalSubmitted = false; // let the next tick retry
@@ -1352,17 +1306,12 @@ public class RunePartyPlugin extends Plugin
     }
 
     /** Fires the local player's final Fishing Contest tally off to the server -- called exactly
-     * once per round, from onGameTick the moment its own local 30-second timer elapses (see
-     * FISHING_CONTEST_DURATION_MS's own doc). Snapshots shrimpCount/anchovyCount at call time
-     * rather than reading them again inside the lambda -- fishingCatchSubmitted is already true by
-     * the time this runs (see onGameTick, the only caller, which sets it right before calling this
-     * so performFishingCatchRoll can no longer add to either count), but this keeps the submitted
-     * numbers visibly tied to the exact instant the round ended rather than "whatever they happen
-     * to be when the request actually fires." No retry on
-     * failure -- unlike reportMinigamePosition's own every-tick heartbeat, there's no next tick to
-     * supersede a dropped one-shot submission with, but a missed submission just means this player
-     * shows as 0 anchovies (see the server's own submit_fishing_catch/pay_out_top), not a hung
-     * round. */
+     * once per round, from onGameTick the moment its own local 30-second timer elapses. Snapshots
+     * shrimpCount/anchovyCount at call time rather than reading them again inside the lambda, so
+     * the submitted numbers stay tied to the exact instant the round ended. No retry on failure --
+     * unlike reportMinigamePosition's own every-tick heartbeat, there's no next tick to supersede a
+     * dropped one-shot submission with, but a missed submission just means this player shows as 0
+     * anchovies, not a hung round. */
     private void submitFishingCatch()
     {
         String self = localRsn();
@@ -1378,14 +1327,11 @@ public class RunePartyPlugin extends Plugin
     }
 
     /** Reports arrival at the Start tile after using a Home Teleport -- called automatically from
-     * onGameTick once the local player has a pending arrival (see
-     * rosterReducer.isHomeTeleportPending) and is standing on their own tracked position (which a
-     * Home Teleport's own PLAYER_MOVED already set to Start the instant it was used, see
-     * items/home_teleport.py). Same retry-on-transient-failure-only shape as confirmArrival's own
-     * doc explains -- a definitive 4xx means the server's already rejected this exact claim (e.g.
-     * nothing was actually pending, or a stale HOME_TELEPORT_ARRIVED already closed it), so
-     * homeTeleportArrivalSubmitted staying true blocks a tick-every-retry spam; only a genuine
-     * transient failure resets it. */
+     * onGameTick once the local player has a pending arrival and is standing on their own tracked
+     * position (which a Home Teleport's own PLAYER_MOVED already set to Start the instant it was
+     * used). Same retry-on-transient-failure-only shape confirmArrival uses -- a definitive 4xx
+     * means the server's already rejected this exact claim, so homeTeleportArrivalSubmitted
+     * staying true blocks a tick-every-retry spam; only a genuine transient failure resets it. */
     private void confirmHomeTeleportArrival(WorldPoint pos)
     {
         String self = localRsn();
@@ -1404,9 +1350,8 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
-    // checkCoinRushCollection/collectCoinRushCoin now live on MinigamePresentation, along with the
-    // Coin Rush fields/handleEvent cases/getters they back -- see ARCHITECTURE_REVIEW.md's C1
-    // finding, step 2.
+    // checkCoinRushCollection/collectCoinRushCoin live on MinigamePresentation, along with the
+    // Coin Rush fields/handleEvent cases/getters they back.
 
     /** Reports the local player standing on the START tile during the pre-game gathering window
      * (GAME_STARTED fired, currentTurnRsn still null). Called automatically from onGameTick --
@@ -1461,12 +1406,9 @@ public class RunePartyPlugin extends Plugin
 
     /** Answers the current True or False round -- called from onAnimationChanged once the local
      * player's YES ("True")/NO ("False") emote finishes, same finish-gated pattern as bowToJad.
-     * The server never echoes back correctness -- see
-     * TRUE_OR_FALSE_ROUND_ENDED, the only thing that actually reveals it, once every player's had
-     * their full 5 seconds. A 409 here (already answered, or the round already ended before this
-     * landed) is a definitive rejection, not a network hiccup -- see ApiClient#ApiHttpException,
-     * same reasoning confirmArrival's own catch block follows -- so this doesn't retry either way;
-     * the player just missed this one, same as if they'd never emoted at all. */
+     * The server never echoes back correctness -- only TRUE_OR_FALSE_ROUND_ENDED reveals it, once
+     * every player's had their full 5 seconds. A 409 here (already answered, or the round already
+     * ended) is a definitive rejection, not a network hiccup, so this doesn't retry either way. */
     private void answerTrueOrFalse(boolean answer)
     {
         String self = localRsn();
@@ -1503,11 +1445,9 @@ public class RunePartyPlugin extends Plugin
     }
 
     /** Arms a requires_placement item (see Item#requiresPlacement) -- called from RunePartyPanel's
-     * item buttons instead of useItem() for one of these, since there's no server call to make
-     * yet: it's client-local until the player actually right-clicks a candidate tile's "Place
-     * &lt;item&gt;" entry (see onMenuEntryAdded/placeCoinTrapAt). Refuses silently (same "not
-     * actually your turn to act right now" guard useItem itself relies on the server to enforce,
-     * just checked locally here first) rather than arming a placement that'd only 409 anyway. */
+     * item buttons instead of useItem() for one of these, since there's no server call to make yet:
+     * it's client-local until the player actually right-clicks a candidate tile's "Place
+     * &lt;item&gt;" entry. Refuses silently rather than arming a placement that'd only 409 anyway. */
     public void beginItemPlacement(String itemKey)
     {
         if (itemKey == null || !isLocalPlayerReadyToRoll() || isItemUsedThisTurn()) return;
@@ -1527,10 +1467,9 @@ public class RunePartyPlugin extends Plugin
     }
 
     /** The two tiles a placement arms "Place &lt;item&gt;" on -- one step ahead, one step behind
-     * the local player's own current course position, by plain pathIndex +-1 (not graph-aware, same
-     * V1 simplification the server's own place-coin-trap endpoint uses -- forks aren't this
-     * feature's concern). Empty if nothing's armed, the course is empty, or the local player isn't
-     * tracked yet. */
+     * the local player's own current course position, by plain pathIndex +-1 (not graph-aware --
+     * forks aren't this feature's concern). Empty if nothing's armed, the course is empty, or the
+     * local player isn't tracked yet. */
     public List<WorldPoint> getItemPlacementCandidates()
     {
         if (itemPlacementKey == null) return Collections.emptyList();
@@ -1622,8 +1561,7 @@ public class RunePartyPlugin extends Plugin
 
     /** Whether the turn order already has MAX_PLAYERS seats filled -- the client-side gate on
      * "Add to Game" (menu entry and roster popup both check this). The server doesn't currently
-     * enforce this cap itself, so it's a UI guard rather than a real limit -- consistent with the
-     * rest of this app's "friendly pickup game" trust model (see Gnomeball's LIMITATIONS.md). */
+     * enforce this cap itself, so it's a UI guard rather than a real limit. */
     public boolean isGameFull()
     {
         return rosterReducer.countRole(RunePartyRole.PLAYER) >= MAX_PLAYERS;
@@ -1644,12 +1582,10 @@ public class RunePartyPlugin extends Plugin
             e -> addChatMessage("Failed to update " + playerRsn + "'s role: " + e.getMessage()));
     }
 
-    /** Host-only kick, wired to the roster panel's "Remove Player" right-click entry
-     * (RunePartyPanel#buildRemovePlayerPopup) -- same PLAYER_LEFT outcome as the target leaving
-     * on their own (see ApiClient#removePlayer), so they drop out of turn order and free their
-     * seat color for a new player -- see app.py's own PLAYER_LEFT handling. A returning player
-     * gets whatever color the host picks for them at that point, same as anyone else, rather than
-     * automatically reclaiming their old one. */
+    /** Host-only kick, wired to the roster panel's "Remove Player" right-click entry -- same
+     * PLAYER_LEFT outcome as the target leaving on their own, so they drop out of turn order and
+     * free their seat color for a new player. A returning player gets whatever color the host
+     * picks for them at that point, rather than automatically reclaiming their old one. */
     public void removePlayer(String playerRsn)
     {
         if (!isHost() || gameId == null) return;
@@ -1661,10 +1597,10 @@ public class RunePartyPlugin extends Plugin
     }
 
     // -------------------------------------------------------------------------
-    // Course building (host, LOBBY only) -- same placement flow as Gnomeball's
-    // field builder: pick a preset, enter Place mode, then right-click a
-    // ground tile to commit its footprint there. There's no per-preset
-    // removal -- clearCourse() below is the host's one "start over" tool.
+    // Course building (host, LOBBY only) -- pick a preset, enter Place mode,
+    // then right-click a ground tile to commit its footprint there. There's
+    // no per-preset removal -- clearCourse() below is the host's one "start
+    // over" tool.
     // -------------------------------------------------------------------------
 
     public void selectPreset(CoursePreset preset)
@@ -1795,20 +1731,13 @@ public class RunePartyPlugin extends Plugin
     private static final String GOLDEN_GNOME_PURCHASE_OPTION = "<col=00FF00>Purchase Golden Gnome</col>";
 
     /** The Golden Gnome's own point if the mouse is genuinely over its model's real clickbox (see
-     * TileOverlay#isGoldenGnomeUnderMouse, same technique HardcodedCourseLauncherOverlay uses for
-     * its own launcher model -- superseded ground-tile-square gating, reported: clicking the exact
-     * tile underneath a model this small/off-center was fiddly), only for the local player's own
-     * turn while a roll is pending (see purchaseGoldenGnomeAt, the opposite gating rollDice/
-     * isLocalPlayerReadyToRoll use -- this is only reachable *during* a pending roll, not before
-     * one), only when it's genuinely reachable this roll (see pendingReachableIndices's own doc --
-     * reported: this used to offer the option for a Golden Gnome that merely happened to be under
-     * the cursor, out of range or not, only for the server to 409 once actually attempted), and
-     * only once per turn -- see goldenGnomePurchasedThisTurn's own doc for why that's set
-     * optimistically on submit rather than waiting for a confirmed purchase. Still doesn't
-     * re-check affordability client-side -- the server already 409s on that (see
-     * purchase-golden-gnome's own doc), same as this guard's siblings only keeping the menu from
-     * *offering* an option the server would reject anyway, never being the actual authority on
-     * whether it would succeed. Called from onClientTick/onMenuOpened, the only two callers. */
+     * TileOverlay#isGoldenGnomeUnderMouse), only for the local player's own turn while a roll is
+     * pending, only when it's genuinely reachable this roll (see pendingReachableIndices), and
+     * only once per turn (see goldenGnomePurchasedThisTurn's own doc for why that's set
+     * optimistically on submit rather than waiting for a confirmed purchase). Still doesn't
+     * re-check affordability client-side -- the server already 409s on that; this guard only keeps
+     * the menu from offering an option the server would reject anyway. Called from
+     * onClientTick/onMenuOpened, the only two callers. */
     private WorldPoint hoveredPurchasableGoldenGnomePoint(Point canvasPoint)
     {
         String self = localRsn();
@@ -1840,11 +1769,8 @@ public class RunePartyPlugin extends Plugin
      * HardcodedCourseLauncherOverlay#hoveredCourse) or the real in-game Golden Gnome mid-purchase
      * (see hoveredPurchasableGoldenGnomePoint) -- speculatively injects whichever entry
      * onMenuOpened would commit for real, purely so the client's own native top-left hover hint
-     * shows it before the player's even right-clicked -- same "the client always labels the
-     * topmost menu entry" technique the Follower Buddy plugin uses for its own clickable
-     * RuneLiteObject. Skipped while a menu's already open, same guard that plugin's own
-     * onClientTick uses -- nothing to speculatively add once a real menu build is already
-     * underway. */
+     * shows it before the player's even right-clicked. Skipped while a menu's already open --
+     * nothing to speculatively add once a real menu build is already underway. */
     @Subscribe
     public void onClientTick(ClientTick event)
     {
@@ -1853,17 +1779,11 @@ public class RunePartyPlugin extends Plugin
     }
 
     /** The definitive, click-time version of onClientTick's own speculative injection -- a
-     * RuneLiteObject has no native menu at all (see Perspective#getClickbox's own @ApiStatus.
-     * Internal doc), so this is the only way right-clicking one can actually work, same
-     * MenuOpened-based technique Follower Buddy uses for its own clickable RuneLiteObject. Strips
-     * whatever onClientTick's own speculative entry left in this exact menu snapshot first (it
-     * persists into the live menu, see that handler's own doc) so hovering never shows either
-     * entry twice. Reads/writes via client.getMenu() -- {@code MenuOpened} is a plain event POJO
-     * (see its own @Data/getMenuEntries doc); its own setMenuEntries only mutates that event
-     * instance's own field, never the actual live menu client.createMenuEntry appends to, so
-     * stripping through it was a silent no-op (the reported "two Create Game options" bug) -- see
-     * Menu#setMenuEntries's own doc, which says outright this is "typically... used in the context
-     * of the MenuOpened event," i.e. this method, not the event object's own same-named setter. */
+     * RuneLiteObject has no native menu at all, so this is the only way right-clicking one can
+     * actually work. Strips whatever onClientTick's own speculative entry left in this exact menu
+     * snapshot first so hovering never shows either entry twice. Reads/writes via
+     * client.getMenu(), not the event object's own same-named setter -- that one only mutates the
+     * event instance's own field, never the actual live menu client.createMenuEntry appends to. */
     @Subscribe
     public void onMenuOpened(MenuOpened event)
     {
@@ -1941,14 +1861,10 @@ public class RunePartyPlugin extends Plugin
     /** Rolls one Fishing Contest catch -- called from onAnimationChanged the moment the local
      * player's own Headbang emote finishes (see awaitingHeadbangFinish). Re-checks
      * isFishingContestActive()/fishingCatchSubmitted here on top of onAnimationChanged's own gate
-     * before arming, same "each response re-checks its own state" convention rollDice()/
-     * bowToJad()/confirmMinigameReady() already follow -- the round could have ended mid-emote.
-     * Requires the local player to be within one tile of the Pond (Chebyshev distance <= 1, i.e.
-     * the Pond's own tile plus its 8 neighbors) and on the same plane, same proximity rule the old
-     * right-click-driven catch loop used -- otherwise a player could stand anywhere on the board
-     * and Headbang for free catches with no relation to the Pond at all. No cooldown beyond the
-     * emote's own animation length -- unlike the old 2-second timer gate, there's nothing else here
-     * to rate-limit, since each catch now costs one full Headbang. */
+     * before arming -- the round could have ended mid-emote. Requires the local player to be
+     * within one tile of the Pond (Chebyshev distance <= 1) and on the same plane, otherwise a
+     * player could stand anywhere on the board and Headbang for free catches. No cooldown beyond
+     * the emote's own animation length, since each catch costs one full Headbang. */
     private void performFishingCatchRoll()
     {
         if (!isFishingContestActive() || fishingCatchSubmitted) return;
@@ -1996,7 +1912,7 @@ public class RunePartyPlugin extends Plugin
         for (int i = 0; i < placed.size(); i++)
         {
             CoursePreset.PlacedTile pt = placed.get(i);
-            // List order IS path order (see CoursePreset's own class doc) -- this is the one
+            // List order is path order (see CoursePreset's own class doc) -- this is the one
             // place that turns "position i in the list" into an explicit pathIndex, since once
             // this leaves as a TileSpec the server/TileReducer only ever see unordered tiles. A
             // decorative tile (see PlacedTile#decorative) gets no pathIndex at all instead -- it's
@@ -2015,14 +1931,12 @@ public class RunePartyPlugin extends Plugin
      * Two mutually exclusive sub-modes, switched on courseConnectFromIndex:
      * <p>
      * Not connecting (courseConnectFromIndex == null): a "Set Tile" submenu (see addSetTileSubmenu
-     * -- places a new tile here, or retypes the one already here in place, see setCustomTileAt's
-     * own doc for why retyping preserves pathIndex/nextIndices rather than treating it as a fresh
-     * append), plus "Connect From"/"Remove All Connections" (only once nextIndices is actually
-     * non-empty -- nothing to bulk-clear otherwise)/"Remove Tile" once the hovered spot already
-     * holds a course tile (courseTileAt != null).
+     * -- places a new tile here, or retypes the one already here in place, preserving its
+     * pathIndex/nextIndices), plus "Connect From"/"Remove All Connections" (only once nextIndices
+     * is actually non-empty)/"Remove Tile" once the hovered spot already holds a course tile.
      * <p>
      * Connecting (courseConnectFromIndex != null): delegates to addCourseConnectMenuEntries for
-     * "Connect To"/"Remove Connection" against whichever *other* tile is hovered, plus "Cancel
+     * "Connect To"/"Remove Connection" against whichever other tile is hovered, plus "Cancel
      * Connecting". */
     private void addCustomCourseBuildMenuEntries()
     {
@@ -2073,14 +1987,13 @@ public class RunePartyPlugin extends Plugin
     }
 
     /** "Set Tile" -> one entry per host-placeable tile type (see MenuEntry#createSubMenu),
-     * populated from the already-fetched catalog (getTileTypeCatalog) rather than a hardcoded copy.
-     * Two kinds of catalog entry are filtered out, for two different reasons: Golden Gnome/Coin
-     * Trap (isModifier) are never host-authored directly, both are modifiers a separate dedicated
-     * flow places dynamically during real play (see tiles/base.py's own is_modifier doc); Arena
-     * Boundary and any future mini-game-only type (isMinigameTile) are never host-authored either,
-     * only ever spawned in bulk by a mini-game's own MinigameContext.swap_board (see
-     * tiles/base.py's own is_minigame_tile doc) -- placing one here would just get swept away (or
-     * worse, confusingly survive) the next time a board swap runs. */
+     * populated from the already-fetched catalog (getTileTypeCatalog) rather than a hardcoded
+     * copy. Two kinds of catalog entry are filtered out: Golden Gnome/Coin Trap (isModifier) are
+     * never host-authored directly, both are modifiers a separate dedicated flow places
+     * dynamically during real play; Arena Boundary and any future mini-game-only type
+     * (isMinigameTile) are never host-authored either, only ever spawned in bulk by a mini-game's
+     * own board swap -- placing one here would just get swept away the next time a board swap
+     * runs. */
     private void addSetTileSubmenu(WorldPoint point)
     {
         MenuEntry parent = client.createMenuEntry(-1)
@@ -2161,13 +2074,11 @@ public class RunePartyPlugin extends Plugin
         return null;
     }
 
-    /** The world point of the tile currently armed via "Connect From" (courseConnectFromIndex),
-     * or null if nothing's armed -- see TileOverlay#renderConnectFromIndicator, the only reader,
-     * which is what actually shows a player which tile that is (nothing else on screen
-     * distinguishes it). Resolves the armed pathIndex back through tileReducer's own live
-     * snapshot, same "index -> point" lookup renderReturnToPositionArrow already uses for an
-     * analogous need -- returns null (rather than a stale point) if that tile's since been
-     * removed out from under the armed state. */
+    /** The world point of the tile currently armed via "Connect From" (courseConnectFromIndex), or
+     * null if nothing's armed -- see TileOverlay#renderConnectFromIndicator, the only reader,
+     * which shows a player which tile that is. Resolves the armed pathIndex back through
+     * tileReducer's own live snapshot, returning null rather than a stale point if that tile's
+     * since been removed out from under the armed state. */
     WorldPoint getCourseConnectFromPoint()
     {
         Integer fromIndex = courseConnectFromIndex;
@@ -2181,12 +2092,10 @@ public class RunePartyPlugin extends Plugin
      * its existing pathIndex/nextIndices and just swaps tileType -- fixing a mistake without
      * breaking whatever already links to/from it. Otherwise it's a brand new tile, appended at
      * tileReducer.courseLength() (one past the current highest pathIndex) with no nextIndices at
-     * all -- placement alone never implies a connection to anything (see TileReducer.TileEntry#
-     * nextIndices's own doc for why there's no default fallback), so a freshly placed tile sits
+     * all -- placement alone never implies a connection to anything, so a freshly placed tile sits
      * disconnected until the host explicitly wires it up via "Connect From"/"Connect To" (see
      * connectCustomTiles). Deliberately doesn't reassign a fresh index after a mid-course removal
-     * left a gap -- courseLength() naturally reuses the freed slot on its own, no bespoke
-     * bookkeeping needed (see removeCustomTileAt's own doc for the removal side of this). */
+     * left a gap -- courseLength() naturally reuses the freed slot on its own. */
     private void setCustomTileAt(WorldPoint point, String tileTypeKey)
     {
         final String gid = gameId;
@@ -2219,12 +2128,9 @@ public class RunePartyPlugin extends Plugin
     }
 
     /** Bulk version of removeCustomConnection -- clears {@code point}'s own nextIndices back to
-     * empty in one call (a genuine dead end, no implicit fallback to fall back to -- see
-     * TileReducer.TileEntry#nextIndices's own doc), rather than needing "Remove Connection" once
-     * per existing target -- called from "Remove All Connections" (see
-     * addCustomCourseBuildMenuEntries, which only offers this once nextIndices is actually
-     * non-empty). Same "empty array, not an omitted field" reasoning removeCustomConnection's own
-     * doc gives -- the server's own _mark_one_tile treats the two identically either way. */
+     * empty in one call (a genuine dead end, no implicit fallback), rather than needing "Remove
+     * Connection" once per existing target -- called from "Remove All Connections" (only offered
+     * once nextIndices is actually non-empty). */
     private void removeAllConnectionsAt(WorldPoint point)
     {
         final String gid = gameId;
@@ -2241,12 +2147,9 @@ public class RunePartyPlugin extends Plugin
 
     /** Adds {@code targetIndex} to {@code source}'s own outgoing edges -- called from "Connect To"
      * (see addCourseConnectMenuEntries). Additive, not replacing: keeps whatever edges source
-     * already had (there's no implicit default to fall back to anymore -- see TileReducer.TileEntry
-     * #nextIndices's own doc -- so this is genuinely everything source connects to today) and just
-     * appends the new one, so connecting a second target turns a straight edge into a fork rather
-     * than silently dropping the first. Clears courseConnectFromIndex optimistically on submit,
-     * same "client-local mode, nothing to undo server-side" reasoning cancelItemPlacement's own doc
-     * explains for its sibling modes. */
+     * already had and just appends the new one, so connecting a second target turns a straight
+     * edge into a fork rather than silently dropping the first. Clears courseConnectFromIndex
+     * optimistically on submit, same client-local-mode reasoning cancelItemPlacement follows. */
     private void connectCustomTiles(TileReducer.TileEntry source, int targetIndex)
     {
         final String gid = gameId;
@@ -2266,10 +2169,8 @@ public class RunePartyPlugin extends Plugin
 
     /** Removes {@code targetIndex} from {@code source}'s own outgoing edges -- called from
      * "Remove Connection" (see addCourseConnectMenuEntries). If that empties the list entirely,
-     * this sends an empty nextIndices array rather than omitting the field -- the server's own
-     * _mark_one_tile already treats an empty list and a missing one identically (`t.get(
-     * "nextIndices") or None`), and either way source is now a genuine dead end (no implicit
-     * fallback to revert to -- see TileReducer.TileEntry#nextIndices's own doc), same as
+     * this sends an empty nextIndices array rather than omitting the field -- the server treats
+     * the two identically, and either way source is now a genuine dead end, same as
      * removeAllConnectionsAt's bulk version of this. */
     private void removeCustomConnection(TileReducer.TileEntry source, int targetIndex)
     {
@@ -2295,9 +2196,9 @@ public class RunePartyPlugin extends Plugin
     }
 
     // -------------------------------------------------------------------------
-    // Movement -- detect arrival at a rolled destination the same way Gnomeball
-    // detects zone/out-of-bounds crossings: watch the local player's position
-    // every tick rather than relying on a click/animation trigger.
+    // Movement -- detect arrival at a rolled destination by watching the local
+    // player's position every tick rather than relying on a click/animation
+    // trigger.
     // -------------------------------------------------------------------------
 
     @Subscribe
@@ -2335,18 +2236,15 @@ public class RunePartyPlugin extends Plugin
 
         // Generic (not Coin-Rush/Arena-specific) live position heartbeat -- any mini-game whose
         // own server-side round wants to know where seated players actually are (today: the
-        // Arena's hazard tiles, and the Arena's own round-begin gate -- see MinigameContext.
-        // get_positions) reads this back. Gated on isMinigameActive() alone, deliberately NOT
-        // isMinigamePlayable() -- the Arena's round begins the instant everyone's reported
-        // position lands inside its own grid (see minigames/arena.py's
-        // _wait_for_everyone_to_arrive), which can happen well before the generic countdown's own
-        // fixed isMinigamePlayable() moment; gating reporting on that fixed moment would silently
-        // put a floor under how fast the Arena could ever actually begin. Harmless for every other
-        // mini-game, which doesn't read positions at all. Unlike every other check in this method,
-        // this one is meant to keep firing every single tick for the whole time a mini-game is
-        // active, not just once -- minigamePositionReportInFlight only guards against piling up
-        // requests if a round-trip is unusually slow, it doesn't gate on "have I already reported"
-        // the way arrivalSubmitted does for a one-shot claim.
+        // Arena's hazard tiles, and its own round-begin gate) reads this back. Gated on
+        // isMinigameActive() alone, deliberately not isMinigamePlayable() -- the Arena's round
+        // begins the instant everyone's reported position lands inside its own grid, which can
+        // happen well before the generic countdown's own fixed isMinigamePlayable() moment;
+        // gating reporting on that fixed moment would silently put a floor under how fast the
+        // Arena could ever begin. Harmless for every other mini-game, which doesn't read
+        // positions at all. Unlike every other check in this method, this one keeps firing every
+        // single tick for the whole time a mini-game is active -- minigamePositionReportInFlight
+        // only guards against piling up requests if a round-trip is unusually slow.
         if (self != null && selfPlayer != null && isMinigameActive()
             && rosterReducer.getRole(self) == RunePartyRole.PLAYER
             && minigamePositionReportInFlight.compareAndSet(false, true))
@@ -2355,13 +2253,11 @@ public class RunePartyPlugin extends Plugin
         }
 
         // Also independent of the turn engine below -- the one-time end-of-round submission for
-        // the local player's own entirely client-local Fishing Contest tally (see
-        // performFishingCatchRoll/minigames/fishing_contest.py's own doc for why catches are
-        // decided here, never server-side, and never reported per-catch). Individual catches are
-        // rolled from onAnimationChanged instead, one per completed Headbang emote -- this just
-        // watches the local 30-second timer (anchored to MINIGAME_ROUND_BEGIN, see
-        // FISHING_CONTEST_DURATION_MS's own doc) and fires the single submission once it elapses,
-        // guarded by fishingCatchSubmitted so it can only ever fire once per round.
+        // the local player's own entirely client-local Fishing Contest tally. Individual catches
+        // are rolled from onAnimationChanged instead, one per completed Headbang emote -- this
+        // just watches the local 30-second timer (anchored to MINIGAME_ROUND_BEGIN) and fires the
+        // single submission once it elapses, guarded by fishingCatchSubmitted so it can only ever
+        // fire once per round.
         if (isFishingContestActive() && !fishingCatchSubmitted)
         {
             long endsAt = getFishingContestEndsAt();
@@ -2432,12 +2328,11 @@ public class RunePartyPlugin extends Plugin
     }
 
     // -------------------------------------------------------------------------
-    // Menu entries -- course placement/removal during LOBBY (mirrors Gnomeball's
-    // field builder) and a host-only "Add to Game" on other players' Follow
-    // option (mirrors Gnomeball's Follow -> Enlist). There's no dedicated
-    // in-world button for course building, so "Walk here" on the relevant tile
-    // is the entry point, same as Gnomeball's approach. Rolling dice is a
-    // gesture trigger instead (see onAnimationChanged) rather than a menu entry.
+    // Menu entries -- course placement/removal during LOBBY, and a host-only
+    // "Add to Game" on other players' Follow option. There's no dedicated
+    // in-world button for course building, so "Walk here" on the relevant
+    // tile is the entry point. Rolling dice is a gesture trigger instead (see
+    // onAnimationChanged) rather than a menu entry.
     // -------------------------------------------------------------------------
 
     @Subscribe
@@ -2467,29 +2362,18 @@ public class RunePartyPlugin extends Plugin
         }
     }
 
-    /** Rolls the dice once the local player's Spin emote finishes on their own turn -- replaces the
-     * old "right-click your tile -> Roll Dice" menu entry with a gesture trigger -- and, the same
+    /** Rolls the dice once the local player's Spin emote finishes on their own turn, and, the same
      * way, responds to a pending Jad bow, a mini-game ready-check, the current True or False round
      * once the matching YES/NO emote finishes, or a Fishing Contest catch roll once a Headbang
-     * emote finishes (replacing that mini-game's own old "right-click the Pond -> Fish" menu entry
-     * the same way Spin replaced Roll Dice). Only reacts to the local player's own animation (every
-     * client sees every nearby player's AnimationChanged, so this would otherwise also fire for
-     * spectators watching someone else spin/nod/shake/headbang for fun). Waits for the *next*
-     * animation change away from whichever emote ID matched -- i.e. the emote actually finishing,
-     * not just starting -- so the roll (and the screen-centered dice reveal every client sees, see
-     * AnnouncementOverlay#renderDiceRoll), catch, or whichever other response fires never happens
-     * mid-emote; awaitingSpinFinish and awaitingHeadbangFinish here, plus JadPresentation's own
-     * awaitingBowFinish and MinigamePresentation's own awaitingMinigameReadyFinish/
-     * awaitingTrueOrFalseYesFinish/awaitingTrueOrFalseNoFinish, are what carry that wait across the
-     * two AnimationChanged firings, exactly one set at a time (see awaitingSpinFinish's own doc for
-     * why none of the underlying situations can ever overlap). Gates the actual roll on
-     * isLocalPlayerReadyToRoll() -- same check AnnouncementOverlay#renderSpinHint uses to decide
-     * whether to show the "Use the SPIN! emote" reminder -- the catch roll on isFishingContestActive()
-     * / fishingCatchSubmitted, and each other response on its own matching isLocalPlayerAwaiting*()
-     * check, so no hint is ever showing when the matching emote wouldn't actually do anything.
-     * rollDice()/bowToJad()/confirmMinigameReady()/answerTrueOrFalse()/performFishingCatchRoll()
-     * each re-check their own state on top of this, this is just what decides *when* to call
-     * them. */
+     * emote finishes. Only reacts to the local player's own animation, since every client sees
+     * every nearby player's AnimationChanged. Waits for the next animation change away from
+     * whichever emote ID matched -- i.e. the emote actually finishing, not just starting -- so the
+     * response never fires mid-emote; awaitingSpinFinish and awaitingHeadbangFinish here, plus
+     * JadPresentation's own awaitingBowFinish and MinigamePresentation's own three awaiting flags,
+     * carry that wait across the two AnimationChanged firings, exactly one set at a time. Gates the
+     * actual roll on isLocalPlayerReadyToRoll() -- same check AnnouncementOverlay#renderSpinHint
+     * uses -- and each other response on its own matching isLocalPlayerAwaiting*() check, so no
+     * hint is ever showing when the matching emote wouldn't actually do anything. */
     @Subscribe
     public void onAnimationChanged(AnimationChanged event)
     {
@@ -2578,20 +2462,14 @@ public class RunePartyPlugin extends Plugin
     /** Whether the local player could actually roll the dice right now by performing the Spin
      * emote: it's genuinely their turn, no roll is already pending or in flight, no mini-game is
      * running, they're standing on their own tracked board position (see
-     * isStandingOnTrackedPosition -- if they wandered off their last landed tile, spinning in place
-     * does nothing until they walk back, see TileOverlay#renderReturnToPositionArrow), and their
-     * own "<player>'s Turn"/"Your Turn!" banner has actually had its chance to appear.
-     * currentTurnRsn itself is real state, set the instant TURN_STARTED lands -- but the banner
-     * announcing it is cosmetic, deliberately delayed behind turnEffectGateUntil (see
-     * scheduleTurnAnnouncement) so it doesn't stomp over e.g. the previous mini-game's rewards/
-     * round recap still showing. Without the turnEffectGateUntil check below, this would go true
-     * the instant currentTurnRsn updates, well before that banner's own delayed slot -- "Use the
-     * SPIN! emote" popping up before "Your Turn!" has even shown. Single source of truth for "can
-     * I roll right now" -- onAnimationChanged gates the real roll on this, AnnouncementOverlay#
-     * renderSpinHint gates the "Use the SPIN! emote" reminder on the exact same thing, so the two
-     * can never disagree about whether spinning would do anything. Reads
-     * standingOnTrackedPositionCached rather than resolving the local player's position live, since
-     * this is also called from RunePartyPanel (Swing EDT) -- see that field's own doc for why a
+     * isStandingOnTrackedPosition), and their own "<player>'s Turn"/"Your Turn!" banner has
+     * actually had its chance to appear. currentTurnRsn itself is real state, set the instant
+     * TURN_STARTED lands -- but the banner announcing it is cosmetic, deliberately delayed behind
+     * turnEffectGateUntil so it doesn't stomp over e.g. the previous mini-game's rewards/round
+     * recap still showing. Single source of truth for "can I roll right now" -- onAnimationChanged
+     * gates the real roll on this, AnnouncementOverlay#renderSpinHint gates the reminder on the
+     * exact same thing. Reads standingOnTrackedPositionCached rather than resolving the local
+     * player's position live, since this is also called from RunePartyPanel (Swing EDT), and a
      * direct Player#getWorldLocation() call here would crash off the client thread. */
     public boolean isLocalPlayerReadyToRoll()
     {
@@ -2604,15 +2482,13 @@ public class RunePartyPlugin extends Plugin
         return standingOnTrackedPositionCached;
     }
 
-    /** Whether the table is genuinely waiting on *someone's* roll right now -- the same gating
-     * isLocalPlayerReadyToRoll uses, minus the two checks that only make sense from the mover's own
-     * perspective ("is it me" and "am I standing on my tracked tile", which a bystander has no way
-     * to verify for someone else anyway). Used by AnnouncementOverlay#renderSpinHint to show
-     * everyone *other* than the mover "Waiting for &lt;player&gt; to roll the dice..." instead of
-     * showing them nothing at all while the mover sees "Use the SPIN! emote...". Deliberately
-     * doesn't care whether the mover has actually walked back to their tile yet -- from a
-     * bystander's vantage point "it's their turn and nobody's rolled" is the whole story either
-     * way. */
+    /** Whether the table is genuinely waiting on someone's roll right now -- the same gating
+     * isLocalPlayerReadyToRoll uses, minus the two checks that only make sense from the mover's
+     * own perspective ("is it me" and "am I standing on my tracked tile"). Used by
+     * AnnouncementOverlay#renderSpinHint to show everyone other than the mover "Waiting for
+     * &lt;player&gt; to roll the dice...". Deliberately doesn't care whether the mover has
+     * actually walked back to their tile yet -- from a bystander's vantage point "it's their turn
+     * and nobody's rolled" is the whole story either way. */
     public boolean isAwaitingSomeonesRoll()
     {
         if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive()) return false;
@@ -2649,15 +2525,14 @@ public class RunePartyPlugin extends Plugin
 
     /** Whether the panel should show the current mini-game's real play controls (see
      * RunePartyPanel#refresh, the only caller) rather than the spinner/instructions/ready-check
-     * sequence still being in AnnouncementOverlay. minigameCountdownStarted is real state (applied
-     * unconditionally, catch-up or not -- see the MINIGAME_COUNTDOWN_STARTED handler), but
-     * minigameCountdownBannerUntil is cosmetic-only, and for a *live* client isn't even armed until
-     * MINIGAME_COUNTDOWN_START_DELAY_MS after minigameCountdownStarted flips (see that handler) --
-     * so during that pause it's legitimately still 0 while very much not yet playable.
+     * sequence still being in AnnouncementOverlay. minigameCountdownStarted is real state, but
+     * minigameCountdownBannerUntil is cosmetic-only, and for a live client isn't even armed until
+     * MINIGAME_COUNTDOWN_START_DELAY_MS after minigameCountdownStarted flips -- so during that
+     * pause it's legitimately still 0 while very much not yet playable.
      * minigameCountdownSkippedForClient is what tells that pause apart from a client that only
-     * ever caught up on the fact that the whole sequence already happened -- only that client
-     * should become playable immediately instead of waiting on a "3...2...1... BEGIN!" replay for
-     * a moment that's long since passed. */
+     * caught up on the fact that the whole sequence already happened -- only that client should
+     * become playable immediately instead of waiting on a "3...2...1... BEGIN!" replay for a
+     * moment that's long since passed. */
     public boolean isMinigamePlayable()
     {
         if (!minigamePresentation.isActive() || !minigamePresentation.isCountdownStarted()) return false;
@@ -2717,8 +2592,7 @@ public class RunePartyPlugin extends Plugin
      * availableSeatColors) -- on another player's Follow option, host-only, so the host can pull a
      * spectator into the turn order with a specific color rather than always following whatever
      * order players happened to be added in. Joining a game only ever grants SPECTATOR (see
-     * assignRole's doc). Hidden once the target is already a PLAYER, same as Gnomeball's Enlist
-     * submenu skipping the enlisted player's current role. */
+     * assignRole's doc). Hidden once the target is already a PLAYER. */
     private void addToGameMenuEntry(MenuEntryAdded event)
     {
         if (!isHost() || gameId == null) return;
@@ -2751,15 +2625,12 @@ public class RunePartyPlugin extends Plugin
     }
 
     /** Adds a "Tele Block &lt;name&gt;"-style entry on another seated PLAYER's own Follow option
-     * while a requires_target item is armed (see beginItemTargeting) -- the exact same "inject onto
-     * the actor's own context menu" idiom addToGameMenuEntry already uses, just gated on
-     * itemTargetKey instead of isHost(). Offered on any active PLAYER other than the local player
-     * themselves, including one who's already Tele Blocked -- stacking is intentional, see
-     * TeleBlockItem's own doc, so there's no "already blocked" exclusion the way addToGameMenuEntry
-     * excludes an already-PLAYER target. Tele Block is the only requires_target item so far, hence
-     * the direct confirmItemTargetOn call rather than a more general dispatch -- generalize this
-     * once a second one exists, same caveat addItemPlacementMenuEntries's own doc carries for
-     * Coin Trap. */
+     * while a requires_target item is armed (see beginItemTargeting) -- the same "inject onto the
+     * actor's own context menu" idiom addToGameMenuEntry uses, just gated on itemTargetKey instead
+     * of isHost(). Offered on any active PLAYER other than the local player, including one who's
+     * already Tele Blocked -- stacking is intentional, see TeleBlockItem's own doc. Tele Block is
+     * the only requires_target item so far, hence the direct confirmItemTargetOn call rather than
+     * a more general dispatch. */
     private void addItemTargetMenuEntry(MenuEntryAdded event)
     {
         String itemKey = itemTargetKey;
@@ -2818,19 +2689,18 @@ public class RunePartyPlugin extends Plugin
     }
 
     /** Pulls a fresh /roster snapshot and merges it into RosterReducer -- the only source for the
-     * turn-order "number" every RunePartyColor lookup (roster panel, PlayerOverlay, TileOverlay's
-     * target arrow) depends on, since it never travels in the event stream itself.
+     * turn-order "number" every RunePartyColor lookup depends on, since it never travels in the
+     * event stream itself.
      * <p>
      * {@code reconcileGameState} additionally reconciles phase/currentTurnRsn/lastDiceRoll from
-     * this same snapshot's own status/currentTurnRsn/lastDiceRoll fields
-     * (ARCHITECTURE_REVIEW.md's X4) -- true only for the two genuine reconnect call sites
+     * this same snapshot -- true only for the two genuine reconnect call sites
      * (connectEventStream's initial backlog sync, EventSocket#onCaughtUp's automatic-reconnect
-     * sync), where a full event replay has (or should have) already brought these fields to the
-     * same place this snapshot independently confirms, so this is self-healing/defense-in-depth
-     * rather than the primary source of truth. False for the live PLAYER_JOINED/ROLE_ASSIGNED/
-     * PLAYER_LEFT resync in handleEvent, which only ever needs fresh turn-order numbers -- letting
-     * that one reconcile game state too would risk this call's own async fetch resolving after a
-     * newer TURN_STARTED already landed live, clobbering it with a stale snapshot. */
+     * sync), where a full event replay has already brought these fields to the same place this
+     * snapshot independently confirms, so this is defense-in-depth rather than the primary source
+     * of truth. False for the live PLAYER_JOINED/ROLE_ASSIGNED/PLAYER_LEFT resync in handleEvent,
+     * which only ever needs fresh turn-order numbers -- letting that one reconcile game state too
+     * would risk this call's own async fetch resolving after a newer TURN_STARTED already landed
+     * live, clobbering it with a stale snapshot. */
     private void syncRosterSnapshot(boolean reconcileGameState)
     {
         final String gid = gameId;
@@ -2882,17 +2752,14 @@ public class RunePartyPlugin extends Plugin
 
     /** Appends a new CoinPopup to {@code rsn}'s own queue (see coinPopups's own doc for why this
      * is a queue, not a single slot) and extends the turn-effect gate to match. Shared by
-     * COINS_CHANGED's real coin-total popups and COIN_RUSH_COLLECTED's own totalless "+2" flash
-     * (see CoinPopup's own doc), so a Coin Rush round's mid-round flashes and its own end-of-round
-     * lump-sum popup still queue behind each other and behind a Golden Gnome popup correctly,
-     * exactly like every other coin popup already does, rather than needing a second queue of
-     * their own.
+     * COINS_CHANGED's real coin-total popups and COIN_RUSH_COLLECTED's own totalless "+2" flash,
+     * so a Coin Rush round's mid-round flashes and its own end-of-round lump-sum popup still queue
+     * behind each other and behind a Golden Gnome popup correctly.
      * <p>
      * start is computed by queuing behind whichever's already showing for this same player -- their
      * Golden Gnome popup (tracked separately, not in this queue) if that's still up, else the tail
      * of their own coin-popup queue, else "now" if nothing's currently showing. A different player
-     * always gets their own popup immediately regardless of what's showing for anyone else (see the
-     * Coin Trap owner's simultaneous +N popup). */
+     * always gets their own popup immediately regardless of what's showing for anyone else. */
     void enqueueCoinPopup(String rsn, int delta, int newTotal, long durationMs, boolean totalless)
     {
         String key = rsn.toLowerCase(Locale.ROOT);
@@ -2913,24 +2780,17 @@ public class RunePartyPlugin extends Plugin
 
     /** Schedules {@code action} to run once every in-flight turn-effect visual has cleared (see
      * extendTurnEffectGate) plus a short POST_TURN_EFFECT_GRACE_MS beat, so an outgoing effect and
-     * an incoming "turn's over" announcement never visually collide -- runs immediately (still off
-     * the caller's thread) if nothing is currently gating. Cancels {@code previousTask} first, since
-     * a stray double-fire of the caller (there shouldn't be one, but see EventSocket's
-     * reconnect-task pattern for the same defensive cancel-before-reschedule) would otherwise leave
-     * two competing delayed writes in flight; returns the new task so the caller can do the same on
-     * its next call.
+     * an incoming "turn's over" announcement never visually collide -- runs immediately if nothing
+     * is currently gating. Cancels {@code previousTask} first so a stray double-fire of the caller
+     * can't leave two competing delayed writes in flight; returns the new task so the caller can do
+     * the same on its next call.
      * <p>
-     * Synchronously reserves the gate through this effect's own {@code durationMs} -- via
-     * extendTurnEffectGate, called here rather than left for {@code action} to do once it actually
-     * fires -- before this method even returns. That matters whenever more than one of these gets
-     * scheduled in the same tick from *different* events (e.g. MINIGAME_ENDED's
-     * scheduleRoundCompleteBanner immediately followed by the new round's own TURN_STARTED calling
-     * scheduleTurnAnnouncement): without reserving synchronously, the second call would compute its
-     * own delay against a gate that doesn't know the first effect is coming yet -- its
-     * gate-extension is still sitting inside its own not-yet-fired callback -- so both would end up
-     * scheduled for the same moment instead of one waiting on the other. Shared by every "the turn
-     * is over, here's what's next" announcement -- anything new in that category should go through
-     * this too rather than growing its own bespoke delay math. */
+     * Synchronously reserves the gate through this effect's own {@code durationMs} before this
+     * method even returns. That matters whenever more than one of these gets scheduled in the same
+     * tick from different events: without reserving synchronously, the second call would compute
+     * its own delay against a gate that doesn't know the first effect is coming yet, so both would
+     * end up scheduled for the same moment instead of one waiting on the other. Shared by every
+     * "the turn is over, here's what's next" announcement. */
     ScheduledFuture<?> scheduleAfterTurnEffects(ScheduledFuture<?> previousTask, long durationMs, Runnable action)
     {
         if (previousTask != null) previousTask.cancel(false);
@@ -2942,10 +2802,9 @@ public class RunePartyPlugin extends Plugin
         // The panel (isLocalPlayerReadyToRoll-gated item/roll UI) only ever refreshes on an
         // explicit refreshPanel() call, unlike AnnouncementOverlay's per-frame render() -- so
         // without this, once turnEffectGateUntil lifts here with no new server event to trigger a
-        // refresh (e.g. sitting on a finished "Your Turn!" banner with nothing else happening),
-        // the item-use section/SPIN-adjacent panel state can go stale indefinitely. Fire one right
-        // as this effect's own reservation of the gate expires so the panel re-checks readiness
-        // the moment it's actually true, not just whenever the next unrelated event happens to land.
+        // refresh, the item-use section/SPIN-adjacent panel state can go stale indefinitely. Fire
+        // one right as this effect's own reservation of the gate expires so the panel re-checks
+        // readiness the moment it's actually true.
         uiTimerExec.schedule(this::refreshPanel, delay + durationMs, TimeUnit.MILLISECONDS);
 
         return uiTimerExec.schedule(action, delay, TimeUnit.MILLISECONDS);
@@ -2953,22 +2812,21 @@ public class RunePartyPlugin extends Plugin
 
     /** Plain fixed-delay scheduling against uiTimerExec, with no turn-effect gating of its own --
      * unlike scheduleAfterTurnEffects, {@code action} just runs {@code delayMs} from now. Public
-     * (unlike uiTimerExec itself, deliberately package-private -- see that field's own doc) so a
-     * caller outside this package, e.g. models/JadEncounter's own bow-acknowledge/idle-reapply
-     * timers, can still schedule a plain callback without reaching into the raw executor. */
+     * (unlike uiTimerExec itself, deliberately package-private) so a caller outside this package,
+     * e.g. models/JadEncounter's own bow-acknowledge/idle-reapply timers, can still schedule a
+     * plain callback without reaching into the raw executor. */
     public ScheduledFuture<?> scheduleDelayed(Runnable action, long delayMs)
     {
         return uiTimerExec.schedule(action, delayMs, TimeUnit.MILLISECONDS);
     }
 
     /** Arms `banner` behind whatever turn-effect visual is already showing (see
-     * scheduleAfterTurnEffects) -- collapses the `<field>.task = scheduleAfterTurnEffects(...)  {
+     * scheduleAfterTurnEffects) -- collapses the `<field>.task = scheduleAfterTurnEffects(...) {
      * <field>.payload = ...; <field>.until = now + duration; extendTurnEffectGate(...); }` shape
-     * repeated across ~6 of the scheduleXBanner methods below (see ARCHITECTURE_REVIEW.md's C6
-     * finding). Not applied to every scheduleXBanner method -- several have real behavior beyond
-     * "arm one banner" (bespoke until/gate math, chaining to a follow-up step, arming two banners
-     * at once) that this deliberately doesn't try to generalize; each of those keeps a one-line
-     * comment pointing back here instead of silently diverging from a pattern it never fit. */
+     * repeated across several scheduleXBanner methods below. Not applied to every one of those --
+     * several have real behavior beyond "arm one banner" (bespoke until/gate math, chaining to a
+     * follow-up step, arming two banners at once) that this deliberately doesn't try to
+     * generalize. */
     <T> void armBanner(TimedBanner<T> banner, long durationMs, Supplier<T> payload, boolean extendGate)
     {
         banner.task = scheduleAfterTurnEffects(banner.task, durationMs, () ->
@@ -3010,9 +2868,9 @@ public class RunePartyPlugin extends Plugin
 
     // scheduleMinigameBanner/scheduleMinigameSpinner/triggerMinigameRewardsBanner/
     // scheduleRoundCompleteBanner, and scheduleItemSpinner/scheduleItemCapBlockedAnnouncement/
-    // scheduleItemUsedAnnouncement/scheduleCoinTrapTriggerAnnouncement, now live on
-    // MinigamePresentation/ItemPresentation respectively, along with the fields/handleEvent cases/
-    // getters they back -- see ARCHITECTURE_REVIEW.md's C1 finding, step 2.
+    // scheduleItemUsedAnnouncement/scheduleCoinTrapTriggerAnnouncement, live on
+    // MinigamePresentation/ItemPresentation respectively, along with the fields/handleEvent
+    // cases/getters they back.
 
     /** Arms AnnouncementOverlay's "Welcome to Rune Party Showdown" title card -- called once, right
      * after createGame/joinGame succeeds, for the local player only (there's no server event for
@@ -3058,20 +2916,19 @@ public class RunePartyPlugin extends Plugin
      * actually known (a fresh plugin start races the login screen, so this can't just run from
      * startUp()). Two genuinely different recovery paths depending on what was persisted:
      *
-     * <p>Host (writeKey present): the persisted writeKey is the ONLY copy that will ever exist --
-     * the server never reissues one, see ApiClient#checkHostSession's own doc -- so this either
-     * still works right now, or that game can never be hosted again from any client. Confirmed via
-     * checkHostSession, a read-only call, before this client resumes acting as host with it.
+     * <p>Host (writeKey present): the persisted writeKey is the only copy that will ever exist --
+     * the server never reissues one -- so this either still works right now, or that game can
+     * never be hosted again from any client. Confirmed via checkHostSession, a read-only call,
+     * before this client resumes acting as host with it.
      *
      * <p>Player (no writeKey): nothing irreplaceable was lost -- rejoining with the same RSN via
-     * the ordinary joinGame call transparently reissues a fresh playerToken for the same seat
-     * (issue_session_token's own ON CONFLICT upsert; see join_game's doc), so there's no dedicated
-     * resume endpoint for this case at all.
+     * the ordinary joinGame call transparently reissues a fresh playerToken for the same seat, so
+     * there's no dedicated resume endpoint for this case at all.
      *
-     * <p>Only clears the persisted session on a definitive server rejection (403/404/409 --
-     * ApiHttpException under 500): a plain IOException (server unreachable, no network yet at
-     * plugin startup) leaves it alone so the next restart gets another try, rather than a transient
-     * hiccup silently costing someone their host status for good. */
+     * <p>Only clears the persisted session on a definitive server rejection (403/404/409): a plain
+     * IOException (server unreachable, no network yet at plugin startup) leaves it alone so the
+     * next restart gets another try, rather than a transient hiccup silently costing someone their
+     * host status for good. */
     private void attemptSessionResume()
     {
         String self = localRsn();
@@ -3144,18 +3001,13 @@ public class RunePartyPlugin extends Plugin
 
     /** Silently replays a game's full event history via a one-time REST fetch before opening the
      * live WebSocket -- otherwise, since EventSocket's initial connect always asks for every event
-     * from the beginning (afterSeq=0), a player joining a game already in progress would see every
-     * banner, popup, and dice-roll animation from the whole game so far fire in rapid succession as
-     * that backlog replayed. Real game state (whose turn it is, coin totals, board positions, tile
-     * markers, the minigame-active flag, roster) still updates from every historical event exactly
-     * as it would live -- see handleEvent's catchingUp parameter, which is the one flag that decides
-     * "state always applies, cosmetic timers/banners/chat only when live" for every event type, so
-     * adding a new tile effect or announcement later only ever needs to sort itself into one of
-     * those two buckets, not duplicate this catch-up logic. Once the backlog is applied, the live
-     * socket starts from the backlog's own latestSeq, so nothing replays twice and every event from
-     * that point on gets full normal (animated) treatment. Falls back to the old full-live-replay
-     * behavior if the backlog fetch itself fails, rather than silently connecting from an unknown
-     * point and risking missed history. */
+     * from the beginning, a player joining a game already in progress would see every banner,
+     * popup, and dice-roll animation from the whole game so far fire in rapid succession as that
+     * backlog replayed. Real game state still updates from every historical event exactly as it
+     * would live -- see handleEvent's catchingUp parameter, which decides "state always applies,
+     * cosmetic timers/banners/chat only when live" for every event type. Once the backlog is
+     * applied, the live socket starts from the backlog's own latestSeq, so nothing replays twice.
+     * Falls back to the old full-live-replay behavior if the backlog fetch itself fails. */
     private void connectEventStream(String gameId, String rsn)
     {
         try
@@ -3181,14 +3033,13 @@ public class RunePartyPlugin extends Plugin
     // -------------------------------------------------------------------------
 
     /** {@code catchingUp} is true both for connectEventStream's initial backlog fetch and for
-     * EventSocket's own replay burst after a reconnect (see EventSocket#onMessage/its CAUGHT_UP
-     * handling) -- false only for an event that arrives genuinely live over the WebSocket, before
-     * or after either kind of catch-up. Real game state -- turn order, coins, board positions, tile
-     * markers, the minigame-active flag, roster sync -- always applies either way, via
+     * EventSocket's own replay burst after a reconnect -- false only for an event that arrives
+     * genuinely live over the WebSocket. Real game state -- turn order, coins, board positions,
+     * tile markers, the minigame-active flag, roster sync -- always applies either way, via
      * rosterReducer/tileReducer above and the unguarded field writes below. Anything purely
-     * cosmetic (a banner, a popup timer, a chat line announcing something happened) is gated behind
-     * {@code !catchingUp} so a player who joins mid-game, or whose connection drops and reconnects
-     * mid-game, only ever sees the game's *current* state, not a replay of how it got there. */
+     * cosmetic (a banner, a popup timer, a chat line) is gated behind {@code !catchingUp} so a
+     * player who joins mid-game, or whose connection drops and reconnects mid-game, only ever
+     * sees the game's current state, not a replay of how it got there. */
     private void handleEvent(ApiClient.EventOut e, boolean catchingUp)
     {
         if (e == null || e.type == null) return;
@@ -3239,12 +3090,12 @@ public class RunePartyPlugin extends Plugin
                 break;
 
             // None of these three carry a turn-order "number" in their payload -- the server only
-            // ever computes it fresh from the whole event log on a roster read (see
-            // _finalize_roster in app.py), and it can shift for everyone whenever the PLAYER set
-            // changes (a join, a promotion, a leave). So on any of them, pull a fresh roster
-            // snapshot rather than trying to derive numbers from the event stream itself. Skipped
-            // during catch-up -- connectEventStream does one roster sync after the whole backlog
-            // instead of one REST call per historical join/promotion/leave.
+            // ever computes it fresh from the whole event log on a roster read, and it can shift
+            // for everyone whenever the PLAYER set changes (a join, a promotion, a leave). So on
+            // any of them, pull a fresh roster snapshot rather than trying to derive numbers from
+            // the event stream itself. Skipped during catch-up -- connectEventStream does one
+            // roster sync after the whole backlog instead of one REST call per historical
+            // join/promotion/leave.
             case Events.PLAYER_JOINED:
             case Events.ROLE_ASSIGNED:
             case Events.PLAYER_LEFT:
@@ -3292,11 +3143,10 @@ public class RunePartyPlugin extends Plugin
 
             case Events.TURN_SKIPPED:
             {
-                // currentTurnPlayer never becomes the skipped player at all (see app.py's
-                // _start_next_eligible_turn -- this fires in place of TURN_STARTED for them, not
-                // before it), so unlike TURN_STARTED there's no turn-state field here to update --
-                // this is purely a cosmetic "here's why you didn't just see a TURN_STARTED for
-                // them" announcement.
+                // currentTurnPlayer never becomes the skipped player at all -- this fires in place
+                // of TURN_STARTED for them, not before it -- so unlike TURN_STARTED there's no
+                // turn-state field here to update. This is purely a cosmetic "here's why you
+                // didn't just see a TURN_STARTED for them" announcement.
                 if (!catchingUp)
                 {
                     String skippedRsn = Json.requiredStr(e.payload, type, "player");
@@ -3390,36 +3240,24 @@ public class RunePartyPlugin extends Plugin
                 // "bowed" gets its own one-shot reaction (JAD_BOW_ACKNOWLEDGE_ANIMATION_ID, then
                 // back to JAD_IDLE_ANIMATION_ID -- see JadEncounter#playBowThenClear), held back
                 // JAD_OUTCOME_BANNER_DURATION_MS from this same moment rather than fired
-                // immediately, so the "Your loyalty will cost you N coins!" outcome banner
-                // (jadPresentation's own JAD_DISMISSED handling, called just above) has had its
-                // full duration to be read before Jad actually reacts -- see that constant's own
-                // doc for why the eventual coin popup (COINS_CHANGED reason="jad_bow" below) is
-                // timed off this same delay in turn. Every other case (smashed, or a catching-up
-                // client with nothing to animate) despawns immediately instead -- by the time this
-                // fires on the smashed path, the whole encounter (including the smash animation)
-                // has already played out on its own server-timed schedule, so there's no "vanishes
-                // before it's drawn" risk left to guard against. A no-op if nothing's spawned, e.g.
-                // a catching-up client that never saw the TILE_EFFECT-driven spawn in the first
-                // place.
+                // immediately, so the "Your loyalty will cost you N coins!" outcome banner has had
+                // its full duration to be read before Jad actually reacts. Every other case
+                // (smashed, or a catching-up client with nothing to animate) despawns immediately
+                // instead -- by the time this fires on the smashed path, the whole encounter has
+                // already played out on its own server-timed schedule.
                 if (!catchingUp && "bowed".equals(Json.safeStr(e.payload, "outcome")))
                 {
                     scheduleDelayed(jadEncounter::playBowThenClear, JAD_OUTCOME_BANNER_DURATION_MS);
 
-                    // Reserve the turn-effect gate for the *whole* client-timed bowed sequence up
+                    // Reserve the turn-effect gate for the whole client-timed bowed sequence up
                     // front, not just the outcome banner's own duration -- jadPresentation.apply
-                    // above already extended it that far (armBanner's own extendGate=true), which
-                    // is only enough to stop the *next* turn/mini-game announcement from colliding
-                    // with the banner itself. Without this, that announcement (gated purely on
-                    // turnEffectGateUntil, see scheduleAfterTurnEffects) could still fire the moment
-                    // the banner fades while Jad's model is still mid-animation/idle-hold on screen,
-                    // or before the delayed "jad_bow" coin popup (COINS_CHANGED handling below) has
-                    // even appeared -- both of those extend the gate themselves too, but only once
-                    // each actually *runs* (JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS/COIN_POPUP_
-                    // DURATION_MS later), which is too late to stop an earlier announcement that
-                    // already fired in the gap. Whichever finishes later -- Jad's own despawn
-                    // (animation hold + idle hold) or the coin popup's own on-screen window -- wins;
-                    // Math.max inside extendTurnEffectGate makes those two later, smaller extensions
-                    // harmless no-ops rather than double-booking.
+                    // above already extended it that far, which is only enough to stop the next
+                    // turn/mini-game announcement from colliding with the banner itself. Without
+                    // this, that announcement could still fire the moment the banner fades while
+                    // Jad's model is still mid-animation, or before the delayed "jad_bow" coin
+                    // popup has even appeared. Whichever finishes later -- Jad's own despawn or
+                    // the coin popup's own on-screen window -- wins; Math.max inside
+                    // extendTurnEffectGate makes the earlier extension a harmless no-op.
                     long now = System.currentTimeMillis();
                     long jadClearAt = now + JAD_OUTCOME_BANNER_DURATION_MS + JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS
                         + JAD_BOW_ACKNOWLEDGE_IDLE_HOLD_MS;
@@ -3454,16 +3292,13 @@ public class RunePartyPlugin extends Plugin
 
             case Events.TELE_BLOCK_APPLIED:
             {
-                // TeleBlockItem leaves hasUseAnnouncement() at its default false (see that class's
-                // own doc) -- the generic "You used/<rsn> used <item>!" banner ITEM_USED already
-                // fires above has no target field to phrase around, so this fires its own dedicated
-                // "You/<caster> cast teleblock on <target>!" banner instead (see
-                // scheduleTeleBlockCastAnnouncement/renderTeleBlockCastAnnouncement), alongside the
-                // impact spotanim on the target's own actor -- both fire together, right here,
-                // rather than staggered the way the bowed Jad sequence's announcement/animation/
-                // coin-popup steps are: there's no earlier "reveal" step here for this to wait
-                // behind. teleblockedByPlayer itself is already updated unconditionally by
-                // rosterReducer.apply above, catch-up or not.
+                // TeleBlockItem leaves hasUseAnnouncement() at its default false -- the generic
+                // "You used/<rsn> used <item>!" banner ITEM_USED already fires above has no
+                // target field to phrase around, so this fires its own dedicated "You/<caster>
+                // cast teleblock on <target>!" banner instead, alongside the impact spotanim on
+                // the target's own actor -- both fire together, right here, since there's no
+                // earlier "reveal" step for this to wait behind. teleblockedByPlayer itself is
+                // already updated unconditionally by rosterReducer.apply above, catch-up or not.
                 if (!catchingUp)
                 {
                     String blockedRsn = Json.requiredStr(e.payload, type, "player");
@@ -3490,18 +3325,17 @@ public class RunePartyPlugin extends Plugin
                 // far (see the COINS_CHANGED/ITEM_GRANTED cases below, which actually pay/grant it)
                 // -- START/EVENT_TILE are still no-ops, but this event fires for every type so this
                 // chat line is always accurate regardless. JAD_TILE has no coins/item effect of its
-                // own either (see tiles/jad_tile.py's own on_land), but does trigger a purely
-                // client-side cosmetic reaction below -- spawning Jad's own model.
+                // own either, but does trigger a purely client-side cosmetic reaction below --
+                // spawning Jad's own model.
                 String tileEffectPlayer = Json.requiredStr(e.payload, type, "player");
                 String tileEffectType = Json.requiredStr(e.payload, type, "tileType");
                 if (!catchingUp)
                 {
                     addChatMessage(tileEffectPlayer + " landed on a " + tileEffectType + " tile.");
                 }
-                // Gated on !catchingUp same as every other "reveal a moment that either just
-                // happened live or already resolved" cosmetic elsewhere in this file (gameStartBanner,
-                // ceremonyPresentation's triggers, minigameSpinner, ...) -- a reconnecting client
-                // simply doesn't see a replay of a Jad appearance that's already come and gone.
+                // Gated on !catchingUp same as every other cosmetic-reveal elsewhere in this file
+                // -- a reconnecting client simply doesn't see a replay of a Jad appearance that's
+                // already come and gone.
                 if ("JAD_TILE".equals(tileEffectType) && !catchingUp && tileEffectPlayer != null)
                 {
                     TileReducer.TileEntry landed = tileReducer.tileAtIndex(getPlayerPosition(tileEffectPlayer));
@@ -3523,26 +3357,20 @@ public class RunePartyPlugin extends Plugin
             {
                 // The standard-tile reward, the Start tile's own reward, an item's own coin
                 // effect, and a Coin Trap steal all get the popup treatment -- a Golden Gnome
-                // purchase or a mini-game's own
-                // end-of-round payout already has its own feedback (the roster/stats panels
-                // update, and submitMinigameResult's caller sees the MINIGAME_ENDED chat line), so
-                // this stays scoped to the cases that otherwise had no visible feedback at all.
-                // Coin Rush's "coin_rush" and True or False's "true_or_false" reasons are the two
-                // exceptions worth calling out: unlike the other three, neither fires per landing --
-                // the server bundles every coin/correct-answer from the whole round/mini-game into
-                // one lump-sum COINS_CHANGED right before MINIGAME_ENDED (see app.py's
-                // _coin_rush_end_round/_true_or_false_end), so each case only ever fires once per
-                // player per mini-game, showing their own round total ("+6 coins" / "+10 coins")
-                // then their real new balance -- never per-pickup or per-round. Coin Rush's own
-                // individual pickups get a separate, purely cosmetic "+2" flash instead (see
-                // COIN_RUSH_COLLECTED handling), which never touches this case at all since it
-                // carries no COINS_CHANGED of its own; True or False has no equivalent mid-round
-                // flash since a round's own correctness isn't revealed until it ends anyway (see
-                // TRUE_OR_FALSE_ROUND_ENDED). The real coin total itself lives in rosterReducer
-                // (updated unconditionally above, catch-up or not) -- everything in this block is
-                // purely the popup's own cosmetics. "dev_adjust" (dev_routes.py's adjust-coins)
-                // gets the same treatment as any other unattended coin change, so a dev-forced
-                // adjustment shows the same live confirmation a real one would.
+                // purchase or a mini-game's own end-of-round payout already has its own feedback,
+                // so this stays scoped to the cases that otherwise had no visible feedback at all.
+                // Coin Rush's "coin_rush" and True or False's "true_or_false" reasons are worth
+                // calling out: unlike the others, neither fires per landing -- the server bundles
+                // every coin/correct-answer from the whole round/mini-game into one lump-sum
+                // COINS_CHANGED right before MINIGAME_ENDED, so each case only ever fires once per
+                // player per mini-game, showing their own round total then their real new balance.
+                // Coin Rush's own individual pickups get a separate, purely cosmetic "+2" flash
+                // instead (see COIN_RUSH_COLLECTED handling); True or False has no equivalent
+                // mid-round flash since a round's own correctness isn't revealed until it ends
+                // anyway. The real coin total itself lives in rosterReducer (updated
+                // unconditionally above, catch-up or not) -- everything in this block is purely
+                // the popup's own cosmetics. "dev_adjust" gets the same treatment as any other
+                // unattended coin change.
                 String coinsChangedReason = Json.requiredStr(e.payload, type, "reason");
                 if (!catchingUp && ("standard_tile".equals(coinsChangedReason) || "start_tile".equals(coinsChangedReason)
                     || "item".equals(coinsChangedReason) || "coin_trap".equals(coinsChangedReason)
@@ -3557,14 +3385,10 @@ public class RunePartyPlugin extends Plugin
                     if (coinsChangedRsn != null)
                     {
                         // "jad_bow" is the one reason here that doesn't reflect its popup/chat the
-                        // instant the event lands -- the toll has to visibly land only *after* the
+                        // instant the event lands -- the toll has to visibly land only after the
                         // "Your loyalty will cost you N coins!" banner has been read and the
-                        // bow-acknowledge animation has played, not sight-unseen the moment the
-                        // server's already-resolved COINS_CHANGED happens to arrive (see
-                        // JAD_OUTCOME_BANNER_DURATION_MS's own doc for why handleEvent's
-                        // JAD_DISMISSED case delays the animation itself by the same amount). Every
-                        // other reason here has no such staged reveal to wait on, so they still fire
-                        // immediately.
+                        // bow-acknowledge animation has played. Every other reason here has no
+                        // such staged reveal to wait on, so they still fire immediately.
                         if ("jad_bow".equals(coinsChangedReason))
                         {
                             int jadBowDelta = delta != null ? delta : 0;
@@ -3579,10 +3403,9 @@ public class RunePartyPlugin extends Plugin
                         {
                             enqueueCoinPopup(coinsChangedRsn, delta != null ? delta : 0, total != null ? total : 0,
                                 COIN_POPUP_DURATION_MS, false);
-                            // Jad has no Golden Gnome to take here (see JadPresentation's own
-                            // GOLDEN_GNOME_LOST handling for that branch's own chat message) -- this
-                            // is the only feedback the coin-loss branch gets, matching Coin Trap's
-                            // own restraint (popup + chat, no dedicated banner).
+                            // Jad has no Golden Gnome to take here -- this is the only feedback
+                            // the coin-loss branch gets, matching Coin Trap's own restraint
+                            // (popup + chat, no dedicated banner).
                             if ("jad_smash".equals(coinsChangedReason))
                             {
                                 addChatMessage("Jad smashes " + coinsChangedRsn + "! They lost " + Math.abs(delta != null ? delta : 0) + " coins!");
@@ -3609,12 +3432,11 @@ public class RunePartyPlugin extends Plugin
                 if (Events.MINIGAME_STARTED.equals(type))
                 {
                     // The round's last roller transitions straight from their own confirm-arrival
-                    // into MINIGAME_STARTED, not TURN_STARTED (see _advance_turn_or_start_minigame)
-                    // -- without this, pendingRoll would stay stuck true (currentTurnRsn stuck at
-                    // that same player) for the entire mini-game, since only TURN_STARTED's own
-                    // case resets it otherwise. That left the "Purchase Golden Gnome" menu entry
-                    // (see addGoldenGnomePurchaseMenuEntry, gated on pendingRoll) offering itself
-                    // to that player well after their turn -- and the round -- was actually over.
+                    // into MINIGAME_STARTED, not TURN_STARTED -- without this, pendingRoll would
+                    // stay stuck true for the entire mini-game, since only TURN_STARTED's own case
+                    // resets it otherwise. That left the "Purchase Golden Gnome" menu entry
+                    // offering itself to that player well after their turn -- and the round --
+                    // was actually over.
                     pendingRoll = false;
                     // Real state regardless of catch-up: a fresh mini-game instance never inherits
                     // a previous round's own Fishing Contest tally/submission-guard/emote-wait, even
@@ -3631,11 +3453,10 @@ public class RunePartyPlugin extends Plugin
 
             case Events.MINIGAME_ENDED:
                 // Real state, applied catch-up or not -- one MINIGAME_ENDED is exactly one
-                // completed round (see the server's own _resolve_minigame_if_complete, which
-                // counts these events the same way to decide when maxRounds is reached). This is
-                // core whole-game progress, not one mini-game instance's own state -- see
-                // getCurrentRound/StatsOverlay's "ROUND x/y" line, the only consumer -- so it stays
-                // inline rather than moving into MinigamePresentation with the rest of this case.
+                // completed round. This is core whole-game progress, not one mini-game instance's
+                // own state -- see getCurrentRound/StatsOverlay's "ROUND x/y" line, the only
+                // consumer -- so it stays inline rather than moving into MinigamePresentation
+                // with the rest of this case.
                 completedRounds++;
                 // Defensive guard against a stray late catch/submission -- covers a round ending
                 // (host force-end, or the server's own bounded wait simply timing out server-side)
@@ -3666,10 +3487,8 @@ public class RunePartyPlugin extends Plugin
 
     /** Plays {@code spotAnimId} (see net.runelite.api.gameval.SpotanimID) once at a fixed world
      * point -- no travel, no actor attached. The client API has no direct "spawn a stationary
-     * graphic" call (a real GraphicsObject is otherwise only ever created by the game engine
-     * itself, in response to an actual server packet); the standard RuneLite-plugin trick for this
-     * is a projectile whose source and target are the same point, which is exactly what this does.
-     * Always hops onto the client thread, so any caller (an event handler off the client thread,
+     * graphic" call, so this uses the standard trick of a projectile whose source and target are
+     * the same point. Always hops onto the client thread, so any caller off it (an event handler,
      * same as everything in handleEvent) can call this directly. */
     public void triggerSpotAnimAtWorldPoint(int spotAnimId, WorldPoint point, int durationCycles)
     {
@@ -3687,18 +3506,11 @@ public class RunePartyPlugin extends Plugin
     }
 
     /** Plays {@code spotAnimId} directly on {@code rsn}'s own in-game actor -- follows them if they
-     * move, unlike triggerSpotAnimAtWorldPoint's fixed-point projectile trick (see that method's
-     * own doc for why *that* one needs the trick at all): an Actor can just be told to show a
-     * spotanim directly via the real, non-deprecated Actor#createSpotAnim, no faked projectile
-     * needed. {@code id} (the first createSpotAnim argument, a per-actor slot key -- see that
-     * method's own javadoc) is just spotAnimId itself; nothing here needs more than one spotanim
-     * live on the same actor at once, so there's no risk of two callers colliding on the same slot.
-     * A no-op if {@code rsn} isn't currently a loaded/visible nearby actor -- same "can't animate
-     * what isn't there" limitation every other in-world cosmetic in this codebase already accepts
-     * (see e.g. JadEncounter's own lazy-retry idiom for a resource that isn't loaded *yet*, a
-     * different problem from an actor that simply isn't nearby at all). Always hops onto the client
-     * thread, so any caller off it (an event handler, same as everything in handleEvent) can call
-     * this directly. */
+     * move, unlike triggerSpotAnimAtWorldPoint's fixed-point projectile trick: an Actor can just be
+     * told to show a spotanim directly via Actor#createSpotAnim, no faked projectile needed.
+     * {@code id} is just spotAnimId itself; nothing here needs more than one spotanim live on the
+     * same actor at once. A no-op if {@code rsn} isn't currently a loaded/visible nearby actor.
+     * Always hops onto the client thread, so any caller off it can call this directly. */
     public void triggerSpotAnimOnPlayer(int spotAnimId, String rsn, int height, int delayTicks)
     {
         if (rsn == null) return;
@@ -3739,9 +3551,8 @@ public class RunePartyPlugin extends Plugin
         // pointing straight down once they're back to whatever they were doing before -- restore
         // it the same way toggling the button off would. clientThread.invoke rather than a direct
         // call since resetState can run from a Swing button handler (leaveGame) as well as a
-        // client-thread event subscriber, and camera setters are believed to require the client
-        // thread the same way RuneLiteObject#setActive does (see CheerleaderRenderer#clear's
-        // identical reasoning in the sibling Gnomeball repo).
+        // client-thread event subscriber, and camera setters require the client thread the same
+        // way RuneLiteObject#setActive does.
         if (boardViewActive) clientThread.invoke(this::restoreCameraFromBoardView);
         if (eventSocket != null) eventSocket.stop();
         turnAnnounce.reset();
@@ -3804,9 +3615,9 @@ public class RunePartyPlugin extends Plugin
     public boolean isGoldenGnomePurchasedThisTurn() { return goldenGnomePurchasedThisTurn; }
     public List<Integer> getPendingTargetIndices() { return pendingTargetIndices; }
     public List<Integer> getPendingReachableIndices() { return pendingReachableIndices; }
-    // Delegating facade -- MinigamePresentation owns the actual state (see ARCHITECTURE_REVIEW.md's
-    // C1 finding, step 2). Every name/signature below is unchanged, so no external caller
-    // (AnnouncementOverlay, RunePartyPanel, StatsOverlay) needs to change.
+    // Delegating facade -- MinigamePresentation owns the actual state. Every name/signature below
+    // is unchanged, so no external caller (AnnouncementOverlay, RunePartyPanel, StatsOverlay)
+    // needs to change.
     public boolean isMinigameActive() { return minigamePresentation.isActive(); }
     /** The board tile (pathIndex) {@code rsn} is currently standing at, per the last PLAYER_MOVED
      * seen for them -- 0 (START) if they haven't moved yet this game. See TileOverlay#
@@ -3823,9 +3634,8 @@ public class RunePartyPlugin extends Plugin
     public long getMinigameSpinnerStart() { return minigamePresentation.getMinigameSpinnerStart(); }
     public long getMinigameSpinnerUntil() { return minigamePresentation.getMinigameSpinnerUntil(); }
     public boolean isMinigameSpinnerSkippedForClient() { return minigamePresentation.isMinigameSpinnerSkippedForClient(); }
-    // Delegating facade -- ItemPresentation owns the actual state (see ARCHITECTURE_REVIEW.md's C1
-    // finding, step 2). Every name/signature below is unchanged, so no external caller
-    // (AnnouncementOverlay, TileOverlay) needs to change.
+    // Delegating facade -- ItemPresentation owns the actual state. Every name/signature below is
+    // unchanged, so no external caller (AnnouncementOverlay, TileOverlay) needs to change.
     public long getItemSpinnerStart() { return itemPresentation.getItemSpinnerStart(); }
     public long getItemSpinnerUntil() { return itemPresentation.getItemSpinnerUntil(); }
     public String getItemGrantRsn() { return itemPresentation.getItemGrantRsn(); }
@@ -3848,9 +3658,8 @@ public class RunePartyPlugin extends Plugin
      * StatsOverlay's live scoreboard, the only consumer. */
     public Map<String, Integer> getCoinRushScores() { return Collections.unmodifiableMap(minigamePresentation.getCoinRushScores()); }
     public boolean isCoinRushActive() { return minigamePresentation.isCoinRushActive(); }
-    /** When the current Coin Rush round's own clock (see COIN_RUSH_DURATION_MS) runs out -- 0 if
-     * no round is active yet or the round hasn't actually become playable (see
-     * coinRushRoundStartAt's own doc on when that gets stamped). */
+    /** When the current Coin Rush round's own clock runs out -- 0 if no round is active yet or the
+     * round hasn't actually become playable. */
     public long getCoinRushEndsAt() { return minigamePresentation.getCoinRushEndsAt(); }
 
     /** Every currently-live Sandwich Rush ingredient spawn, keyed by the server's own spawn id --
@@ -3862,31 +3671,27 @@ public class RunePartyPlugin extends Plugin
     public Set<String> getSandwichHeld() { return Collections.unmodifiableSet(minigamePresentation.getSandwichHeld()); }
     public int getSandwichCount() { return minigamePresentation.getSandwichCount(); }
     public boolean isSandwichRushActive() { return minigamePresentation.isSandwichRushActive(); }
-    /** When the current Sandwich Rush round's own clock (see SANDWICH_RUSH_DURATION_MS) runs out
-     * -- 0 if no round is active yet or the round hasn't actually become playable (see
-     * MinigamePresentation#sandwichRushRoundStartAt's own doc on when that gets stamped). */
+    /** When the current Sandwich Rush round's own clock runs out -- 0 if no round is active yet
+     * or the round hasn't actually become playable. */
     public long getSandwichRushEndsAt() { return minigamePresentation.getSandwichRushEndsAt(); }
 
     public boolean isFishingContestActive() { return minigamePresentation.isFishingContestActive(); }
-    /** When the current Fishing Contest round's own local catch-timer should stop (see
-     * FISHING_CONTEST_DURATION_MS) -- 0 if no round is active yet or the round hasn't actually
-     * become playable (see MinigamePresentation#fishingRoundStartAt's own doc on when that gets
-     * stamped). */
+    /** When the current Fishing Contest round's own local catch-timer should stop -- 0 if no
+     * round is active yet or the round hasn't actually become playable. */
     public long getFishingContestEndsAt() { return minigamePresentation.getFishingContestEndsAt(); }
     /** This round's own local catch counts so far -- see FishingCatchOverlay, the only consumer.
-     * Client-local only, per the Fishing Contest field block's own doc -- nobody but the local
-     * player ever sees these, there's no server-broadcast equivalent to read instead. */
+     * Client-local only -- nobody but the local player ever sees these. */
     public int getShrimpCount() { return shrimpCount; }
     public int getAnchovyCount() { return anchovyCount; }
 
     public boolean isTurfWarsActive() { return minigamePresentation.isTurfWarsActive(); }
     /** This round's own live tile tally, keyed by whatever color hex each tile is currently
-     * claimed in (2 keys for an even-count 2-team round, up to 8 for an odd-count free-for-all --
-     * see minigames/turf_wars.py's own doc), tallied fresh from TileReducer's own already-
-     * broadcast TURF_WARS_TILE snapshot -- see TurfWarsScoreOverlay (the live scoreboard) and
-     * MinigamePresentation#triggerTurfWarsConfetti (the end-of-round winner), the two consumers.
-     * There's no dedicated score event at all -- a claim is just an ordinary tiles_marked update,
-     * so the board's own current colors already *are* the score. */
+     * claimed in (2 keys for an even-count 2-team round, up to 8 for an odd-count free-for-all),
+     * tallied fresh from TileReducer's own already-broadcast TURF_WARS_TILE snapshot -- see
+     * TurfWarsScoreOverlay (the live scoreboard) and MinigamePresentation#triggerTurfWarsConfetti
+     * (the end-of-round winner), the two consumers. There's no dedicated score event at all -- a
+     * claim is just an ordinary tiles_marked update, so the board's own current colors already
+     * are the score. */
     public Map<String, Integer> getTurfWarsTileCounts()
     {
         Map<String, Integer> counts = new HashMap<>();
@@ -3911,9 +3716,8 @@ public class RunePartyPlugin extends Plugin
         try { return Color.decode(hex); }
         catch (NumberFormatException e) { return null; }
     }
-    /** When the round's own fixed-duration clock (see TURF_WARS_ROUND_MS) runs out -- 0 if no
-     * round is active yet or the round hasn't actually become playable (see MinigamePresentation#
-     * turfWarsRoundStartAt's own doc on when that gets stamped). */
+    /** When the round's own fixed-duration clock runs out -- 0 if no round is active yet or the
+     * round hasn't actually become playable. */
     public long getTurfWarsEndsAt() { return minigamePresentation.getTurfWarsEndsAt(); }
 
     public String getTrueOrFalseQuestion() { return minigamePresentation.getTrueOrFalseQuestion(); }
@@ -3923,14 +3727,11 @@ public class RunePartyPlugin extends Plugin
     public Set<String> getTrueOrFalseAnsweredRsns() { return Collections.unmodifiableSet(minigamePresentation.getTrueOrFalseAnsweredRsns()); }
     public Boolean getTrueOrFalseMyAnswer() { return minigamePresentation.getTrueOrFalseMyAnswer(); }
     /** When the current True or False round's reading period ends and its answer countdown starts
-     * ticking (see TRUE_OR_FALSE_READING_DURATION_MS) -- 0 if no round is currently open, same
-     * gating as getTrueOrFalseRoundEndsAt. renderTrueOrFalseQuestion hides the countdown number
-     * until this passes. */
+     * ticking -- 0 if no round is currently open. renderTrueOrFalseQuestion hides the countdown
+     * number until this passes. */
     public long getTrueOrFalseAnswerWindowStartsAt() { return minigamePresentation.getTrueOrFalseAnswerWindowStartsAt(); }
-    /** When the current True or False round's own clock (see TRUE_OR_FALSE_READING_DURATION_MS +
-     * TRUE_OR_FALSE_ROUND_DURATION_MS) runs out -- 0 if no round is currently open (see
-     * trueOrFalseRoundStartedAt's own doc on when that gets stamped, and trueOrFalseQuestion,
-     * cleared the instant the round ends). */
+    /** When the current True or False round's own clock runs out -- 0 if no round is currently
+     * open. */
     public long getTrueOrFalseRoundEndsAt() { return minigamePresentation.getTrueOrFalseRoundEndsAt(); }
     public Boolean getTrueOrFalseLastCorrectAnswer() { return minigamePresentation.getTrueOrFalseLastCorrectAnswer(); }
     public List<TrueOrFalseResult> getTrueOrFalseLastResults() { return minigamePresentation.getTrueOrFalseLastResults(); }
@@ -3976,9 +3777,8 @@ public class RunePartyPlugin extends Plugin
     public String getTeamAssignedBannerTeam() { return minigamePresentation.getTeamAssignedBannerTeam(); }
     public long getTurfWarsConfettiUntil() { return minigamePresentation.getTurfWarsConfettiUntil(); }
     public Color getTurfWarsConfettiColor() { return minigamePresentation.getTurfWarsConfettiColor(); }
-    // Delegating facade -- CeremonyPresentation owns the actual state (see
-    // ARCHITECTURE_REVIEW.md's C1 finding, step 2). Every name/signature below is unchanged, so no
-    // external caller (AnnouncementOverlay, ConfettiOverlay) needs to change.
+    // Delegating facade -- CeremonyPresentation owns the actual state. Every name/signature below
+    // is unchanged, so no external caller (AnnouncementOverlay, ConfettiOverlay) needs to change.
     public List<RosterReducer.RosterEntry> getGameOverStandings() { return ceremonyPresentation.getGameOverStandings(); }
     public long getGameOverBannerUntil() { return ceremonyPresentation.getGameOverBannerUntil(); }
     public long getWinnerIntroBannerUntil() { return ceremonyPresentation.getWinnerIntroBannerUntil(); }
@@ -4015,9 +3815,9 @@ public class RunePartyPlugin extends Plugin
     public int getDiceRollBonus() { return diceRollBonus; }
     public long getDiceRollStart() { return diceRollStart; }
     public long getDiceRollUntil() { return diceRollUntil; }
-    // Delegating facade -- GoldenGnomePresentation owns the actual state (see
-    // ARCHITECTURE_REVIEW.md's C1 finding, step 2). Every name/signature below is unchanged, so no
-    // external caller (AnnouncementOverlay, PlayerOverlay, TileOverlay) needs to change.
+    // Delegating facade -- GoldenGnomePresentation owns the actual state. Every name/signature
+    // below is unchanged, so no external caller (AnnouncementOverlay, PlayerOverlay, TileOverlay)
+    // needs to change.
     public String getGoldenGnomeOutcome() { return goldenGnomePresentation.getOutcome(); }
     public String getGoldenGnomeOutcomeRsn() { return goldenGnomePresentation.getOutcomeRsn(); }
     public long getGoldenGnomeOutcomeBannerUntil() { return goldenGnomePresentation.getOutcomeBannerUntil(); }

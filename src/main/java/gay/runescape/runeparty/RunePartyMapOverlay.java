@@ -26,19 +26,15 @@ import java.util.Map;
  * type color, a small gold marker over any Golden Gnome modifier, a diamond over any Coin Trap,
  * and every seated PLAYER's live position as a dot in their own RunePartyColor (the local player's
  * ring drawn a little heavier so "where am I" is a glance, not a search). Toggled via
- * RunePartyPlugin#toggleMap (the panel's "Show Map"/"Hide Map" button, see RunePartyPanel#refresh
- * for the label swap) -- replaces the earlier RunePartyMapDialog, a separate non-modal Swing
- * window; this instead dims the whole game view and draws the same content directly on the canvas,
- * so it reads as part of the game rather than a second window competing for attention, and (see
- * AnnouncementOverlay's own new isMapShowing() gate) suppresses every banner/announcement while up
- * so nothing draws over it. Purely a repaint of RunePartyPlugin/TileReducer/RosterReducer's already
- * -live state every frame -- like every overlay in this plugin, it never computes or guesses a
- * total or position itself.
+ * RunePartyPlugin#toggleMap -- dims the whole game view and draws directly on the canvas rather
+ * than opening a separate window, and (see AnnouncementOverlay's own isMapShowing() gate)
+ * suppresses every banner/announcement while up so nothing draws over it. Purely a repaint of
+ * RunePartyPlugin/TileReducer/RosterReducer's already-live state every frame.
  * <p>
  * Per-tile hover detail (see maybeShowTooltip) is computed fresh each render() from this exact
  * frame's own on-screen layout (see lastMinX/lastMaxY/lastPlane/lastOriginX/lastOriginY) rather
- * than a cached one -- unlike the old dialog's JPanel, an Overlay gets no dedicated per-pixel mouse
- * hook of its own, so this just does the same hit-test inline every frame it's showing. */
+ * than a cached one -- an Overlay gets no dedicated per-pixel mouse hook of its own, so this just
+ * does the same hit-test inline every frame it's showing. */
 public class RunePartyMapOverlay extends Overlay
 {
     private static final int CELL_SIZE = 22;
@@ -55,7 +51,7 @@ public class RunePartyMapOverlay extends Overlay
     private static final int FOOTER_ITEM_GAP = 22; // between one item's text and the next item's icon
 
     private static final Color BACKDROP = new Color(0, 0, 0, 165); // dims the whole game view behind the panel
-    private static final Color PANEL_BACKGROUND = new Color(24, 24, 24, 230); // "slightly transparent" per the reported ask
+    private static final Color PANEL_BACKGROUND = new Color(24, 24, 24, 230);
     private static final Color PANEL_BORDER = new Color(120, 120, 120, 220);
     private static final Color FOOTER_BACKGROUND = new Color(16, 16, 16, 225);
     private static final Color FOOTER_BORDER = new Color(120, 120, 120, 200);
@@ -248,10 +244,7 @@ public class RunePartyMapOverlay extends Overlay
 
     /** Hit-tests the mouse's current canvas position against this exact frame's own grid layout
      * (see lastMinX/lastMaxY/lastPlane/lastOriginX/lastOriginY) and, if it lands on a cell with
-     * anything to say, queues up its detail via TooltipManager -- one Tooltip per line, the same
-     * "every completed add() this frame renders as one stacked box" convention RuneLite's own
-     * tooltip system uses (replaces the old dialog's single HTML string, which needed line breaks
-     * spelled out itself). */
+     * anything to say, queues up its detail via TooltipManager -- one Tooltip per line. */
     private void maybeShowTooltip()
     {
         if (!boundsKnown) return;
@@ -294,11 +287,9 @@ public class RunePartyMapOverlay extends Overlay
         return new WorldPoint(minX + col, maxY - row, plane);
     }
 
-    /** Plain-English gloss for one tile/modifier -- see buildLegendRows for the same reward
-     * numbers' short-form color-swatch summary; this is the fuller per-tile version, including how
-     * far it is from the local viewer's own current position where that's meaningful (see
-     * stepsAwaySuffix). The gloss itself comes from the served catalog (see RunePartyPlugin#
-     * getTileTypeCatalog). */
+    /** Plain-English gloss for one tile/modifier -- see buildLegendRows for the short-form
+     * color-swatch summary; this is the fuller per-tile version, including how far it is from the
+     * local viewer's own current position where that's meaningful (see stepsAwaySuffix). */
     private String tileDescription(TileReducer.TileEntry t)
     {
         ApiClient.TileTypeOut type = plugin.getTileTypeCatalog().get(t.tileType);
@@ -310,10 +301,9 @@ public class RunePartyMapOverlay extends Overlay
     }
 
     /** " -- N tiles away" from the local viewer's own current board position, or null if there's
-     * nothing to say -- an observer (not a seated PLAYER, see RosterReducer.RosterEntry#role) has
-     * no position of their own to measure from (reported ask: don't say anything for them), and a
-     * target genuinely unreachable from here at all (a dead end, or a gap in the course -- see
-     * TileReducer#stepsBetween) has no meaningful distance either. */
+     * nothing to say -- an observer (not a seated PLAYER) has no position of their own to measure
+     * from, and a target genuinely unreachable from here at all (a dead end, or a gap in the
+     * course) has no meaningful distance either. */
     private String stepsAwaySuffix(int targetPathIndex)
     {
         String localRsn = plugin.getLocalRsn();
@@ -331,12 +321,11 @@ public class RunePartyMapOverlay extends Overlay
         return " -- " + steps + (steps == 1 ? " tile away" : " tiles away");
     }
 
-    /** One dot per seated, joined PLAYER at their live board position (see
-     * RunePartyPlugin#getPlayerPosition), fanned out a little when more than one shares a tile so
-     * they don't just stack into an unreadable blob -- gathering at START is exactly when this
-     * comes up most. The local player's dot gets a heavier white ring around it, same "make 'you'
-     * unmistakable" idea as PlayerOverlay's on-turn glow, just always on here rather than
-     * turn-gated -- there's no obvious "your turn" moment on a static map. */
+    /** One dot per seated, joined PLAYER at their live board position, fanned out a little when
+     * more than one shares a tile so they don't just stack into an unreadable blob -- gathering at
+     * START is exactly when this comes up most. The local player's dot gets a heavier white ring
+     * around it, always on here rather than turn-gated, since there's no obvious "your turn"
+     * moment on a static map. */
     private void paintPlayers(Graphics2D g, int minX, int maxY, int plane, int originX, int originY)
     {
         String localRsn = plugin.getLocalRsn();
@@ -390,13 +379,11 @@ public class RunePartyMapOverlay extends Overlay
     }
 
     /** A plain tile-color swatch (SQUARE), the Golden Gnome's own isosceles triangle, or the Coin
-     * Trap's own diamond -- one shared shape/size-parameterized drawer instead of three near-copies
-     * of the same fill-then-outline polygon code, used both for the grid's own in-world markers
-     * (drawGnomeMarker/drawCoinTrapMarker below, at CELL_SIZE-relative sizing) and the footer
-     * legend's own small icons (see drawLegendFooter) -- reported: the legend's own key used to
-     * always draw a plain square regardless of what it stood for, so the Golden Gnome's entry read
-     * as a square when the marker it's actually keying is a triangle. {@code size} is the shape's
-     * own width; TRIANGLE's height follows the same 5:4 ratio the original in-world marker used. */
+     * Trap's own diamond -- one shared shape/size-parameterized drawer, used both for the grid's
+     * own in-world markers (drawGnomeMarker/drawCoinTrapMarker below) and the footer legend's own
+     * small icons (see drawLegendFooter), so the legend key always matches the marker it's keying.
+     * {@code size} is the shape's own width; TRIANGLE's height follows the same 5:4 ratio the
+     * in-world marker uses. */
     private void drawShapeIcon(Graphics2D g, LegendShape shape, Color fill, Color border, int centerX, int centerY, int size)
     {
         switch (shape)
@@ -484,11 +471,10 @@ public class RunePartyMapOverlay extends Overlay
 
     /** Fixed reference list, one icon/color + short name per tile type -- just enough to place a
      * color or marker shape, not the fuller reward-number description maybeShowTooltip's own
-     * per-tile hover already gives. Non-modifier types come from the served catalog (see
-     * RunePartyPlugin#getTileTypeCatalog), in the server's own REGISTRY order -- the 2 modifiers
-     * get their own bespoke marker shape/color below rather than a tile-outline square, but still
-     * pull their own short name from the same served catalog rather than hardcoding it a second
-     * time (ARCHITECTURE_REVIEW.md's X2(a)). */
+     * per-tile hover already gives. Non-modifier types come from the served catalog; the 2
+     * modifiers get their own bespoke marker shape/color below rather than a tile-outline square,
+     * but still pull their own short name from the same served catalog rather than hardcoding it a
+     * second time. */
     private List<LegendRow> buildLegendRows()
     {
         List<LegendRow> rows = new ArrayList<>();
@@ -504,11 +490,9 @@ public class RunePartyMapOverlay extends Overlay
 
     /** A full-width footer bar, flush with the bottom of the game view, listing every legend entry
      * left-to-right and wrapping onto another row once a line would run past the viewport's own
-     * width -- "the entire bottom, like a footer" per the reported ask, replacing the earlier
-     * vertical list squeezed under the map panel itself. Two passes: the first only measures how
-     * many rows the wrap actually needs (so the background bar's own height is known up front and
-     * every row draws top-down inside it, rather than guessing tall enough and drawing bottom-up);
-     * the second actually draws. */
+     * width. Two passes: the first only measures how many rows the wrap actually needs (so the
+     * background bar's own height is known up front and every row draws top-down inside it, rather
+     * than guessing tall enough and drawing bottom-up); the second actually draws. */
     private void drawLegendFooter(Graphics2D g, int viewportWidth, int viewportHeight)
     {
         List<LegendRow> rows = buildLegendRows();
@@ -563,18 +547,17 @@ public class RunePartyMapOverlay extends Overlay
         }
     }
 
-    /** Pulls a modifier tile type's own served display name (see buildLegendRows's own doc) --
-     * falls back to {@code fallback} if the catalog fetch failed or hasn't landed yet, same
-     * defensive shape tileColor already uses for a missing catalog entry. */
+    /** Pulls a modifier tile type's own served display name -- falls back to {@code fallback} if
+     * the catalog fetch failed or hasn't landed yet, same defensive shape tileColor already uses
+     * for a missing catalog entry. */
     private String modifierName(String tileType, String fallback)
     {
         ApiClient.TileTypeOut t = plugin.getTileTypeCatalog().get(tileType);
         return t != null && t.displayName != null ? t.displayName : fallback;
     }
 
-    /** Same served catalog TileOverlay#defaultColorFor reads (see RunePartyPlugin#
-     * getTileTypeCatalog, populated once at startup from GET /v1/tile-types) rather than its own
-     * hardcoded table -- falls back to plain yellow for a type the catalog doesn't have. */
+    /** Same served catalog TileOverlay#defaultColorFor reads, rather than its own hardcoded table
+     * -- falls back to plain yellow for a type the catalog doesn't have. */
     private Color tileColor(String tileType, String hex)
     {
         if (hex != null && !hex.isBlank())

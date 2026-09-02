@@ -16,26 +16,15 @@ import net.runelite.client.util.ImageUtil;
 
 /** Shows the local player's own Fishing Contest catch tally -- a titled panel with a shrimp/
  * anchovy icon and a big bold running count each, side by side -- while a Fishing Contest round is
- * active (see RunePartyPlugin#isFishingContestActive) AND actually playable (see
- * RunePartyPlugin#isMinigamePlayable) -- the second check matters here specifically: without it
- * this would render the instant MINIGAME_STARTED lands, spoiling the "MINIGAME!" banner/selection
- * wheel's own reveal by showing a titled "Fishing Contest" panel before the wheel's even finished
- * spinning (reported bug -- same fix CoinRushTimerOverlay/StatsOverlay's Coin Rush scoreboard
- * already apply). Every completed Headbang emote near the Pond rolls one catch (see
- * RunePartyPlugin#performFishingCatchRoll) -- there's no separate "started fishing" state to gate
- * on beyond that, this shows for the whole rest of the round regardless of whether the local
- * player's caught anything yet.
+ * active AND actually playable. The second check matters: without it this would render the instant
+ * the mini-game starts, spoiling the "MINIGAME!" banner/selection wheel's own reveal. Every
+ * completed Headbang emote near the Pond rolls one catch -- there's no separate "started fishing"
+ * state to gate on beyond that.
  * <p>
- * Deliberately front-and-center (OverlayPosition.TOP_CENTER) with large icons/numbers rather than a
- * small BOTTOM_LEFT corner readout an earlier version of this class used -- a live count the player
- * is meant to actually watch mid-round belongs somewhere obvious, the same reasoning
- * CoinRushTimerOverlay's own big standalone countdown gives for not burying itself in a stats
- * panel. Still deliberately self-only, not a shared leaderboard like StatsOverlay's own Coin Rush
- * scoreboard treatment: catches are entirely client-local until the one final submission (see
- * minigames/fishing_contest.py's own doc for why), so no client ever learns another player's
- * running count mid-round -- there's nothing to show but the local player's own. Reads
- * RunePartyPlugin#getShrimpCount/getAnchovyCount fresh every frame, no timer of its own, same
- * reasoning StatsOverlay's own render() already gives for its live scoreboard.
+ * Deliberately front-and-center (OverlayPosition.TOP_CENTER) with large icons/numbers -- a live
+ * count the player is meant to actually watch mid-round belongs somewhere obvious. Still
+ * deliberately self-only, not a shared leaderboard: catches are entirely client-local until the
+ * one final submission, so no client ever learns another player's running count mid-round.
  * <p>
  * Drawn directly rather than via PanelComponent/LineComponent (the convention StatsOverlay uses)
  * -- those stack one full-width component per row, with no built-in way to put an icon and text
@@ -123,9 +112,8 @@ public class FishingCatchOverlay extends Overlay
 
     /** Draws one icon+count pair starting at {@code x}, returns the x coordinate immediately past
      * its text (i.e. where the next pair, plus its own gap, should start). Big bold shadowed text
-     * -- same shadow technique CoinRushTimerOverlay's own big countdown number uses -- so the count
-     * stays legible over whatever's on screen behind it. icon may be null (a missing/failed-to-load
-     * resource) -- skips drawing it rather than throwing, the text still renders on its own. */
+     * keeps the count legible over whatever's on screen behind it. icon may be null (a
+     * missing/failed-to-load resource) -- skips drawing it rather than throwing. */
     private int drawCount(Graphics2D g, BufferedImage icon, String text, int x, int rowTop, int rowHeight, Font font, FontMetrics fm)
     {
         if (icon != null)

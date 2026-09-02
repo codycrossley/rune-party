@@ -20,12 +20,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * Every (re)connect opens at {@code afterSeq=lastSeq}, so the server's first flush on that
  * connection is always a replay of whatever committed after that point -- true live events only
- * start once the server's own CAUGHT_UP sentinel arrives (see the server's game_events_ws). A
- * client that drops for 30 seconds and reconnects would otherwise have that whole missed-history
- * burst delivered indistinguishably from live traffic, firing every banner/dice-reveal/spotanim at
- * once (see ARCHITECTURE_REVIEW.md's R3) -- {@link #caughtUp} tracks the boundary per connection so
- * {@link EventListener#onEvent} can tell the two apart the same way connectEventStream's own
- * initial backlog fetch already lets RunePartyPlugin#handleEvent do for the very first connect.
+ * start once the server's own CAUGHT_UP sentinel arrives. A client that drops for 30 seconds and
+ * reconnects would otherwise have that whole missed-history burst delivered indistinguishably from
+ * live traffic, firing every banner/dice-reveal/spotanim at once -- {@link #caughtUp} tracks the
+ * boundary per connection so {@link EventListener#onEvent} can tell the two apart.
  */
 public class EventSocket
 {
@@ -53,8 +51,7 @@ public class EventSocket
     private WebSocket webSocket;
     private ScheduledFuture<?> reconnectTask;
     // False from the moment a new connection opens until its own CAUGHT_UP sentinel arrives -- see
-    // the class doc above and onMessage below, the only reader/writer besides connect() (which
-    // resets it for each fresh attempt).
+    // the class doc above.
     private volatile boolean caughtUp = false;
 
     public EventSocket(OkHttpClient okHttpClient, Gson gson, EventListener listener)
@@ -188,13 +185,12 @@ public class EventSocket
                 // catchingUp is read once per message (not per unwrapped event below) since the
                 // server never mixes a replay-burst event and a genuinely live one in the same
                 // frame -- the CAUGHT_UP sentinel above always arrives as its own message between
-                // the two (see the server's game_events_ws).
+                // the two.
                 boolean catchingUp = !caughtUp;
 
-                // The server coalesces a short burst of events for the same game into one
-                // wrapped message instead of one frame each --
-                // unwrap it back into individual onEvent calls, in order, so nothing downstream
-                // (TileReducer, RosterReducer, handleEvent's switch) needs to know batching exists.
+                // The server coalesces a short burst of events for the same game into one wrapped
+                // message instead of one frame each -- unwrap it back into individual onEvent
+                // calls, in order, so nothing downstream needs to know batching exists.
                 if (Events.EVENTS_BATCH.equals(e.type))
                 {
                     EventsBatch batch = gson.fromJson(text, EventsBatch.class);
@@ -237,8 +233,8 @@ public class EventSocket
         }
     }
 
-    /** Wire shape for a coalesced burst of events (see the server's broadcast batching) -- only
-     * sent when more than one event landed in the server's ~100ms buffering window for this game. */
+    /** Wire shape for a coalesced burst of events -- only sent when more than one event landed in
+     * the server's ~100ms buffering window for this game. */
     private static final class EventsBatch
     {
         String type;

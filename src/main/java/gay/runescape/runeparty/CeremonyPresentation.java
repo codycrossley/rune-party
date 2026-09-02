@@ -6,25 +6,20 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ScheduledFuture;
 
-/** End-game awards ceremony state and choreography -- extracted from RunePartyPlugin per
- * ARCHITECTURE_REVIEW.md's C1 finding, step 2. Owns its own fields, exposes triggerGameOverSequence()
- * for RunePartyPlugin's hybrid GAME_ENDED case to call (GAME_ENDED itself is a core phase
- * transition, not "ceremony state," so it isn't routed through an apply()), and clears itself via
- * reset(); RunePartyPlugin still exposes every getter under its original name, just delegating
- * here, so no external caller needs to change. */
+/** End-game awards ceremony state and choreography, extracted out of RunePartyPlugin. Owns its own
+ * fields, exposes triggerGameOverSequence() for RunePartyPlugin's GAME_ENDED handling to call, and
+ * clears itself via reset(); RunePartyPlugin still exposes every getter under its original name,
+ * just delegating here. */
 final class CeremonyPresentation
 {
     private final RunePartyPlugin plugin;
 
-    // ---- end-game awards ceremony (server-driven, everyone sees it -- see GAME_ENDED handling and
-    // triggerGameOverSequence). A chain of banners, each scheduled behind the last via
-    // scheduleAfterTurnEffects: "GAME OVER!" -> "Now it's time to see the winner..." -> one
+    // End-game awards ceremony (server-driven, everyone sees it). A chain of banners, each
+    // scheduled behind the last: "GAME OVER!" -> "Now it's time to see the winner..." -> one
     // "In Nth place..." reveal per eliminated player (worst to best, stopping once only the top two
     // remain) -> "And the winner is..." -> the winner's name plus ConfettiOverlay's burst.
-    // gameOverStandings is the final ranking (coins desc, Golden Gnomes tiebreak, same order
-    // renderRoundCompleteBanner already uses), snapshotted once at trigger time since no further
-    // coin/gnome changes are possible once the server's flipped the game out of ACTIVE. ----
-    private volatile ScheduledFuture<?> gameOverTask; // one handle threaded through every step below, not owned by any single one
+    // gameOverStandings is the final ranking, snapshotted once at trigger time.
+    private volatile ScheduledFuture<?> gameOverTask; // one handle threaded through every step below
     private volatile List<RosterReducer.RosterEntry> gameOverStandings = Collections.emptyList();
     private final TimedBanner<Void> gameOverBanner = new TimedBanner<>();
     private final TimedBanner<Void> winnerIntroBanner = new TimedBanner<>();
@@ -38,11 +33,8 @@ final class CeremonyPresentation
         this.plugin = plugin;
     }
 
-    /** Final standings, ranked the same way renderRoundCompleteBanner already ranks the live
-     * mid-game ones -- Golden Gnome count descending, coins as tiebreak -- snapshotted once on
-     * GAME_ENDED rather than read live, since no further coin/gnome changes are possible once the
-     * server's flipped the game out of ACTIVE. Spectators and never-joined seats are excluded, same
-     * as every other standings view. */
+    /** Final standings -- Golden Gnome count descending, coins as tiebreak -- snapshotted once on
+     * GAME_ENDED. Spectators and never-joined seats are excluded. */
     private List<RosterReducer.RosterEntry> computeFinalStandings()
     {
         List<RosterReducer.RosterEntry> standings = plugin.getRosterReducer().seatedPlayers();
@@ -53,17 +45,8 @@ final class CeremonyPresentation
     }
 
     /** Kicks off the end-game awards ceremony on GAME_ENDED -- a chain of banners, each scheduled
-     * behind the last via scheduleAfterTurnEffects (see the field block's own doc for the full
-     * sequence). This first step is itself gated the same way, since GAME_ENDED can land in the
-     * very same event batch as the final round's own MINIGAME_ENDED (see app.py's
-     * _resolve_minigame_if_complete) -- without waiting behind that banner's own gate reservation,
-     * "GAME OVER!" would flash up mid-rewards-recap instead of politely queuing after it. No-ops if
-     * nobody's actually seated (shouldn't happen for a game that reached GAME_ENDED, but a lone
-     * host force-ending an empty lobby is technically possible). Not an armBanner call, nor are
-     * the four scheduleX methods below it that continue this chain (see that method's own doc) --
-     * each carries real logic beyond arming one banner (building a reveal order, a chat message,
-     * arming two banners in the same callback), not just the arm-and-extend-gate shape armBanner
-     * covers. */
+     * behind the last (see the field block's own doc for the full sequence). No-ops if nobody's
+     * actually seated. */
     void triggerGameOverSequence()
     {
         List<RosterReducer.RosterEntry> standings = computeFinalStandings();
@@ -86,9 +69,8 @@ final class CeremonyPresentation
             plugin.extendTurnEffectGate(winnerIntroBanner.until);
 
             // Worst to best, stopping once only the top two remain -- e.g. a 4-player game reveals
-            // 4th then 3rd, leaving 1st/2nd for the "And the winner is..." showdown. A 2-player (or
-            // fewer) game has nothing to reveal here at all, so this list ends up empty and
-            // schedulePlaceReveal falls straight through to scheduleWinnerSuspense.
+            // 4th then 3rd, leaving 1st/2nd for the "And the winner is..." showdown. A 2-player
+            // game has nothing to reveal here, so this list ends up empty.
             List<RosterReducer.RosterEntry> revealOrder = new ArrayList<>();
             for (int i = gameOverStandings.size() - 1; i >= 2; i--) revealOrder.add(gameOverStandings.get(i));
             schedulePlaceReveal(revealOrder, 0);
@@ -124,9 +106,8 @@ final class CeremonyPresentation
     }
 
     /** The ceremony's final step -- the winner's own name, held alongside ConfettiOverlay's burst
-     * (confettiBanner, shorter than WINNER_REVEAL_DURATION_MS so the confetti finishes settling
-     * while the name's still up rather than both cutting off together). gameOverStandings is sorted
-     * winner-first, so index 0 is always the winner. */
+     * (confettiBanner runs shorter so the confetti finishes settling while the name's still up).
+     * gameOverStandings is sorted winner-first, so index 0 is always the winner. */
     private void scheduleWinnerReveal()
     {
         gameOverTask = plugin.scheduleAfterTurnEffects(gameOverTask, RunePartyPlugin.WINNER_REVEAL_DURATION_MS, () ->

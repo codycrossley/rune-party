@@ -11,18 +11,12 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import net.runelite.client.ui.FontManager;
 
-/** Client-side counterpart to the server's CoinRushMinigame (see minigames/coin_rush.py, once
- * built) -- Rune Party's first real mini-game, replacing one of the four PlaceholderMinigame
- * wheel slots (see Minigames). 2-4 coin spawns (object 29165, "Mounted Coins") appear on random
- * tiles at random points over a 30-second round (RunePartyPlugin#COIN_RUSH_DURATION_MS); whoever
- * physically reaches a spawn's tile first gets +2 coins for it (see RunePartyPlugin#
- * checkCoinRushCollection/ApiClient#collectCoinRushCoin) and it disappears, then another can spawn
- * elsewhere. Unlike PlaceholderMinigame's self-reported score spinner, there's nothing for the
- * player to actually operate here -- collection is automatic the instant they walk onto a live
- * spawn's tile -- so this control panel is purely a "here's what to do" reminder; the actual
- * gameplay renders in-world (TileOverlay#updateCoinRushModels) and the live per-round tally lives
- * in StatsOverlay's scoreboard, not here. Key must match the server's own CoinRushMinigame
- * registration exactly, see that file. */
+/** 2-4 coin spawns appear on random tiles over a 30-second round; whoever physically reaches a
+ * spawn's tile first gets +2 coins and it disappears, then another can spawn elsewhere. There's
+ * nothing for the player to actually operate here -- collection is automatic the instant they walk
+ * onto a live spawn's tile -- so this control panel is purely a "here's what to do" reminder; the
+ * actual gameplay renders in-world and the live per-round tally lives in StatsOverlay's
+ * scoreboard. */
 public class CoinRushMinigame implements Minigame
 {
     private static final Color COIN_COLOR = new Color(255, 215, 0);
@@ -40,8 +34,7 @@ public class CoinRushMinigame implements Minigame
         return "Coin Rush";
     }
 
-    /** A small pile of overlapping gold coins -- distinct from CoinTrapItem's single trapped coin
-     * and PlaceholderMinigame's plain gray glyph, reads as "grab the coins" at wheel-icon size. */
+    /** A small pile of overlapping gold coins -- reads as "grab the coins" at wheel-icon size. */
     @Override
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {

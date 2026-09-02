@@ -16,29 +16,21 @@ import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 
 /** Turf Wars' own live scoreboard -- one colored swatch+count per team currently in play, plus a
- * small "time left" countdown, while a Turf Wars round is active (see RunePartyPlugin#
- * isTurfWarsActive) AND actually playable (see RunePartyPlugin#isMinigamePlayable) -- without the
- * second check this would render (title and all) the instant MINIGAME_STARTED lands, spoiling the
- * "MINIGAME!" banner/selection wheel's own reveal by naming the mini-game before the wheel's even
- * finished spinning, same reported bug FishingCatchOverlay's own identical fix addresses. Front-
- * and-center (OverlayPosition.TOP_CENTER) with big bold numbers, same
- * reasoning FishingCatchOverlay's own redesign gives for not tucking a live count a player is
- * meant to actually watch mid-round into a corner or side panel -- this game in particular needs
- * the score to read at a glance while running across a 64-tile grid. The panel's own border is
- * tinted to the local player's own team color (see RunePartyPlugin#getPlayerTeamColor) so which
- * side you're on is obvious without reading any number.
+ * small "time left" countdown, while a Turf Wars round is active AND actually playable -- without
+ * the second check this would render the instant the mini-game starts, spoiling the "MINIGAME!"
+ * banner/selection wheel's own reveal. Front-and-center (OverlayPosition.TOP_CENTER) with big bold
+ * numbers, since this game needs the score to read at a glance while running across a 64-tile
+ * grid. The panel's own border is tinted to the local player's own team color so which side you're
+ * on is obvious without reading any number.
  * <p>
  * Unlike a fixed 2-team layout, the number of entries here varies: an even seated-PLAYER count
  * gives exactly 2 (the shared TEAM_A_COLOR/TEAM_B_COLOR), an odd count gives up to 7 (one per
- * solo player, each their own seat color -- see minigames/turf_wars.py's own doc). Entries are
- * sorted by tile count descending and wrap onto additional rows past MAX_PER_ROW, rather than
- * assuming exactly two columns fit.
+ * solo player, each their own seat color). Entries are sorted by tile count descending and wrap
+ * onto additional rows past MAX_PER_ROW, rather than assuming exactly two columns fit.
  * <p>
- * Unlike FishingCatchOverlay's catches (entirely client-local until one final submission), there's
- * no dedicated score event here at all -- a tile claim is just an ordinary tiles_marked update, so
- * every entry is tallied fresh every frame straight from TileReducer's own already-broadcast board
- * (see RunePartyPlugin#getTurfWarsTileCounts), the same "just render what the board already shows"
- * idea TileOverlay's own rendering already relies on. No timer of its own. */
+ * There's no dedicated score event here at all -- a tile claim is just an ordinary tiles_marked
+ * update, so every entry is tallied fresh every frame straight from TileReducer's own
+ * already-broadcast board. No timer of its own. */
 public class TurfWarsScoreOverlay extends Overlay
 {
     private static final int PADDING_X = 16;
@@ -198,10 +190,9 @@ public class TurfWarsScoreOverlay extends Overlay
         return textX + fm.stringWidth(text);
     }
 
-    /** "Time left: Ns", rounding up to the nearest whole second the same way CoinRushTimerOverlay's
-     * own remaining-time display does, so this never shows "0s" for a moment while the round is
-     * still technically active. Falls back to a blank countdown (not "0s") if getTurfWarsEndsAt()
-     * hasn't been stamped yet (0 -- the round's own MINIGAME_ROUND_BEGIN hasn't landed). */
+    /** "Time left: Ns", rounding up to the nearest whole second so this never shows "0s" for a
+     * moment while the round is still technically active. Falls back to a blank countdown (not
+     * "0s") if getTurfWarsEndsAt() hasn't been stamped yet. */
     private String countdownText()
     {
         long endsAt = plugin.getTurfWarsEndsAt();

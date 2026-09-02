@@ -17,25 +17,17 @@ import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 
-/** Spawns the same Golden Gnome model models/GoldenGnomeModel.java uses (model ID 32303, kept as
- * its own copy of that constant here -- these are two independent concerns, see that class's own
- * doc) at every {@link HardcodedCourse#launcherPoint}, entirely independent of TileReducer/course
- * state -- unlike GoldenGnomeModel (driven by a live game's own marked tiles), this has to render
- * with no active game at all, since discovering/right-clicking it is how a hard-coded course's
- * game gets created in the first place (see RunePartyPlugin#onMenuOpened/#onClientTick, which read
- * {@link #hoveredCourse} to find out what's actually under the cursor). TileOverlay can't host
- * this: its own render() hard-bails unless phase is LOBBY/ACTIVE (see that class's own render()),
- * which is never true for a client with no game at all.
+/** Spawns the same Golden Gnome model models/GoldenGnomeModel.java uses at every
+ * {@link HardcodedCourse#launcherPoint}, entirely independent of TileReducer/course state --
+ * unlike GoldenGnomeModel (driven by a live game's own marked tiles), this has to render with no
+ * active game at all, since discovering/right-clicking it is how a hard-coded course's game gets
+ * created in the first place. TileOverlay can't host this since its own render() hard-bails unless
+ * a game is already in LOBBY/ACTIVE.
  * <p>
- * Gated on the whole local client having no active game (plugin.getGameId() == null), not on
- * whether any specific launcher's own game is currently running -- once you're in a game (any
- * game) there's nothing left to advertise to you, and this deliberately never tries to answer "is
- * someone else already playing at this exact spot" (see HardcodedCourse's own doc on that accepted
- * tradeoff). */
+ * Gated on the whole local client having no active game, not on whether any specific launcher's
+ * own game is currently running -- once you're in a game there's nothing left to advertise to you. */
 public final class HardcodedCourseLauncherOverlay extends Overlay
 {
-    // Same model GoldenGnomeModel spawns for a real in-game Golden Gnome tile -- see that class's
-    // own GOLDEN_GNOME_MODEL_ID.
     private static final int GOLDEN_GNOME_MODEL_ID = 32303;
 
     private final Client client;
@@ -71,15 +63,9 @@ public final class HardcodedCourseLauncherOverlay extends Overlay
     /** The hard-coded course whose launcher Golden Gnome model {@code canvasPoint} is currently
      * over, or null -- real per-model screen-space clickbox hit-testing via
      * {@link Perspective#getClickbox}, not a fixed ground-tile square, so it tracks the model's
-     * actual visible silhouette from whatever angle/distance it's being viewed at (see
-     * RunePartyPlugin#onClientTick/#onMenuOpened, the only two callers). {@code Perspective.
-     * getClickbox} is the same {@code @ApiStatus.Internal} method that backs a real {@code
-     * TileObject#getClickbox()} -- a RuneLiteObject has no clickbox of its own at all otherwise,
-     * same reasoning the Follower Buddy plugin's own {@code isUnderMouse} gives for using it
-     * directly. Height (the projection's own z) isn't the object's own getZ() -- that field is
-     * never populated by setLocation (see RuneLiteObjectController's own source), it's a separate
-     * offset nothing here ever sets -- so this looks up the real tile height itself, same as that
-     * plugin's own equivalent method does. */
+     * actual visible silhouette from whatever angle/distance it's being viewed at. A RuneLiteObject
+     * has no clickbox of its own otherwise. Height comes from Perspective#getTileHeight, not the
+     * object's own getZ() -- that field is never populated by setLocation. */
     HardcodedCourse hoveredCourse(Point canvasPoint)
     {
         if (canvasPoint == null || plugin.getGameId() != null) return null;
@@ -101,9 +87,8 @@ public final class HardcodedCourseLauncherOverlay extends Overlay
         return null;
     }
 
-    /** Despawns and forgets every launcher RuneLiteObject -- called from RunePartyPlugin#shutDown,
-     * same "a RuneLiteObject outlives this overlay unless explicitly cleared" reasoning
-     * GoldenGnomeModel#clear's own doc gives. */
+    /** Despawns and forgets every launcher RuneLiteObject -- a RuneLiteObject otherwise outlives
+     * this overlay unless explicitly cleared. */
     public void clear()
     {
         objects.clear();

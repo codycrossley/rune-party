@@ -8,15 +8,13 @@ import java.util.List;
 import java.util.Map;
 
 /** A course layout: an <b>ordered</b> list of tiles relative to a center anchor, with rotation
- * support -- the Rune Party analog of Gnomeball's FieldPreset. {@code tiles}' list order is still
- * the tile's stable identity (tile 0 is the start, and a fresh commit assigns pathIndex == list
- * position, see RunePartyPlugin#commitPreset), and it's also the *only* way tiles connect here:
- * every tile's {@link RelativeTile#nextIndices} has to be set explicitly, pointing at one or more
- * other list positions -- there's no implicit "list position + 1" default (see
- * TileReducer.TileEntry#nextIndices's own doc for why). {@link #buildStandardLoop} bakes that
- * "+1, wrapping at the end" edge into every one of its own tiles explicitly, for exactly this
- * reason. Built-in courses and host-saved custom courses share this one representation, same as
- * FieldPreset does for Gnomeball fields. */
+ * support. {@code tiles}' list order is still the tile's stable identity (tile 0 is the start, and
+ * a fresh commit assigns pathIndex == list position), and it's also the only way tiles connect
+ * here: every tile's {@link RelativeTile#nextIndices} has to be set explicitly, pointing at one or
+ * more other list positions -- there's no implicit "list position + 1" default. {@link
+ * #buildStandardLoop} bakes that "+1, wrapping at the end" edge into every one of its own tiles
+ * explicitly, for exactly this reason. Built-in courses and host-saved custom courses share this
+ * one representation. */
 public final class CoursePreset
 {
     public final String name;
@@ -42,7 +40,7 @@ public final class CoursePreset
      * rotation exactly as before it -- and since nextIndices are list-position references rather
      * than coordinates, they carry over unchanged by rotation. This is the single source of truth
      * for course geometry, used identically by the live placement preview and the actual commit so
-     * they can never disagree (same guarantee FieldPreset.layout() makes for Gnomeball fields).
+     * they can never disagree.
      */
     public List<PlacedTile> layout(WorldPoint center, int rotationSteps)
     {
@@ -67,18 +65,13 @@ public final class CoursePreset
 
     /**
      * Builds a course from whatever tiles are currently marked, anchored at the bounding-box
-     * center, in path order. Unlike FieldPreset.fromTiles (which doesn't care about order), this
-     * sorts the snapshot by {@link TileReducer.TileEntry#pathIndex} first -- the reducer's own
-     * storage is an unordered map, so path order only survives via that field, not iteration order.
-     * Entries with no path index (a stray non-course marker <i>or</i> a decorative Golden Gnome
-     * modifier, see RelativeTile#decorative) are dropped rather than guessed at -- this function
-     * predates decorative tiles and doesn't yet know how to place one back at the right dx/dy
-     * relative to whatever real tile it was sitting on, same "not yet wired up" limitation
-     * {@link #fromTiles} already had before this feature existed (there's still no UI calling it).
-     * Each tile's nextIndices carries over unchanged, which only stays correct if pathIndex values
-     * are contiguous from 0 (true for any course committed via the normal placement flow) --
-     * removing individual tiles by hand first could leave stale references, same pre-existing
-     * caveat this function already had for path order in general.
+     * center, in path order. Sorts the snapshot by {@link TileReducer.TileEntry#pathIndex} first --
+     * the reducer's own storage is an unordered map, so path order only survives via that field,
+     * not iteration order. Entries with no path index (a stray non-course marker or a decorative
+     * Golden Gnome modifier, see RelativeTile#decorative) are dropped rather than guessed at --
+     * this function doesn't yet know how to place one back at the right dx/dy relative to whatever
+     * real tile it was sitting on (there's still no UI calling it). Each tile's nextIndices carries
+     * over unchanged, which only stays correct if pathIndex values are contiguous from 0.
      */
     public static CoursePreset fromTiles(String name, List<TileReducer.TileEntry> snapshot)
     {
@@ -92,8 +85,8 @@ public final class CoursePreset
         if (ordered.isEmpty()) return new CoursePreset(name, List.of());
         ordered.sort((a, b) -> Integer.compare(a.pathIndex, b.pathIndex));
 
-        // Filter to the majority plane first, same reasoning as FieldPreset.fromTiles -- a stray
-        // off-plane tile would otherwise skew the bounds used to anchor the relative coordinates.
+        // Filter to the majority plane first -- a stray off-plane tile would otherwise skew the
+        // bounds used to anchor the relative coordinates.
         Map<Integer, Integer> countByPlane = new LinkedHashMap<>();
         for (TileReducer.TileEntry e : ordered)
         {
@@ -136,25 +129,19 @@ public final class CoursePreset
         public final int dx, dy;
         public final String tileType;
         public final String color;
-        /** This tile's own outgoing edges, as *list positions* in this preset's own {@code tiles}
-         * (which become pathIndex values 1:1 on commit -- see RunePartyPlugin#commitPreset) --
-         * its *only* ones, empty means a genuine dead end. No implicit default (see
-         * TileReducer.TileEntry#nextIndices's own doc for why); a plain "continue to the next
-         * tile in the loop" edge has to be listed explicitly, same as a fork (two or more entries)
-         * or a merge redirect (one entry pointing somewhere other than "+1" -- e.g. a branch's
-         * last tile rejoining the trunk elsewhere in the list). Always empty for a decorative tile
-         * -- it has no course position of its own to route from. */
+        /** This tile's own outgoing edges, as list positions in this preset's own {@code tiles}
+         * (which become pathIndex values 1:1 on commit) -- its only ones, empty means a genuine
+         * dead end. No implicit default; a plain "continue to the next tile in the loop" edge has
+         * to be listed explicitly, same as a fork (two or more entries) or a merge redirect (one
+         * entry pointing somewhere other than "+1"). Always empty for a decorative tile -- it has
+         * no course position of its own to route from. */
         public final int[] nextIndices;
         /** True for a modifier tile that sits on top of another (non-decorative) tile at the same
          * dx/dy rather than being a course stop of its own -- a Golden Gnome tile, currently the
-         * only example (see app.py's GOLDEN_GNOME_TILE handling). Committed with pathIndex omitted
-         * (see RunePartyPlugin#commitPreset) instead of the usual "list position becomes
-         * pathIndex," the same "decorative marker" shape TileReducer already supports for a stray
-         * non-course tile. <b>Must be listed after every non-decorative tile in the preset</b>: the
-         * commit step still uses raw list position as pathIndex for non-decorative entries, so a
-         * decorative entry earlier in the list would shift every pathIndex after it, and would also
-         * throw off nextIndices values (which are list-position references computed before
-         * decorative entries are known to skip numbering). */
+         * only example. Committed with pathIndex omitted instead of the usual "list position
+         * becomes pathIndex". <b>Must be listed after every non-decorative tile in the preset</b>:
+         * the commit step still uses raw list position as pathIndex for non-decorative entries, so
+         * a decorative entry earlier in the list would shift every pathIndex after it. */
         public final boolean decorative;
 
         public RelativeTile(int dx, int dy, String tileType, String color, int... nextIndices)
@@ -193,19 +180,13 @@ public final class CoursePreset
 
     /**
      * A generated placeholder loop (a plain rectangular ring of PATH tiles, START at index 0) so
-     * there's at least one non-empty, testable built-in course out of the box. Actual course
-     * <i>design</i> is explicitly out of scope for this pass -- real courses are expected to be
-     * host-authored via sequential freehand placement (each click appends the next path index,
-     * then explicitly wired up via "Connect From"/"Connect To" -- see
-     * RunePartyPlugin#setCustomTileAt/#connectCustomTiles) and saved as custom slots through
-     * {@link #fromTiles}, the same way Gnomeball hosts build/save custom fields. Every tile here
-     * gets its own explicit single-edge nextIndices baked in below (the perimeter walk's own "+1,
-     * wrapping at the end" order) -- there's no implicit default to lean on (see
-     * TileReducer.TileEntry#nextIndices's own doc for why), so a generated course has to set this
-     * itself same as a host-built one would. Also exercises a Golden Gnome modifier end-to-end
-     * (see RelativeTile#decorative) two steps out from START, so it's reachable by almost any
-     * first roll. Also carries a Jad Tile at list index 10 (see JadEncounter), swapped in the same
-     * "same dx/dy, new tileType" way as the Item Space below.
+     * there's at least one non-empty, testable built-in course out of the box. Real courses are
+     * expected to be host-authored via sequential freehand placement, then saved as custom slots
+     * through {@link #fromTiles}. Every tile here gets its own explicit single-edge nextIndices
+     * baked in below (the perimeter walk's own "+1, wrapping at the end" order) -- there's no
+     * implicit default to lean on. Also exercises a Golden Gnome modifier end-to-end (see
+     * RelativeTile#decorative) two steps out from START, so it's reachable by almost any first
+     * roll, plus a Jad Tile at list index 10 (see JadEncounter).
      */
     public static CoursePreset buildStandardLoop()
     {
@@ -246,11 +227,9 @@ public final class CoursePreset
         }
 
         // Bake in every tile's own explicit "+1, wrapping at the end" edge -- must happen after
-        // every tileType swap above (tileType/color aren't touched here) and before the decorative
-        // Golden Gnome tile is appended below, since courseLen has to be exactly the real course's
-        // own tile count, not real-tiles-plus-decorative (a decorative tile never gets a pathIndex
-        // of its own, see RelativeTile#decorative's own doc, so it must never factor into this
-        // wraparound modulus either).
+        // every tileType swap above and before the decorative Golden Gnome tile is appended below,
+        // since courseLen has to be exactly the real course's own tile count, not
+        // real-tiles-plus-decorative (a decorative tile never gets a pathIndex of its own).
         int courseLen = tiles.size();
         for (int i = 0; i < tiles.size(); i++)
         {

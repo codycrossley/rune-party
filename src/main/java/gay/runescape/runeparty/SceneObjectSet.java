@@ -11,21 +11,17 @@ import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 
 /** Keeps one {@link RuneLiteObject} spawned per key in a caller-supplied "desired" set, diffing it
- * every call against whatever's already spawned -- the sync algorithm GoldenGnomeModel/
- * CoinTrapModel/CoinRushModel (see the models/ package) each used to independently reimplement
- * before being split out of TileOverlay (see ARCHITECTURE_REVIEW.md's C5): entrySet().removeIf
- * deactivating anything no longer wanted, computeIfAbsent spawning anything newly wanted, lazily
- * loading the model (retrying every call until it succeeds, since {@code Client#loadModel} can
- * return null for a few frames right after the client starts), bailing (deactivating) on a null
- * {@link LocalPoint} for a point not currently loaded into the scene, then setLocation and
- * setActive(true) once a model's actually attached.
+ * every call against whatever's already spawned -- the shared sync algorithm behind
+ * GoldenGnomeModel/CoinTrapModel/CoinRushModel (see the models/ package): entrySet().removeIf
+ * deactivates anything no longer wanted, computeIfAbsent spawns anything newly wanted (lazily
+ * loading the model, retrying every call until it succeeds since {@code Client#loadModel} can
+ * return null for a few frames right after the client starts), bails (deactivates) on a null
+ * {@link LocalPoint} for a point not currently loaded into the scene, then sets location and
+ * activates once a model's actually attached.
  * <p>
- * Deliberately doesn't try to own its callers' real differences -- the force-persist/suppress
- * windows (Golden Gnome relocation, Coin Trap's post-trigger linger) are just extra entries the
- * caller adds to/removes from {@code desired} before calling {@link #sync}, and Coin Trap's one-shot
- * spring animation is applied by the caller afterward via {@link #get}, not folded in here. Public
- * (unlike most of this package's classes) since every current caller lives under models/, a
- * different package. */
+ * Deliberately doesn't try to own its callers' real differences -- any force-persist/suppress
+ * windows are just extra entries the caller adds to/removes from {@code desired} before calling
+ * {@link #sync}, and a one-shot animation is applied by the caller afterward via {@link #get}. */
 public final class SceneObjectSet<K>
 {
     private final Client client;

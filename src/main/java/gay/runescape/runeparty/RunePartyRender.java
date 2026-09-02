@@ -8,17 +8,14 @@ import net.runelite.api.ModelData;
 import net.runelite.api.NPCComposition;
 import net.runelite.api.coords.WorldPoint;
 
-/** Small rendering helpers every overlay/dialog previously kept its own copy of (see
- * ARCHITECTURE_REVIEW.md's C3) -- {@code withAlpha} existed 5 times, and the "black shadow offset
- * one pixel, then the real color on top" idiom 3 of those same times. Two copies of a 3-line color
- * helper would be a fine judgment call; five was worth collapsing.
+/** Small rendering helpers shared across overlays/dialogs -- {@code withAlpha} and the
+ * "black shadow offset one pixel, then the real color on top" idiom, previously duplicated at
+ * several call sites.
  * <p>
- * {@code loadNpcModel}/{@code orientationFacing} were added for JadEncounter (the Jad Tile's
- * spawned-model effect) but don't belong to Jad specifically -- both are generic enough for any
- * future NPC-model-based tile effect to reuse without re-deriving them, which is also why both are
- * {@code public} while the rest of this class stays package-private -- JadEncounter lives under
- * models/, a different package, and is the one existing caller that actually needs them from
- * outside. */
+ * {@code loadNpcModel}/{@code orientationFacing} were added for JadEncounter but are generic
+ * enough for any NPC-model-based tile effect to reuse, which is why both are {@code public} while
+ * the rest of this class stays package-private -- JadEncounter lives under models/, a different
+ * package. */
 public final class RunePartyRender
 {
     private RunePartyRender()
@@ -26,14 +23,11 @@ public final class RunePartyRender
     }
 
     /** Loads and merges an NPC's own model parts into one final renderable {@link Model}, for
-     * spawning as a {@link net.runelite.api.RuneLiteObject} rather than a real NPC -- same
-     * technique Gnomeball's {@code CheerleaderRenderer#resolveModels}/{@code buildHueShiftedModel}
-     * already prove out for NPC 3158, minus the hue-shift step (not every caller needs a recolor).
-     * Returns {@code null} while any part isn't cached yet -- {@code Client#loadModelData} can
-     * return null for a couple of frames right after the client starts, same as every other
-     * lazy-model-load site in this codebase (see TileOverlay's own docs on this) -- callers should
-     * keep calling this every frame until it succeeds, then cache the result themselves rather
-     * than re-merging every frame. */
+     * spawning as a {@link net.runelite.api.RuneLiteObject} rather than a real NPC. Returns
+     * {@code null} while any part isn't cached yet -- {@code Client#loadModelData} can return null
+     * for a couple of frames right after the client starts -- callers should keep calling this
+     * every frame until it succeeds, then cache the result themselves rather than re-merging every
+     * frame. */
     public static Model loadNpcModel(Client client, int npcId)
     {
         NPCComposition comp = client.getNpcDefinition(npcId);
@@ -71,9 +65,8 @@ public final class RunePartyRender
         return new Color(c.getRed(), c.getGreen(), c.getBlue(), alpha);
     }
 
-    /** Clamped to [0, 255] before handing java.awt.Color a component value -- one of the five
-     * previous copies of this (ConfettiOverlay's) didn't clamp, which would have thrown if a
-     * caller's own alpha arithmetic ever drifted fractionally outside [0f, 1f]. */
+    /** Clamped to [0, 255] before handing java.awt.Color a component value, in case a caller's
+     * alpha arithmetic drifts fractionally outside [0f, 1f]. */
     static Color withAlpha(Color c, float alpha)
     {
         int a = Math.max(0, Math.min(255, (int) (alpha * 255)));
@@ -81,14 +74,10 @@ public final class RunePartyRender
     }
 
     /** Draws {@code text} once in black at (x+1, y+1), then again in {@code color} at (x, y) --
-     * the shadow-then-draw idiom PlayerOverlay's coin/Golden-Gnome popups and TileOverlay's
-     * return-arrow label all independently repeated, each already scaling both draws to the same
-     * {@code alpha}. Not a fit for every "draw text with a shadow" site in this codebase --
-     * CoinRushTimerOverlay's own drawShadowedText is a permanently-opaque HUD label with a
-     * different (+2, +2) offset, and AnnouncementOverlay's drawLeftAlignedText dims its shadow to
-     * 0.7x the main alpha and returns the x position past the text for layout chaining -- both
-     * real behavioral differences, not just duplicate names for this same thing, so both stay
-     * separate rather than being forced through this one signature. */
+     * the shadow-then-draw idiom shared by PlayerOverlay's coin/Golden-Gnome popups and
+     * TileOverlay's return-arrow label. Not a fit for every "draw text with a shadow" site in this
+     * codebase -- CoinRushTimerOverlay and AnnouncementOverlay each have real behavioral
+     * differences (a different offset, a dimmed shadow, layout chaining), so they stay separate. */
     static void drawShadowed(Graphics2D g, String text, int x, int y, Color color, int alpha)
     {
         g.setColor(withAlpha(Color.BLACK, alpha));

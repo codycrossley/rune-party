@@ -9,12 +9,9 @@ import java.io.InputStream;
 import javax.imageio.ImageIO;
 import lombok.extern.slf4j.Slf4j;
 
-/** Client-side counterpart to the server's EnergyPotionItem (see items/energy_potion.py) --
- * banks a +3 bonus for the holder's own next roll rather than resolving immediately, so unlike
- * PlaceholderItem this has no coin-popup feedback of its own; see hasUseAnnouncement/
- * getUseAnnouncementSubtitle for the banner that stands in for that, and RunePartyPlugin's
- * DICE_ROLLED handling for how the bonus itself gets shown once it's actually applied. Key must
- * match the server's own EnergyPotionItem registration exactly, see that file. */
+/** Banks a +3 bonus for the holder's own next roll rather than resolving immediately, so unlike
+ * PlaceholderItem this has no coin-popup feedback of its own -- see hasUseAnnouncement/
+ * getUseAnnouncementSubtitle for the banner that stands in for that. */
 @Slf4j
 public class EnergyPotionItem implements Item
 {

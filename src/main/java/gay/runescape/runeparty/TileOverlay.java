@@ -23,20 +23,19 @@ import java.util.Collection;
 import java.util.List;
 
 /** Renders the course: committed tiles from TileReducer, plus a live placement/removal preview
- * while the host is building. Unlike Gnomeball's TileOverlay -- whose FIELD/ZONE tiles are large
- * connected regions rendered as an outline -- a course is a one-tile-wide walked path, so every
- * tile renders individually as its own rounded-corner outline (see renderOutlinedTile), inset a
- * little inward from the tile's true boundary so adjacent tiles' outlines read as a clean grid
- * rather than doubled-up touching edges, with a connecting line drawn between consecutive path
- * indices to make the route itself legible. Several exceptions, all genuinely connected regions
- * rather than a walked path (like Gnomeball's own zones): the Fishing Contest platform's
- * FISHING_TILE block and Sandwich Rush's own SANDWICH_RUSH_TILE grid each render as a single
- * merged-area outline only, no per-tile fill underneath (see renderFishingZoneOutline/
- * renderArenaOutline) -- Sandwich Rush's tiles never change color (see minigames/sandwich_rush.py's
- * own doc), so an individual fill per tile would just be noise. Turf Wars' own TURF_WARS_TILE grid
- * also gets that same merged arena outline, but keeps an individual fill-only tile underneath it
- * (renderTurfWarsTile) since each tile's own color is real, meaningful state (which team claimed
- * it) -- all outlines still share roundedInsetPolygon so their corners read exactly the same. */
+ * while the host is building. A course is a one-tile-wide walked path, so every tile renders
+ * individually as its own rounded-corner outline (see renderOutlinedTile), inset a little inward
+ * from the tile's true boundary so adjacent tiles' outlines read as a clean grid rather than
+ * doubled-up touching edges, with a connecting line drawn between consecutive path indices to make
+ * the route itself legible. Several exceptions are genuinely connected regions rather than a
+ * walked path: the Fishing Contest platform's FISHING_TILE block and Sandwich Rush's own
+ * SANDWICH_RUSH_TILE grid each render as a single merged-area outline only, no per-tile fill
+ * underneath (see renderFishingZoneOutline/renderArenaOutline) -- Sandwich Rush's tiles never
+ * change color, so an individual fill per tile would just be noise. Turf Wars' own TURF_WARS_TILE
+ * grid also gets that same merged arena outline, but keeps an individual fill-only tile underneath
+ * it (renderTurfWarsTile) since each tile's own color is real, meaningful state (which team
+ * claimed it) -- all outlines still share roundedInsetPolygon so their corners read exactly the
+ * same. */
 @Slf4j
 public class TileOverlay extends Overlay
 {
@@ -73,7 +72,7 @@ public class TileOverlay extends Overlay
     private static final Color TURF_WARS_ARENA_OUTLINE_COLOR = new Color(255, 255, 255, 160);
     // Sandwich Rush's own arena outline -- a warm gold rather than Turf Wars' neutral white, so
     // the two arenas read as visually distinct at a glance (matches SANDWICH_RUSH_TILE's own
-    // served color_hex, see tiles/sandwich_rush.py).
+    // served color).
     private static final Color SANDWICH_RUSH_ARENA_OUTLINE_COLOR = new Color(232, 163, 61, 180);
 
     private static final Stroke SOLID_STROKE   = new BasicStroke(3.5f);
@@ -89,9 +88,8 @@ public class TileOverlay extends Overlay
     private final TileReducer tileReducer;
 
     // The tile-decoration 3D models -- Golden Gnome, Coin Trap, Coin Rush, Arena Fire -- each own
-    // their own SceneObjectSet-backed diff/spawn (see ARCHITECTURE_REVIEW.md's C5) under models/,
-    // split out of this class since more of these are planned; this overlay just owns one instance
-    // of each and calls update()/clear() at the right moments below.
+    // their own SceneObjectSet-backed diff/spawn under models/; this overlay just owns one
+    // instance of each and calls update()/clear() at the right moments below.
     private final GoldenGnomeModel goldenGnomeModel;
     private final CoinTrapModel coinTrapModel;
     private final CoinRushModel coinRushModel;
@@ -178,7 +176,7 @@ public class TileOverlay extends Overlay
             if ("ARENA_TILE".equals(entry.tileType) && ArenaFireModel.isDead(entry.color)) continue; // rendered as a 3D model instead, see models/ArenaFireModel
             if ("POND_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see models/PondModel
             if ("FISHING_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderFishingZoneOutline
-            if ("SANDWICH_RUSH_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- these tiles never change color (see minigames/sandwich_rush.py's own doc), so an individual fill per tile is just noise
+            if ("SANDWICH_RUSH_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- these tiles never change color, so an individual fill per tile is just noise
             if ("TURF_WARS_TILE".equals(entry.tileType)) { renderTurfWarsTile(g, entry); continue; } // fill only, no per-tile outline, see renderTurfWarsTile
             Color base = resolveColor(entry.color, entry.tileType);
             renderOutlinedTile(g, entry.point, base, SOLID_STROKE);
@@ -198,16 +196,14 @@ public class TileOverlay extends Overlay
 
     /** Draws the whole Fishing Contest platform's FISHING_TILE block as one merged-area outline,
      * rather than each of its tiles getting its own individually like renderCommittedCourse's main
-     * loop does for a walked path -- the platform is a genuinely connected region (see this class's
-     * own doc), so tracing every internal seam would just be visual noise. Derives the region's
-     * center from the POND_TILE modifier stacked at its exact center coordinate (see
-     * minigames/fishing_contest.py's own _centered_platform, the only source of this layout) rather
-     * than averaging FISHING_TILE corners itself, and its size from the FISHING_TILE entries' own
-     * bounding box rather than a hardcoded constant, so this keeps working if PLATFORM_SIZE ever
-     * changes. {@link Perspective#getCanvasTileAreaPoly} is the AoE-polygon counterpart to
-     * getCanvasTilePoly (which a single renderOutlinedTile call uses) -- same 4-corner polygon
-     * shape, just spanning the whole region instead of one tile, so it drops straight into the same
-     * roundedInsetPolygon call every other outline here already uses. */
+     * loop does for a walked path -- the platform is a genuinely connected region, so tracing every
+     * internal seam would just be visual noise. Derives the region's center from the POND_TILE
+     * modifier stacked at its exact center coordinate rather than averaging FISHING_TILE corners
+     * itself, and its size from the FISHING_TILE entries' own bounding box rather than a hardcoded
+     * constant, so this keeps working if the platform size ever changes. {@link
+     * Perspective#getCanvasTileAreaPoly} is the AoE-polygon counterpart to getCanvasTilePoly (which
+     * a single renderOutlinedTile call uses) -- same 4-corner polygon shape, just spanning the
+     * whole region instead of one tile. */
     private void renderFishingZoneOutline(Graphics2D g, List<TileReducer.TileEntry> entries)
     {
         WorldPoint center = null;
@@ -246,16 +242,13 @@ public class TileOverlay extends Overlay
      * SANDWICH_RUSH_TILE) as one merged-area outline, same "genuinely one connected region, not a
      * walked path" reasoning renderFishingZoneOutline already gives -- individual tiles are
      * fill-only (Turf Wars' own colored claims via renderTurfWarsTile, Sandwich Rush's plain
-     * catalog color via the generic per-tile loop above), so this is each grid's *only* outline.
+     * catalog color via the generic per-tile loop above), so this is each grid's only outline.
      * Neither arena has a single "center" tile to anchor on the way Fishing Contest's own
-     * POND_TILE-marked platform does -- GRID_SIZE is even, so the true geometric center falls
+     * POND_TILE-marked platform does -- the grid size is even, so the true geometric center falls
      * between four tiles, not on any one of them. Built directly from the bounding box's own
      * min/max corner tiles' LocalPoints instead: averaging two tile-center LocalPoints gives
      * exactly the midpoint between the low edge of the min corner and the high edge of the max
-     * corner (the +/-64 each tile's own half-width contributes cancels out), which is the region's
-     * true center -- constructed via LocalPoint's own plain (x, y) constructor, confirmed present
-     * on the real API. Generalized from a Turf-Wars-only version once Sandwich Rush needed the
-     * identical shape for its own arena, rather than a second copy of this same scan/outline. */
+     * corner, which is the region's true center. */
     private void renderArenaOutline(Graphics2D g, List<TileReducer.TileEntry> entries, String tileType, Color outlineColor)
     {
         Integer minX = null, maxX = null, minY = null, maxY = null;
@@ -296,85 +289,64 @@ public class TileOverlay extends Overlay
     }
 
     /** Whether {@code canvasPoint} is currently over the Golden Gnome model spawned at {@code
-     * point}'s own real screen-space clickbox -- see GoldenGnomeModel#isUnderMouse, and
-     * RunePartyPlugin#onClientTick/#onMenuOpened, the only callers (same clickbox-hit-testing
-     * technique HardcodedCourseLauncherOverlay#hoveredCourse uses for its own launcher model). */
+     * point}'s own real screen-space clickbox -- see GoldenGnomeModel#isUnderMouse. */
     // Fully qualified rather than imported -- this file's own bare "Point" already means
-    // java.awt.Point everywhere else (via the java.awt.* import above, this file's own established
-    // canvas-coordinate type, public x/y fields), and an explicit net.runelite.api.Point import
-    // would shadow that for the whole file, not just this one method.
+    // java.awt.Point everywhere else, and an explicit net.runelite.api.Point import would shadow
+    // that for the whole file, not just this one method.
     public boolean isGoldenGnomeUnderMouse(WorldPoint point, net.runelite.api.Point canvasPoint)
     {
         return goldenGnomeModel.isUnderMouse(point, canvasPoint);
     }
 
-    /** Despawns and forgets every Coin Trap RuneLiteObject -- same reasoning/call sites as
-     * clearGoldenGnomeModels. */
+    /** Despawns and forgets every Coin Trap RuneLiteObject. */
     public void clearCoinTrapModels()
     {
         coinTrapModel.clear();
     }
 
-    /** Despawns and forgets every Coin Rush RuneLiteObject -- same reasoning/call sites as
-     * clearGoldenGnomeModels/clearCoinTrapModels. */
+    /** Despawns and forgets every Coin Rush RuneLiteObject. */
     public void clearCoinRushModels()
     {
         coinRushModel.clear();
     }
 
-    /** Despawns and forgets every Sandwich Rush ingredient RuneLiteObject -- same reasoning/call
-     * sites as clearGoldenGnomeModels/clearCoinRushModels. */
+    /** Despawns and forgets every Sandwich Rush ingredient RuneLiteObject. */
     public void clearSandwichItemModels()
     {
         sandwichItemModel.clear();
     }
 
-    /** Despawns and forgets every Arena Fire RuneLiteObject -- same reasoning/call sites as
-     * clearGoldenGnomeModels/clearCoinTrapModels/clearCoinRushModels. */
+    /** Despawns and forgets every Arena Fire RuneLiteObject. */
     public void clearArenaFireModels()
     {
         arenaFireModel.clear();
     }
 
-    /** Despawns and forgets every Pond RuneLiteObject -- same reasoning/call sites as
-     * clearGoldenGnomeModels/clearCoinTrapModels/clearCoinRushModels/clearArenaFireModels. */
+    /** Despawns and forgets every Pond RuneLiteObject. */
     public void clearPondModels()
     {
         pondModel.clear();
     }
 
-    /** Despawns and forgets every Table RuneLiteObject -- same reasoning/call sites as
-     * clearGoldenGnomeModels/clearCoinTrapModels/clearCoinRushModels/clearArenaFireModels/
-     * clearPondModels. */
+    /** Despawns and forgets every Table RuneLiteObject. */
     public void clearTableModels()
     {
         tableModel.clear();
     }
 
-    /** Draws a bouncing, pulsing arrow -- in the mover's own RunePartyColor (see
-     * RunePartyPlugin#getRosterReducer, falls back to gold if their seat color can't be resolved)
-     * -- labeled with their name centered above it, over <i>every</i> candidate tile the current
-     * roll could resolve to. Usually that's one tile, but a roll whose path crosses a fork can
-     * offer more than one (see RunePartyPlugin#getPendingTargetIndices and the server's
-     * _reachable_targets) -- the player picks which one to walk to, so every candidate gets its
-     * own arrow. Visible to every client watching, not just the mover, the same way the rest of
-     * the board state is shared. Held back until AnnouncementOverlay's dice-roll reveal has
-     * actually settled on the real number (RunePartyPlugin.DICE_ROLL_SPIN_PHASE_MS after
-     * diceRollStart, plus RunePartyPlugin.DICE_ROLL_BONUS_REVEAL_MS more on top of that whenever
-     * this roll carried an item bonus -- see getDiceRollBonus -- so the "+N = total" reveal always
-     * finishes before this arrow spoils where that total actually lands) --
-     * pendingTargetIndices is known the instant DICE_ROLLED lands, same moment
-     * the die starts cycling random faces, so showing the destination immediately would spoil the
-     * roll before the die even reveals what it landed on. All of them disappear together as soon as
-     * the mover is actually standing on any one candidate (checked directly against their on-screen
-     * position every frame, not just on the next TURN_STARTED echo) or, failing that, once
-     * TURN_STARTED clears pendingRoll/pendingTargetIndices (see RunePartyPlugin#handleEvent) -- e.g.
-     * if the mover isn't currently rendered for this client. Also suppressed once a mini-game
-     * starts: when the last roller of a round lands, the server fires MINIGAME_STARTED instead of
-     * TURN_STARTED (see the server's _advance_turn_or_start_minigame), so
-     * pendingRoll/pendingTargetIndices are never cleared by that path -- without this check, that
-     * mover stepping off their landed tile during the mini-game would make this arrow reappear
-     * telling them to go back, which is no longer where they need to be. */
+    /** Draws a bouncing, pulsing arrow -- in the mover's own RunePartyColor, falls back to gold if
+     * their seat color can't be resolved -- labeled with their name centered above it, over
+     * <i>every</i> candidate tile the current roll could resolve to. Usually that's one tile, but
+     * a roll whose path crosses a fork can offer more than one -- the player picks which one to
+     * walk to, so every candidate gets its own arrow. Visible to every client watching, not just
+     * the mover, the same way the rest of the board state is shared. Held back until
+     * AnnouncementOverlay's dice-roll reveal has actually settled on the real number, so this
+     * arrow never spoils where the total lands before the die reveals it. All of them disappear
+     * together as soon as the mover is actually standing on any one candidate, or, failing that,
+     * once TURN_STARTED clears the pending roll. Also suppressed once a mini-game starts: the last
+     * roller of a round fires MINIGAME_STARTED instead of TURN_STARTED, so the pending roll is
+     * never cleared by that path -- without this check, that mover stepping off their landed tile
+     * during the mini-game would make this arrow reappear telling them to go back. */
     private void renderTargetArrow(Graphics2D g)
     {
         if (!plugin.isPendingRoll() || plugin.isMinigameActive()) return;
@@ -409,21 +381,17 @@ public class TileOverlay extends Overlay
         }
     }
 
-    /** Draws the "come back here" arrow over the current mover's own tracked board position (see
-     * RunePartyPlugin#getPlayerPosition) whenever it's their turn, they haven't rolled yet, and
-     * they're not actually standing there -- e.g. they wandered off after landing last round.
-     * Mirrors renderStartArrow's pre-game "gather here" instruction, just generalized to every
-     * turn instead of only the first: RunePartyPlugin#onAnimationChanged enforces the same
-     * requirement server-side-of-the-gesture (the Spin emote does nothing until they're back), this
-     * is purely the visual telling them where "back" is. Suppressed during a mini-game the same way
-     * renderTargetArrow is (see that method's own doc) -- once minigameActive flips true there's no
-     * tile left to return to until the round's next TURN_STARTED. Also suppressed for the whole
-     * duration of a pending roll (isPendingRoll), which covers wandering off toward the Golden
-     * Gnome to purchase it (see purchaseGoldenGnomeAt) just as well as any other mid-roll detour --
-     * "return" isn't the point until they've actually confirmed arrival. Unlike renderTargetArrow
-     * (which broadcasts whose turn is resolving to everyone watching), this only ever renders for
-     * the mover themselves -- it's a personal nudge to walk back, not board state anyone else needs
-     * to see. */
+    /** Draws the "come back here" arrow over the current mover's own tracked board position
+     * whenever it's their turn, they haven't rolled yet, and they're not actually standing there --
+     * e.g. they wandered off after landing last round. Mirrors renderStartArrow's pre-game "gather
+     * here" instruction, just generalized to every turn instead of only the first. Suppressed
+     * during a mini-game the same way renderTargetArrow is -- once minigameActive flips true
+     * there's no tile left to return to until the round's next TURN_STARTED. Also suppressed for
+     * the whole duration of a pending roll, which covers wandering off toward the Golden Gnome to
+     * purchase it just as well as any other mid-roll detour. Unlike renderTargetArrow (which
+     * broadcasts whose turn is resolving to everyone watching), this only ever renders for the
+     * mover themselves -- it's a personal nudge to walk back, not board state anyone else needs to
+     * see. */
     private void renderReturnToPositionArrow(Graphics2D g)
     {
         if (plugin.isPendingRoll() || plugin.isMinigameActive()) return;
@@ -476,11 +444,10 @@ public class TileOverlay extends Overlay
         RunePartyRender.drawShadowed(g, label, center.x - textWidth / 2, textY, color, alpha);
     }
 
-    /** Draws the pre-game "gather here" arrow over the START tile (always path index 0, see
-     * CoursePreset) during the window between GAME_STARTED and the first TURN_STARTED -- i.e.
-     * while RunePartyPlugin#getCurrentTurnRsn is still null, see RunePartyPlugin#
-     * checkGatheringAtStart for the matching per-player confirm-start reporting. Uses the START
-     * tile's own green so the arrow visually ties back to the tile it's pointing at. */
+    /** Draws the pre-game "gather here" arrow over the START tile (always path index 0) during the
+     * window between GAME_STARTED and the first TURN_STARTED, i.e. while
+     * RunePartyPlugin#getCurrentTurnRsn is still null. Uses the START tile's own green so the
+     * arrow visually ties back to the tile it's pointing at. */
     private void renderStartArrow(Graphics2D g)
     {
         if (plugin.getPhase() != GamePhase.ACTIVE) return;
@@ -507,19 +474,14 @@ public class TileOverlay extends Overlay
     }
 
     /** "Purchase!" arrow over the Golden Gnome's own current tile while the local player has a
-     * roll pending on their own turn -- see RunePartyPlugin#hoveredPurchasableGoldenGnomePoint,
-     * the right-click entry (offered on the model's own real clickbox now, not this tile -- see
-     * that method's own doc) this arrow is pointing at. Local-only, same reasoning
-     * renderItemPlacementArrows gives: nobody but the current roller can actually act on the menu
-     * entry it's advertising. Gated on exactly the same conditions that menu entry itself checks
-     * (already-purchased-this-turn, reachability) -- reported: this used to skip both, so the
-     * arrow kept advertising a purchase the menu entry would no longer even offer, either because
-     * it was already bought this turn or because the gnome had relocated somewhere out of reach.
-     * Still doesn't re-check affordability -- same as the menu entry, purchase-golden-gnome is the
-     * real authority on that (see that endpoint's own doc); showing the arrow for a purchase that
-     * turns out unaffordable just means an attempt from here 409s, same as any other doomed click.
-     * Uses the Golden Gnome tile type's own served color, same reasoning renderStartArrow ties its
-     * own arrow back to START's own green. */
+     * roll pending on their own turn. Local-only, same reasoning renderItemPlacementArrows gives:
+     * nobody but the current roller can actually act on the menu entry it's advertising. Gated on
+     * exactly the same conditions that menu entry itself checks (already-purchased-this-turn,
+     * reachability), so the arrow never advertises a purchase the menu entry wouldn't actually
+     * offer. Still doesn't re-check affordability -- purchase-golden-gnome is the real authority
+     * on that; showing the arrow for a purchase that turns out unaffordable just means an attempt
+     * from here 409s. Uses the Golden Gnome tile type's own served color, same reasoning
+     * renderStartArrow ties its own arrow back to START's own green. */
     private void renderGoldenGnomePurchaseArrow(Graphics2D g)
     {
         if (!plugin.isPendingRoll()) return;
@@ -688,17 +650,14 @@ public class TileOverlay extends Overlay
         }
     }
 
-    /** Draws one Turf Wars tile as a fill only -- no per-tile outline any more (see this class's
-     * own doc and renderArenaOutline, the grid's one merged boundary now). Shares
-     * roundedInsetPolygon's own geometry with renderOutlinedTile -- same shape, just filled
-     * instead of stroked -- so a Turf Wars tile still lines up with the rest of the board's own
-     * inset/rounding, even though nothing draws its edge individually any more.
+    /** Draws one Turf Wars tile as a fill only -- no per-tile outline (see this class's own doc
+     * and renderArenaOutline, the grid's one merged boundary). Shares roundedInsetPolygon's own
+     * geometry with renderOutlinedTile -- same shape, just filled instead of stroked.
      * <p>
      * Alpha is a faint neutral wash (TURF_WARS_FILL_ALPHA_UNCLAIMED) while entry.color is still
-     * null -- nobody's ever stood here, resolveColor falls through to the catalog's own default
-     * gray -- or a solid, opaque-reading fill (TURF_WARS_FILL_ALPHA_CLAIMED) the moment a real
-     * team color lands. This *is* the game's own live "who controls what" map -- no periodic
-     * pulse/reshuffle warning any more, ownership just persists once claimed until someone else
+     * null -- nobody's ever stood here -- or a solid, opaque-reading fill
+     * (TURF_WARS_FILL_ALPHA_CLAIMED) the moment a real team color lands. This is the game's own
+     * live "who controls what" map -- ownership just persists once claimed until someone else
      * physically stands there and flips it. */
     private void renderTurfWarsTile(Graphics2D g, TileReducer.TileEntry entry)
     {
@@ -819,9 +778,8 @@ public class TileOverlay extends Overlay
         return path;
     }
 
-    /** Looks up this tile type's color in the served catalog (see RunePartyPlugin#getTileTypeCatalog,
-     * populated once at startup from GET /v1/tile-types) rather than a hardcoded table -- falls
-     * back to COLOR_UNKNOWN_TYPE for a type the catalog doesn't have (yet, or ever). */
+    /** Looks up this tile type's color in the served catalog rather than a hardcoded table --
+     * falls back to COLOR_UNKNOWN_TYPE for a type the catalog doesn't have (yet, or ever). */
     private Color defaultColorFor(String tileType)
     {
         ApiClient.TileTypeOut t = plugin.getTileTypeCatalog().get(tileType);

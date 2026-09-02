@@ -7,17 +7,13 @@ import java.io.InputStream;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.ui.FontManager;
 
-/** Shared font resources for the whole plugin -- currently just the one Mario Party-style display
- * font, split out of AnnouncementOverlay (its original sole consumer) once CoinRushTimerOverlay
- * needed the exact same font too, so both load it through one place instead of duplicating the
- * loader. */
+/** Shared font resources for the whole plugin -- currently just the Mario Party-style display font
+ * used by both AnnouncementOverlay and CoinRushTimerOverlay. */
 @Slf4j
 final class RunePartyFonts
 {
-    // Bundled at src/main/resources/gay/runescape/runeparty/mario-party-hudson.ttf -- loaded once
-    // at class-init, deriveFont(size) per use same as FontManager's own fonts. Falls back to the
-    // client's own bold font if the resource is ever missing, so a packaging mistake degrades
-    // gracefully instead of crashing whichever overlay asked for it.
+    // Loaded once at class-init; falls back to the client's own bold font if the resource is
+    // missing, so a packaging mistake degrades gracefully instead of crashing.
     static final Font MARIO_PARTY = load();
 
     private static Font load()

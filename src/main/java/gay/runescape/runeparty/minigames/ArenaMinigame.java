@@ -7,14 +7,9 @@ import java.util.Random;
 import javax.swing.JComponent;
 import javax.swing.JPanel;
 
-/** Client-side counterpart to the server's ArenaMinigame (see minigames/arena.py) -- a 4x4 hazard
- * grid whose gathering message, tile colors, and elimination all render/animate in-world and
- * center-screen (see TileOverlay's generic tile rendering and AnnouncementOverlay#
- * renderArenaGatherMessage) rather than through any side-panel control, same "fully screen-driven"
- * shape TrueOrFalseMinigame already uses (see hasSidePanelPresence). Key must match the server's
- * own ArenaMinigame registration exactly, see that file. Registering this is what keeps
- * RunePartyPanel from falling back to KeyedRegistry's own default entry (a Placeholder mini-game's
- * score-submission spinner, which makes no sense for the Arena) whenever this key's active. */
+/** A 4x4 hazard grid whose gathering message, tile colors, and elimination all render/animate
+ * in-world and center-screen, rather than through any side-panel control (see
+ * hasSidePanelPresence). */
 public class ArenaMinigame implements Minigame
 {
     private static final Color ARENA_RED = new Color(220, 30, 30);
@@ -82,8 +77,7 @@ public class ArenaMinigame implements Minigame
         g.drawRect(left, top, size, size);
     }
 
-    /** Never actually called -- see hasSidePanelPresence, same "minimal rather than unreachable"
-     * shape TrueOrFalseMinigame's own doc explains. */
+    /** Never actually called -- see hasSidePanelPresence. */
     @Override
     public JComponent createControlPanel(RunePartyPlugin plugin)
     {

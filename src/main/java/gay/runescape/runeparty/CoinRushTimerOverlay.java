@@ -12,31 +12,21 @@ import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.OverlayPriority;
 
-/** A big, standalone Coin Rush countdown -- deliberately its own overlay rather than a line inside
- * StatsOverlay's own Coin Rush scoreboard (see that class's own doc), so a round's remaining time
- * reads as a genuinely prominent, Mario-Party-style on-screen clock instead of one small line
- * buried in a stats panel. Positioned just past the right edge of StatsOverlay's own panel (see
- * StatsOverlay#PANEL_WIDTH) rather than through RuneLite's own corner-stacking layout: two
- * TOP_LEFT overlays would stack vertically, one above the other, not side by side, which isn't
- * what "next to it" means here -- so this uses OverlayPosition.DYNAMIC and draws itself directly
- * at a fixed canvas offset instead, the same raw-canvas-coordinate approach AnnouncementOverlay/
- * PlayerOverlay already use for everything they draw. That offset assumes StatsOverlay is sitting
- * at its own default top-left corner position -- if a player ever drags StatsOverlay elsewhere via
- * RuneLite's overlay editor, this one won't follow it, the same limitation any fixed-offset layout
- * has without a live cross-overlay bounds query. */
+/** A big, standalone Coin Rush countdown, positioned just past the right edge of StatsOverlay's
+ * panel. Uses OverlayPosition.DYNAMIC and draws itself at a fixed canvas offset rather than
+ * RuneLite's corner-stacking layout, since two TOP_LEFT overlays would stack vertically instead of
+ * side by side. That offset assumes StatsOverlay is still at its default position -- it won't
+ * follow if a player drags StatsOverlay elsewhere. */
 public class CoinRushTimerOverlay extends Overlay
 {
-    private static final Color NUMBER_COLOR = new Color(255, 215, 0); // matches AnnouncementOverlay's own RAINBOW_YELLOW
-    private static final Color URGENT_COLOR = new Color(235, 60, 60); // last few seconds -- reads as "hurry up"
+    private static final Color NUMBER_COLOR = new Color(255, 215, 0);
+    private static final Color URGENT_COLOR = new Color(235, 60, 60); // last few seconds
     private static final long URGENT_THRESHOLD_MS = 5000;
     private static final float NUMBER_SIZE = 48f;
     private static final float LABEL_SIZE = 14f;
 
-    // Canvas offset this overlay draws itself at -- see this class's own doc on why it's a fixed
-    // constant rather than a query against StatsOverlay's actual rendered position. Matches the
-    // small margin RuneLite's own OverlayRenderer applies to a TOP_LEFT-anchored overlay, so the
-    // two read as vertically aligned; GAP_X is empirically chosen, just enough that this doesn't
-    // look glued to StatsOverlay's own right edge.
+    // Canvas offset this overlay draws itself at (see class doc). MARGIN matches RuneLite's own
+    // default TOP_LEFT margin so the two read as vertically aligned.
     private static final int MARGIN_X = 4;
     private static final int MARGIN_Y = 4;
     private static final int GAP_X = 14;
@@ -61,7 +51,7 @@ public class CoinRushTimerOverlay extends Overlay
         if (!plugin.isCoinRushActive() || !plugin.isMinigamePlayable()) return null;
 
         long remainingMs = plugin.getCoinRushEndsAt() - System.currentTimeMillis();
-        long remainingSec = Math.max(0, (remainingMs + 999) / 1000); // 0 (not negative) once the round's own clock runs out -- the server's MINIGAME_ENDED is what actually ends it, this is purely the display
+        long remainingSec = Math.max(0, (remainingMs + 999) / 1000); // never negative once the round ends
 
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);

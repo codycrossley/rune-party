@@ -6,13 +6,8 @@ import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import net.runelite.client.ui.FontManager;
 
-/** Client-side counterpart to the server's PlaceholderItem (see items/placeholder.py) -- applying
- * it just changes coins by a fixed amount, so there's nothing to draw here beyond an obvious
- * placeholder icon. Registered multiple times under different keys (see Items) purely so the
- * Item Space wheel/inventory/use-flow have more than one option to actually exercise while real
- * items are still being designed -- every instance behaves identically apart from its own
- * key/displayName. Keys and display names must match the server's own PlaceholderItem
- * registrations exactly, see that file. */
+/** A generic item that just changes coins by a fixed amount -- nothing to draw here beyond an
+ * obvious placeholder icon. Keys and display names must match the server's own registrations. */
 public class PlaceholderItem implements Item
 {
     private static final Color ICON_COLOR = new Color(80, 150, 220);
@@ -39,10 +34,7 @@ public class PlaceholderItem implements Item
     }
 
     /** An explicit, obvious placeholder -- a plain blue square with a glyph (the key's own last
-     * character, so the registered instances read as distinct options on the wheel and in the
-     * panel), standing in until real items (and their own real icons) replace these. Square
-     * rather than PlaceholderMinigame's circle purely so the two wheels' placeholders are
-     * visually distinguishable from each other too. */
+     * character, so multiple registered instances read as distinct options). */
     @Override
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {

@@ -22,10 +22,8 @@ import net.runelite.client.ui.overlay.OverlayPosition;
 /** Spawns a real 3D model of TzTok-Jad (NPC {@link #JAD_NPC_ID}) -- not a 2D overlay -- for the
  * full Jad Tile encounter (awaken -> idle loop while awaiting a response -> either a bow
  * acknowledgement or a smash penalty -> despawn), facing back at whoever landed there. Spawned by
- * TILE_EFFECT (see RunePartyPlugin, the only caller of {@link #spawn}); the encounter itself is
- * server-driven (see app.py's _run_jad_encounter), so every despawn here (JAD_DISMISSED, either
- * directly via {@link #clear} on the smashed path or via {@link #playBowThenClear} on the bowed
- * one) is reacting to something the server has already decided, never guessing at it.
+ * TILE_EFFECT; the encounter itself is server-driven, so every despawn here reacts to something
+ * the server has already decided, never guessing at it.
  * <p>
  * Same "RuneLiteObject registered directly with the client's scene graph" approach the models/
  * package's own GoldenGnomeModel/CoinTrapModel/CoinRushModel use for their own tile decorations.
@@ -35,14 +33,11 @@ import net.runelite.client.ui.overlay.OverlayPosition;
  * for its own animation-hold timers rather than a plain per-frame diff. */
 public class JadEncounter extends Overlay
 {
-    private static final int JAD_NPC_ID = 3127; // TzTok-Jad, per the RuneMonk entity-viewer link this was asked from
+    private static final int JAD_NPC_ID = 3127; // TzTok-Jad
 
-    // Fallback if NPCComposition.getSize() isn't available yet the first frame render() runs --
-    // same 5-tile-wide assumption resolveRadius() computes properly once the composition loads.
-    // See RuneLiteObjectController#radius's own doc: the default (60) "works well for models the
-    // size of a single tile" -- nothing in either this repo or Gnomeball has ever spawned an
-    // object this large before, so this scaling (size * half a tile) is new ground, not a copied
-    // pattern, and may need visual tuning once actually seen in-client.
+    // Fallback if NPCComposition.getSize() isn't available yet the first frame render() runs.
+    // RuneLiteObject's own default radius (60) works well for models the size of a single tile,
+    // but Jad is much bigger, so this scales by the model's actual size once it's known.
     private static final int DEFAULT_RADIUS = 320;
 
     private final Client client;
@@ -69,10 +64,8 @@ public class JadEncounter extends Overlay
     private volatile WorldPoint facing;
 
     // When the object is actually allowed to start showing -- the later of "now" or
-    // plugin.getTurnEffectGateUntil(), computed ONCE inside spawn(), not re-checked every frame.
-    // See JadPresentation#revealAt's own doc for why this must be a fixed timestamp decided once:
-    // an earlier version re-read the live gate every frame here, which self-inflicted a flashing
-    // loop once anything (this render() included) started extending that same gate while showing.
+    // plugin.getTurnEffectGateUntil(), computed once inside spawn(), not re-checked every frame.
+    // See JadPresentation#revealAt's own doc for why this must be a fixed timestamp decided once.
     private volatile long revealAt;
 
     // Set by playSmash() (see JAD_SMASH_TRIGGERED handling), consumed the next frame render() finds
@@ -140,14 +133,11 @@ public class JadEncounter extends Overlay
                 smashPending = false;
                 idleApplied = true; // belt-and-suspenders: never let a late-loading idle animation clobber the smash afterward
 
-                // Estimated duration of the smash animation itself (not measured, same caveat
-                // every other animation-hold estimate here carries) -- after which Jad returns to
-                // its ordinary idle loop for whatever's left of the server's own real
-                // JAD_SMASH_ANIMATION_SECONDS window, rather than staying frozen on the smash's
-                // last frame until JAD_DISMISSED despawns it. Unlike playBowThenClear's own tail,
-                // no separate "and then clear" follow-up is scheduled here -- JAD_DISMISSED already
-                // despawns this immediately on its own server-timed schedule (see RunePartyPlugin's
-                // own JAD_DISMISSED handling).
+                // Estimated duration of the smash animation itself, after which Jad returns to its
+                // ordinary idle loop rather than staying frozen on the smash's last frame until
+                // JAD_DISMISSED despawns it. Unlike playBowThenClear's own tail, no separate "and
+                // then clear" follow-up is scheduled here -- JAD_DISMISSED already despawns this on
+                // its own server-timed schedule.
                 plugin.scheduleDelayed(() -> idleApplied = false, RunePartyPlugin.JAD_SMASH_ANIMATION_HOLD_MS);
             }
         }
@@ -165,11 +155,9 @@ public class JadEncounter extends Overlay
                 // smash/penalty sequence, this whole tail is purely client-timed. Flipping
                 // idleApplied back to false after the animation's own estimated duration is enough
                 // to make the !idleApplied branch below reapply JAD_IDLE_ANIMATION_ID on its own
-                // next frame -- same lazy "retry until loaded" idiom every animation swap here
-                // already uses, so no separate pending flag is needed for the return trip. clear()
-                // (and the idleApplied write) are safe to run from this executor thread directly --
-                // clear() hops to the client thread itself for the actual RuneLiteObject mutation,
-                // see its own doc, and idleApplied is just a volatile field write.
+                // next frame, so no separate pending flag is needed for the return trip. clear()
+                // hops to the client thread itself for the actual RuneLiteObject mutation, so it's
+                // safe to call from this executor thread directly.
                 plugin.scheduleDelayed(() -> idleApplied = false, RunePartyPlugin.JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS);
                 plugin.scheduleDelayed(this::clear,
                     RunePartyPlugin.JAD_BOW_ACKNOWLEDGE_ANIMATION_HOLD_MS + RunePartyPlugin.JAD_BOW_ACKNOWLEDGE_IDLE_HOLD_MS);
@@ -237,17 +225,13 @@ public class JadEncounter extends Overlay
     }
 
     /** Despawns Jad immediately, if one's currently up -- for shutDown(), RunePartyPlugin's own
-     * JAD_DISMISSED handling (directly on the smashed path; scheduled after the bow-acknowledge
-     * sequence on the bowed one, see {@link #playBowThenClear}), and render()'s own phase-based
-     * safety net (leaving/disconnecting shouldn't strand this the way the models/ package's own
-     * tile decorations can't either). Safe to call when nothing's spawned.
+     * JAD_DISMISSED handling, and render()'s own phase-based safety net. Safe to call when nothing's
+     * spawned.
      * <p>
-     * Callers include RunePartyPlugin#handleEvent (EventSocket's own WebSocket callback thread --
-     * see the field docs above), plugin.scheduleDelayed's own scheduled thread (see
-     * playBowThenClear), as well as render() itself (already on the client thread) --
-     * RuneLiteObject#setActive() asserts client-thread ownership the same way camera setters do
-     * (see RunePartyPlugin#resetState's identical reasoning), so this dispatches there itself
-     * rather than trust the caller's thread, same as Gnomeball's own CheerleaderRenderer#clear. */
+     * Called from more than one thread (RunePartyPlugin#handleEvent's WebSocket callback thread,
+     * plugin.scheduleDelayed's scheduled thread, and render() on the client thread) --
+     * RuneLiteObject#setActive() asserts client-thread ownership, so this dispatches there itself
+     * rather than trust the caller's thread. */
     public void clear()
     {
         jadCenter = null;

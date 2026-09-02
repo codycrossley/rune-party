@@ -19,10 +19,10 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Locks in EventSocket's CAUGHT_UP handling (ARCHITECTURE_REVIEW.md's R3): every (re)connect opens
- * at {@code afterSeq=lastSeq}, so the server's own replay burst for that connection -- everything
- * sent before its CAUGHT_UP sentinel -- must reach the listener with {@code catchingUp=true}, and
- * only events after that sentinel should read as genuinely live.
+ * Locks in EventSocket's CAUGHT_UP handling: every (re)connect opens at {@code afterSeq=lastSeq},
+ * so the server's own replay burst for that connection -- everything sent before its CAUGHT_UP
+ * sentinel -- must reach the listener with {@code catchingUp=true}, and only events after that
+ * sentinel should read as genuinely live.
  */
 public class EventSocketTest
 {
@@ -103,8 +103,8 @@ public class EventSocketTest
         };
 
         // The server sends two backlog events, then its CAUGHT_UP sentinel, then one genuinely
-        // live event -- one WebSocket frame per message, matching how app.py's game_events_ws
-        // actually writes them (one send_json call per backlog row, not batched).
+        // live event -- one WebSocket frame per message, matching how the server actually writes
+        // them.
         server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener()
         {
             @Override

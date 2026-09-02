@@ -4,9 +4,8 @@ import net.runelite.api.coords.WorldPoint;
 
 import java.util.List;
 
-/** A course whose tiles sit at fixed, absolute world coordinates -- committed verbatim via the
- * ordinary mark-tiles endpoint (see RunePartyPlugin#createGameFromHardcodedCourse) the instant a
- * game is created from this course's own launcher, rather than a host placing tiles by hand
+/** A course whose tiles sit at fixed, absolute world coordinates -- committed verbatim the instant
+ * a game is created from this course's own launcher, rather than a host placing tiles by hand
  * through build mode. Unlike {@link CoursePreset} (list-position == pathIndex, host picks a center
  * + rotation), a hard-coded course's {@link #tiles} already carry real, possibly non-contiguous
  * pathIndex values and their own explicit nextIndices exactly as captured -- there's no relative
@@ -14,20 +13,18 @@ import java.util.List;
  * <p>
  * {@link #launcherPoint} is this course's own START tile point -- where
  * {@link HardcodedCourseLauncherOverlay} spawns the persistent, always-visible Golden Gnome model
- * that "Create Game" hangs off of (see RunePartyPlugin#addHardcodedCourseLauncherMenuEntry). Every
- * course's own {@link #tiles} includes one extra GOLDEN_GNOME_TILE stacked on that same point --
- * tiles are keyed by (x, y, plane, tileType), same stacking CoursePreset.buildStandardLoop already
- * uses for its own Golden Gnome modifier, so this needs no special-casing at commit time. Once the
- * game actually starts, app.py's own start_game relocates that gnome off START to a random PATH
- * tile automatically (a general rule, not specific to hard-coded courses -- see that endpoint's own
- * doc), using the exact same relocation event/animation a purchase-triggered move already uses. */
+ * that "Create Game" hangs off of. Every course's own {@link #tiles} includes one extra
+ * GOLDEN_GNOME_TILE stacked on that same point, the same stacking CoursePreset.buildStandardLoop
+ * uses for its own Golden Gnome modifier. Once the game starts, the server relocates that gnome
+ * off START to a random PATH tile automatically, using the same relocation event/animation a
+ * purchase-triggered move already uses. */
 public final class HardcodedCourse
 {
     public final String name;
     /** Stable identifier sent to the server via ApiClient#lockStandardCourse -- distinct from
      * {@link #name} (a display string that could change) so a rename here never silently breaks
-     * anything keyed off of it server-side (see minigames/course_offset.py's own ARENA_OFFSETS
-     * table). Never changes once a course ships -- treat it the same as a database primary key. */
+     * anything keyed off of it server-side. Never changes once a course ships -- treat it the same
+     * as a database primary key. */
     public final String key;
     public final WorldPoint launcherPoint;
     public final List<ApiClient.TileSpec> tiles;
@@ -47,21 +44,10 @@ public final class HardcodedCourse
         return new ApiClient.TileSpec(x, y, 0, tileType, null, null, pathIndex, nextIndices);
     }
 
-    /** Captured read-only from a real, currently-active LOBBY game (host "Mario Twunk", game_id
-     * 20260901-033101-41DB) via a direct query against the local docker DB -- no write made, that
-     * live game is untouched. This is the same real-world spot the original hard-coded capture
-     * used (START still at (2996, 3374, 0), unchanged -- see this class's own doc on why
-     * {@link #launcherPoint} always just follows wherever a course's own START tile is), evolved
-     * since via the host's own "Connect From"/"Connect To" edits -- new ITEM_TILE/EVENT_TILE
-     * forks, more branches. 56 real tiles, non-contiguous pathIndex (this course has real gaps
-     * from in-game tile removals) preserved exactly as captured, plus one GOLDEN_GNOME_TILE
-     * already stacked on START in the live data itself. 8 tiles' own nextIndices had a second,
-     * genuinely dangling entry left over from that editing (an old "+1" edge to a since-removed
-     * tile, sitting alongside a real new fork edge the host had added without ever cleaning up the
-     * stale one via "Remove Connection") -- harmless in play (a nonexistent target is just never
-     * followed, see app.py's _resolve_next_indices/tile_at_index) but stripped here rather than
-     * baked permanently into a hard-coded course that has no in-game "Remove Connection" of its
-     * own to fix it with later. */
+    /** Captured from a real, host-built course (56 tiles, non-contiguous pathIndex from in-game
+     * tile removals, plus one GOLDEN_GNOME_TILE stacked on START). A few stale, dangling
+     * nextIndices entries left over from editing were stripped here rather than baked permanently
+     * into a course with no in-game "Remove Connection" of its own to fix them with later. */
     private static HardcodedCourse buildFallyParkCourse()
     {
         WorldPoint start = new WorldPoint(2996, 3374, 0);

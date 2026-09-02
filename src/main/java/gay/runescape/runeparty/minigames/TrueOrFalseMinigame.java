@@ -9,15 +9,10 @@ import javax.swing.JComponent;
 import javax.swing.JPanel;
 import net.runelite.client.ui.FontManager;
 
-/** Client-side counterpart to the server's TrueOrFalseMinigame (see minigames/true_or_false.py)
- * -- 5 rounds, 5 seconds each, one OSRS trivia question per round. An answer is a YES
- * ("True")/NO ("False") emote (see RunePartyPlugin#isLocalPlayerAwaitingTrueOrFalseAnswer/
- * answerTrueOrFalse), and the question, countdown, live "who's answered" tally, and per-round
- * reveal all render screen-centered in AnnouncementOverlay (see renderTrueOrFalseQuestion/
- * renderTrueOrFalseReveal) -- the same "Ready screen"-style treatment the mini-game ready-check
- * already uses -- so this mini-game has zero side-panel presence at all (see
- * hasSidePanelPresence), unlike Coin Rush's own plain "here's what to do" reminder there. Key
- * must match the server's own TrueOrFalseMinigame registration exactly, see that file. */
+/** 5 rounds, 5 seconds each, one OSRS trivia question per round. An answer is a YES ("True")/NO
+ * ("False") emote, and the question, countdown, live "who's answered" tally, and per-round reveal
+ * all render screen-centered in AnnouncementOverlay -- so this mini-game has zero side-panel
+ * presence (see hasSidePanelPresence), unlike Coin Rush's plain "here's what to do" reminder. */
 public class TrueOrFalseMinigame implements Minigame
 {
     private static final Color CARD_COLOR = new Color(230, 230, 230);
@@ -38,8 +33,7 @@ public class TrueOrFalseMinigame implements Minigame
     }
 
     /** A small card with a green "T" and a red "F" -- reads as "true/false quiz" at wheel-icon
-     * size without needing a real model/image asset, same procedural-icon approach
-     * CoinTrapItem/PlaceholderMinigame already use. */
+     * size without needing a real model/image asset. */
     @Override
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
@@ -72,12 +66,8 @@ public class TrueOrFalseMinigame implements Minigame
         g.drawString(f, fX, glyphY);
     }
 
-    /** Entirely screen-driven -- the question, countdown, and "who's answered" tally all render
-     * center-screen in AnnouncementOverlay (see renderTrueOrFalseQuestion/renderTrueOrFalseReveal),
-     * so this mini-game has no side-panel presence at all (see hasSidePanelPresence) -- unlike
-     * Coin Rush, which still shows a plain "here's what to do" reminder there. This is never
-     * actually called as a result; kept minimal rather than unreachable purely to satisfy the
-     * interface. */
+    /** Never actually called -- see hasSidePanelPresence; kept minimal rather than unreachable
+     * purely to satisfy the interface. */
     @Override
     public JComponent createControlPanel(RunePartyPlugin plugin)
     {

@@ -20,21 +20,14 @@ import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.util.ImageUtil;
 
 /** Shows the local player's own Sandwich Rush progress -- a titled panel with one icon per
- * ingredient (dimmed until held, full brightness plus a gold border once collected -- see
- * RunePartyPlugin#getSandwichHeld) plus a running completed-sandwich count, while a Sandwich Rush
- * round is active (see RunePartyPlugin#isSandwichRushActive) AND actually playable (see
- * RunePartyPlugin#isMinigamePlayable) -- same reveal-spoiler fix FishingCatchOverlay's own doc
- * explains. Also gated on the local viewer actually being a seated PLAYER (explicit
- * seatedPlayers() membership check) -- "none for observers" per the reported ask, not just an
- * empty/zero panel; an observer has no held ingredients or sandwich count of their own to show at
- * all.
+ * ingredient (dimmed until held, full brightness plus a gold border once collected) plus a running
+ * completed-sandwich count, while a Sandwich Rush round is active AND actually playable -- same
+ * reveal-spoiler fix FishingCatchOverlay avoids. Also gated on the local viewer actually being a
+ * seated PLAYER -- an observer has no held ingredients or sandwich count of their own to show.
  * <p>
- * Deliberately self-only, same reasoning FishingCatchOverlay's own doc gives for its own catch
- * tally -- confirmed via clarifying question during this feature's own planning (self-only during
- * the round; the shared final tally happens for free via the existing end-of-round rewards
- * recap, same as every other minigame's payout). Reads RunePartyPlugin#getSandwichHeld/
- * getSandwichCount fresh every frame, no timer of its own, same reasoning FishingCatchOverlay's
- * own render() already gives. */
+ * Deliberately self-only, same as FishingCatchOverlay's catch tally -- the shared final tally
+ * happens for free via the existing end-of-round rewards recap, same as every other minigame's
+ * payout. */
 public class SandwichRushHudOverlay extends Overlay
 {
     private static final int ICON_SIZE = 30;
@@ -142,11 +135,10 @@ public class SandwichRushHudOverlay extends Overlay
         return new Dimension(width, height);
     }
 
-    /** held: full brightness plus a small gold border, matching HELD_BORDER's own "you have this"
-     * color. Not held: same icon dimmed to NOT_HELD_ALPHA via AlphaComposite, no border -- still
-     * identifiable (this is a checklist, not a mystery), just visually secondary. icon may be null
-     * (a missing/failed-to-load resource) -- skips drawing it rather than throwing, same defensive
-     * shape FishingCatchOverlay's own drawCount already follows. */
+    /** held: full brightness plus a small gold border. Not held: same icon dimmed to
+     * NOT_HELD_ALPHA via AlphaComposite, no border -- still identifiable, just visually secondary.
+     * icon may be null (a missing/failed-to-load resource) -- skips drawing it rather than
+     * throwing. */
     private void drawIngredientIcon(Graphics2D g, BufferedImage icon, int x, int y, boolean held)
     {
         if (icon == null) return;
@@ -166,9 +158,9 @@ public class SandwichRushHudOverlay extends Overlay
         g.drawRoundRect(x - 2, y - 2, ICON_SIZE + 4, ICON_SIZE + 4, 6, 6);
     }
 
-    /** "None for observers" per the reported ask -- a spectator has no held ingredients/sandwich
-     * count of their own to show, so this checks seatedPlayers() membership directly rather than
-     * letting an empty/zero panel render for them. */
+    /** A spectator has no held ingredients/sandwich count of their own to show, so this checks
+     * seatedPlayers() membership directly rather than letting an empty/zero panel render for
+     * them. */
     private boolean isLocalPlayerSeated()
     {
         String self = plugin.getLocalRsn();

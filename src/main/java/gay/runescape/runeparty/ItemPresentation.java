@@ -5,35 +5,30 @@ import net.runelite.api.coords.WorldPoint;
 
 import java.util.Locale;
 
-/** Item wheel/cap/used-announcement and Coin Trap trigger state and event handling -- extracted
- * from RunePartyPlugin per ARCHITECTURE_REVIEW.md's C1 finding, step 2. Owns its own fields, folds
- * ITEM_GRANTED/ITEM_CAP_BLOCKED/COIN_TRAP_TRIGGERED via apply(), and exposes handleItemUsed() for
- * RunePartyPlugin's hybrid ITEM_USED case to call (itemUsedThisTurn itself stays core -- see
- * RunePartyPlugin#isLocalPlayerReadyToRoll/isAwaitingSomeonesRoll, which read it directly). Clears
- * itself via reset(); RunePartyPlugin still exposes every getter under its original name, just
- * delegating here, so no external caller needs to change. */
+/** Item wheel/cap/used-announcement and Coin Trap trigger state and event handling, extracted out
+ * of RunePartyPlugin. Owns its own fields, folds ITEM_GRANTED/ITEM_CAP_BLOCKED/
+ * COIN_TRAP_TRIGGERED via apply(), and exposes handleItemUsed() for RunePartyPlugin's hybrid
+ * ITEM_USED case to call (itemUsedThisTurn itself stays core, read directly by RunePartyPlugin).
+ * Clears itself via reset(); RunePartyPlugin still exposes every getter under its original name,
+ * just delegating here. */
 final class ItemPresentation
 {
     private final RunePartyPlugin plugin;
 
     // ---- item wheel reveal (cosmetic-only timing, chained behind whatever turn-effect is already
     // showing -- see scheduleItemSpinner). Payload identifies who got what, needed by the reveal
-    // text ("You got..."/"<rsn> got...", mirroring GoldenGnomePresentation's own outcome banner's
-    // per-viewer split). ----
+    // text ("You got..."/"<rsn> got..."). ----
     private final TimedBanner<ItemSpinnerPayload> itemSpinner = new TimedBanner<>();
-    // ---- item cap announcement (cosmetic-only timing, chained the same way as the item spinner
-    // above -- see scheduleItemCapBlockedAnnouncement). Fires instead of the item wheel when
-    // ITEM_CAP_BLOCKED lands, so at most one of {itemSpinner.until, itemCapBlocked.until} is ever
-    // "live" for the same landing. ----
+    // ---- item cap announcement, chained the same way as the item spinner above. Fires instead of
+    // the item wheel when ITEM_CAP_BLOCKED lands, so at most one of {itemSpinner.until,
+    // itemCapBlocked.until} is ever "live" for the same landing. ----
     private final TimedBanner<ItemCapBlockedPayload> itemCapBlocked = new TimedBanner<>();
-    // ---- item-used announcement (cosmetic-only timing, chained the same way as the item cap
-    // banner above -- see scheduleItemUsedAnnouncement). Only fired for items that opt in via
-    // Item#hasUseAnnouncement -- PlaceholderItem's coin change already has its own feedback. ----
+    // ---- item-used announcement, chained the same way as the item cap banner above. Only fired
+    // for items that opt in via Item#hasUseAnnouncement -- PlaceholderItem's coin change already
+    // has its own feedback. ----
     private final TimedBanner<ItemUsedAnnouncePayload> itemUsedAnnounce = new TimedBanner<>();
-    // ---- Coin Trap trigger (cosmetic-only timing, chained the same way as the item-used
-    // announcement above -- see scheduleCoinTrapTriggerAnnouncement). Payload is whoever landed on
-    // it (the victim) -- the owner's own feedback is purely their coin popup, no banner of their
-    // own. ----
+    // ---- Coin Trap trigger, chained the same way as the item-used announcement above. Payload is
+    // whoever landed on it (the victim) -- the owner's own feedback is purely their coin popup. ----
     private final TimedBanner<String> coinTrapAnnounce = new TimedBanner<>(); // payload: victim rsn
     // Real-time (not chained behind scheduleAfterTurnEffects -- see COIN_TRAP_TRIGGERED handling's
     // own doc): where TileOverlay#updateCoinTrapModels should force-persist the model and fire its
@@ -69,8 +64,8 @@ final class ItemPresentation
 
             case Events.ITEM_CAP_BLOCKED:
             {
-                // No inventory change -- the server refused to grant anything, see app.py's
-                // ITEM_TILE handling. Purely cosmetic, same as ITEM_GRANTED's own reveal.
+                // No inventory change -- the server refused to grant anything. Purely cosmetic,
+                // same as ITEM_GRANTED's own reveal.
                 if (!catchingUp)
                 {
                     String rsn = Json.requiredStr(e.payload, type, "player");
@@ -146,9 +141,9 @@ final class ItemPresentation
     }
 
     /** Schedules AnnouncementOverlay's "already have N items" announcement via
-     * scheduleAfterTurnEffects -- fired instead of scheduleItemSpinner when the server's own
-     * ITEM_CAP_BLOCKED lands (see app.py's ITEM_TILE handling), so it waits behind whatever
-     * turn-effect visual is already showing the same way the item wheel itself would have. */
+     * scheduleAfterTurnEffects -- fired instead of scheduleItemSpinner when ITEM_CAP_BLOCKED
+     * lands, so it waits behind whatever turn-effect visual is already showing the same way the
+     * item wheel itself would have. */
     private void scheduleItemCapBlockedAnnouncement(String rsn, int cap)
     {
         plugin.armBanner(itemCapBlocked, RunePartyPlugin.ITEM_CAP_BLOCKED_DURATION_MS, () -> new ItemCapBlockedPayload(rsn, cap), true);

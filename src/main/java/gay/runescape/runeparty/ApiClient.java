@@ -64,8 +64,8 @@ public class ApiClient
     }
 
     /** {@code maxRounds} is "turns per player" -- the host-set limit after which the game ends
-     * (following that round's mini-game). The server deliberately doesn't insert the first
-     * TURN_STARTED here; see confirmStart. */
+     * (following that round's mini-game). The first TURN_STARTED isn't inserted here; see
+     * confirmStart. */
     public void startGame(String gameId, String writeKey, int maxRounds) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -79,9 +79,8 @@ public class ApiClient
     }
 
     /** Reports the local player standing on the START tile after GAME_STARTED but before turn
-     * order has actually begun (currentTurnRsn still null) -- once every seated PLAYER has called
-     * this, the server inserts the first TURN_STARTED itself. Same report-then-server-decides
-     * shape as confirmArrival, just for the pre-game gathering window instead of a rolled move. */
+     * order has actually begun -- once every seated PLAYER has called this, the server inserts the
+     * first TURN_STARTED itself. */
     public void confirmStart(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -119,8 +118,7 @@ public class ApiClient
     }
 
     /** Host-only kick -- same PLAYER_LEFT outcome as leaveGame, just authorized via the host's own
-     * write key instead of the target's session token (which the host doesn't have). See
-     * RunePartyPlugin#removePlayer, the only caller. */
+     * write key instead of the target's session token. */
     public void removePlayer(String gameId, String writeKey, String playerRsn) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -134,12 +132,9 @@ public class ApiClient
     }
 
     /** Host-only: promotes/demotes a roster member between PLAYER and SPECTATOR. Joining a game
-     * only ever grants SPECTATOR (see /v1/join/{code}) -- this is how the host opts someone into
-     * the turn order, same assign-role contract as Gnomeball's ApiClient. colorNumber is the
-     * host's own explicit seat-color choice (see RunePartyColor#seatNumber, and RunePartyPlugin#
-     * addToGameMenuEntry/RunePartyPanel#buildAddToGamePopup, which offer one submenu entry per
-     * currently-available color) -- null for a SPECTATOR demotion, or to let the server auto-pick
-     * the lowest available color instead. */
+     * only ever grants SPECTATOR -- this is how the host opts someone into the turn order.
+     * colorNumber is the host's explicit seat-color choice -- null for a SPECTATOR demotion, or to
+     * let the server auto-pick the lowest available color. */
     public void assignRole(String gameId, String writeKey, String playerRsn, RunePartyRole role, Integer colorNumber) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -157,8 +152,7 @@ public class ApiClient
     // -------------------------------------------------------------------------
     // Turn engine -- dice rolls and coin balances are always server-resolved.
     // These calls report a request/claim; the authoritative outcome comes back
-    // as an event (DICE_ROLLED / PLAYER_MOVED / COINS_CHANGED / ...), same
-    // report-then-wait-for-echo pattern Gnomeball's README documents.
+    // as an event (DICE_ROLLED / PLAYER_MOVED / COINS_CHANGED / ...).
     // -------------------------------------------------------------------------
 
     /** Requests a dice roll for the current player. The server rolls (not the client) and
@@ -176,10 +170,9 @@ public class ApiClient
         }
     }
 
-    /** Reports that the local player has finished walking to the tile their roll resolved to.
-     * The server validates this against the pending roll before resolving the tile's effect and
-     * advancing the turn -- same "client reports a position claim, server decides" trust boundary
-     * Gnomeball's zoneGoal/outOfBounds use (see gnomeball/LIMITATIONS.md Section 1). */
+    /** Reports that the local player has finished walking to the tile their roll resolved to. The
+     * server validates this against the pending roll before resolving the tile's effect and
+     * advancing the turn -- the client only reports a position claim, the server decides. */
     public void confirmArrival(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -196,11 +189,9 @@ public class ApiClient
     }
 
     /** Reports that the local player has finished walking to the Start tile after using a Home
-     * Teleport -- see the server's own confirm-home-teleport-arrival endpoint, which is what
-     * actually pays out the reward (never at use time, see items/home_teleport.py's own doc). Same
-     * "client reports a position claim, server decides" trust boundary confirmArrival already
-     * uses, just not tied to a pending roll -- Home Teleport is a free action, so this can be
-     * called well after (even a turn or more after) the item was actually used. */
+     * Teleport -- this is what actually pays out the reward, never at use time. Not tied to a
+     * pending roll like confirmArrival, since Home Teleport is a free action that can be called
+     * well after the item was used. */
     public void confirmHomeTeleportArrival(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -217,11 +208,9 @@ public class ApiClient
     }
 
     /** Continuous "here's where I am right now" ping, fired every game tick while a mini-game is
-     * playable (see RunePartyPlugin#onGameTick) -- unlike confirmArrival/confirmHomeTeleportArrival,
-     * this isn't a one-shot report of reaching a specific destination, it's a live heartbeat a
-     * mini-game's own server-side round (e.g. the Arena's hazard tiles) reads back to know who's
-     * standing where, moment to moment. Generic, not Arena-specific -- any future mini-game that
-     * needs live positions reuses this same call. */
+     * playable -- unlike confirmArrival, this is a live heartbeat rather than a one-shot report of
+     * reaching a destination. Generic, shared by any mini-game that needs live positions (e.g. the
+     * Arena's hazard tiles). */
     public void reportMinigamePosition(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -237,11 +226,9 @@ public class ApiClient
         }
     }
 
-    /** Submits the local player's final Fishing Contest catch tally -- see the server's own
-     * submit-fishing-catch endpoint. Fired exactly once per round, from RunePartyPlugin#
-     * submitFishingCatch the moment that client's own local 30-second timer elapses -- unlike
-     * reportMinigamePosition's own per-tick heartbeat, this is a one-shot report, not a
-     * continuously-repeated one. */
+    /** Submits the local player's final Fishing Contest catch tally. Fired once per round, when
+     * the local 30-second timer elapses -- a one-shot report, unlike reportMinigamePosition's
+     * per-tick heartbeat. */
     public void submitFishingCatch(String gameId, String playerRsn, String playerToken, int anchovies, int shrimp) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -256,13 +243,11 @@ public class ApiClient
         }
     }
 
-    /** Buys the Golden Gnome currently standing at (x, y, plane) -- see the server's own
-     * purchase-golden-gnome endpoint. A free side-action during the local player's own pending
-     * roll, triggered by a right-click "Purchase Golden Gnome" menu entry rather than an emote --
-     * doesn't touch pendingRoll or advance the turn, so confirmArrival is still a separate call
-     * afterward. 409s if it isn't genuinely the local player's turn, no roll is pending, the tile
-     * isn't reachable within the current roll, they've already bought one this turn, or they can't
-     * afford it -- the server, not this call's caller, checks and debits the coin balance. */
+    /** Buys the Golden Gnome standing at (x, y, plane). A free side-action during the local
+     * player's pending roll, triggered by a right-click menu entry rather than an emote -- doesn't
+     * touch pendingRoll or advance the turn, so confirmArrival is still a separate call afterward.
+     * 409s if it isn't the local player's turn, no roll is pending, the tile isn't reachable, one's
+     * already been bought this turn, or they can't afford it. */
     public void purchaseGoldenGnome(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -278,9 +263,8 @@ public class ApiClient
         }
     }
 
-    /** Reports the local player's BOW emote during a pending Jad encounter -- same
-     * report-then-server-decides shape as answerTrueOrFalse. 409s if the encounter isn't
-     * pending for this player, or if it already smashed (the bow window expired first). */
+    /** Reports the local player's BOW emote during a pending Jad encounter. 409s if the encounter
+     * isn't pending for this player, or if it already smashed (the bow window expired first). */
     public void bowToJad(String gameId, String playerRsn, String playerToken) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -293,9 +277,8 @@ public class ApiClient
         }
     }
 
-    /** Spends one of the local player's held items on their own turn -- see the server's own
-     * use-item endpoint, which applies the item's effect and 409s if they don't actually hold it
-     * or it isn't genuinely their turn to act. */
+    /** Spends one of the local player's held items on their own turn. 409s if they don't hold it or
+     * it isn't their turn to act. */
     public void useItem(String gameId, String playerRsn, String playerToken, String itemKey) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -309,11 +292,9 @@ public class ApiClient
         }
     }
 
-    /** Spends one of the local player's held requires_target items (currently only Tele Block) on
-     * {@code targetRsn} -- see the server's own use-item-on-player endpoint, a separate call from
-     * useItem the same way placeCoinTrap is (see that method's own doc), since a requires_target
-     * item has no meaningful use without a target to go with it. 409s if they don't hold it, it
-     * isn't genuinely their turn to act, or targetRsn isn't an active PLAYER in this game. */
+    /** Spends one of the local player's held target-requiring items (currently only Tele Block) on
+     * {@code targetRsn} -- a separate call from useItem since these items need a target to go with
+     * them. 409s if they don't hold it, it isn't their turn, or targetRsn isn't an active PLAYER. */
     public void useItemOnPlayer(String gameId, String playerRsn, String playerToken, String itemKey, String targetRsn) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -328,11 +309,9 @@ public class ApiClient
         }
     }
 
-    /** Spends a held Coin Trap by placing it at (x, y, plane) -- see the server's own
-     * place-coin-trap endpoint, which both consumes the item and marks the tile in one call (there's
-     * no separate "use" step for a requires_placement item, see Item#requiresPlacement). 409s if
-     * the tile isn't one of the two directly adjacent to the player's own current position, or if
-     * it isn't genuinely their turn to act. */
+    /** Spends a held Coin Trap by placing it at (x, y, plane) -- consumes the item and marks the
+     * tile in one call. 409s if the tile isn't directly adjacent to the player's current position,
+     * or if it isn't their turn to act. */
     public void placeCoinTrap(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -348,13 +327,8 @@ public class ApiClient
         }
     }
 
-    /** Submits this player's raw result for the currently-active mini-game. The server determines
-     * the winner and coin payout from all submitted results -- the payout amount is never
-     * client-dictated -- but the underlying performance number is necessarily self-reported by
-     * each client, the same trust boundary as every other client-observed claim in this model. */
-    /** Reports the local player's YES emote during the ready-check screen -- see the server's own
-     * minigame_ready, which inserts MINIGAME_COUNTDOWN_STARTED once every seated PLAYER's made
-     * this same call, same "report-then-server-decides" shape as confirmStart. */
+    /** Reports the local player's YES emote during the ready-check screen -- the server inserts
+     * MINIGAME_COUNTDOWN_STARTED once every seated PLAYER's made this same call. */
     public void confirmMinigameReady(String gameId, String playerRsn, String playerToken) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -367,6 +341,9 @@ public class ApiClient
         }
     }
 
+    /** Submits this player's raw result for the currently-active mini-game. The server determines
+     * the winner and coin payout from all submitted results -- the payout amount is never
+     * client-dictated, though the underlying performance number is self-reported. */
     public void submitMinigameResult(String gameId, String playerRsn, String playerToken, int score) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -380,16 +357,11 @@ public class ApiClient
         }
     }
 
-    /** Reports the local player reaching a still-live Coin Rush spawn tile (see the server's own
-     * collect-coin-rush-coin endpoint), keyed by {@code spawnId} rather than just the tile's own
-     * coordinates -- more than one racer can report the exact same spawn within the same tick, and
-     * the server needs to tell "two separate reports for the same still-live spawn, first one
-     * wins" apart from "this spawn already got claimed and a new one just happens to share the
-     * tile." (x, y, plane) are carried alongside purely so the server can sanity-check the report
-     * against where it actually placed that spawn, the same trust-boundary shape confirmArrival's
-     * own (x, y, plane) already has for a rolled destination -- the payout itself (+2 coins,
-     * COIN_RUSH_COLLECTED naming the actual winner) is always server-decided, never this call's own
-     * response. */
+    /** Reports the local player reaching a still-live Coin Rush spawn tile, keyed by
+     * {@code spawnId} rather than just coordinates -- more than one racer can report the same
+     * spawn in the same tick, and the server needs to tell that apart from a new spawn that
+     * happens to share the tile. (x, y, plane) let the server sanity-check the report against
+     * where it actually placed the spawn. The payout is always server-decided. */
     public void collectCoinRushCoin(String gameId, String playerRsn, String playerToken, int spawnId, int x, int y, int plane) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -423,10 +395,8 @@ public class ApiClient
     }
 
     /** Reports the local player's YES ("True")/NO ("False") emote answering the current True or
-     * False round -- see the server's own true-or-false-answer endpoint, which 409s a second
-     * attempt for the same round (an answer, once landed, is final) or if no question is
-     * currently open. Never echoes back correctness -- that's only ever revealed once the round's
-     * own clock runs out, via TRUE_OR_FALSE_ROUND_ENDED. */
+     * False round. 409s a second attempt for the same round, or if no question is open. Never
+     * echoes back correctness -- that's only revealed once the round ends. */
     public void answerTrueOrFalse(String gameId, String playerRsn, String playerToken, boolean answer) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -441,13 +411,10 @@ public class ApiClient
     }
 
     // -------------------------------------------------------------------------
-    // Course/board building -- same tile-marking shape as Gnomeball's field
-    // builder, extended with a path index so a course is an ordered sequence
-    // rather than an unordered zone/field set.
+    // Course/board building
     // -------------------------------------------------------------------------
 
-    /** One request for a whole course's worth of tiles instead of one request per tile, same
-     * reasoning as Gnomeball's markTiles/unmarkTiles. */
+    /** One request for a whole course's worth of tiles instead of one request per tile. */
     public void markTiles(String gameId, String writeKey, List<TileSpec> tiles) throws IOException
     {
         JsonArray arr = new JsonArray();
@@ -501,11 +468,9 @@ public class ApiClient
         }
     }
 
-    /** Locks this game to a Standard Course (see HardcodedCourse.java/
-     * RunePartyPlugin#createGameFromHardcodedCourse) -- called once, right after that course's own
-     * tiles are committed via markTiles above. Once locked, the server refuses every future
-     * mark-tiles/unmark-tiles call for this game (see app.py's own standard_course_key checks),
-     * matching this course no longer having any client-side build tools offered either. */
+    /** Locks this game to a Standard Course (see HardcodedCourse.java) -- called once, right after
+     * that course's tiles are committed via markTiles above. Once locked, the server refuses
+     * further mark-tiles/unmark-tiles calls for this game. */
     public void lockStandardCourse(String gameId, String writeKey, String courseKey) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -540,9 +505,8 @@ public class ApiClient
         }
     }
 
-    /** Static, server-wide catalog of tile-type colors/labels/descriptions
-     * -- not game-scoped, so unlike fetchRoster this only needs fetching once per
-     * plugin session, not per game. See RunePartyPlugin#loadTileTypeCatalog. */
+    /** Static, server-wide catalog of tile-type colors/labels/descriptions -- not game-scoped, so
+     * unlike fetchRoster this only needs fetching once per plugin session. */
     public TileTypesResponse fetchTileTypes() throws IOException
     {
         Request req = new Request.Builder()
@@ -579,15 +543,11 @@ public class ApiClient
         }
     }
 
-    /** Read-only check that {@code writeKey} still actually works for {@code gameId} -- see
-     * RunePartyPlugin#attemptSessionResume, the only caller: a host's writeKey lives only in that
-     * client's own memory (never persisted server-side beyond its hash, see create_game's own
-     * doc), so a plugin restart has nothing to reload it from except this same client's own
-     * earlier-persisted copy. This just confirms that copy is still good -- and hands back the
-     * game's current joinCode/hostRsn/status -- before RunePartyPlugin resumes acting as host with
-     * it. Throws ApiHttpException(403) if the key's simply wrong, (404) if the game's gone
-     * entirely -- both mean this game can never be hosted again from here, there's no reissue path
-     * (unlike a player's own session token, see joinGame). */
+    /** Read-only check that {@code writeKey} still works for {@code gameId} -- a host's writeKey
+     * lives only in client memory, so a plugin restart has nothing to reload it from except its own
+     * earlier-persisted copy. Confirms that copy is still good and hands back the game's current
+     * joinCode/hostRsn/status. Throws ApiHttpException(403) if the key's wrong, (404) if the game's
+     * gone -- both mean this game can never be hosted again from here. */
     public HostSessionInfo checkHostSession(String gameId, String writeKey) throws IOException
     {
         try (Response resp = get("/v1/games/" + gameId + "/host-session", writeKey))
@@ -631,14 +591,9 @@ public class ApiClient
         return resp.body() != null ? resp.body().string() : "";
     }
 
-    /** Thrown when the server actually responded, but with a non-2xx status -- carries the real
-     * HTTP status code so a caller can tell a definitive rejection (4xx: the server has already
-     * looked at this exact request and said no -- retrying the identical request will only get
-     * the identical answer again) apart from something worth retrying (a genuine network-level
-     * IOException with no response at all, or a 5xx server error). Not yet thrown by every
-     * endpoint here -- see confirmArrival, the first caller that actually needed the distinction
-     * (RunePartyPlugin's own confirmArrival was retrying a 409 "No roll is pending" forever, once
-     * a tick, since nothing told it the claim itself -- not just the request -- was invalid). */
+    /** Thrown when the server responded, but with a non-2xx status -- carries the HTTP status code
+     * so a caller can distinguish a definitive rejection (4xx) from something worth retrying (a
+     * network-level IOException, or a 5xx). Not yet thrown by every endpoint here. */
     public static final class ApiHttpException extends IOException
     {
         public final int code;
@@ -677,7 +632,7 @@ public class ApiClient
         public final String color; // nullable
         public final Integer orientation; // nullable -- reserved for future directional tiles
         public final Integer pathIndex; // nullable -- this tile's position along the walked course
-        public final int[] nextIndices; // this tile's only outgoing edges -- empty means a genuine dead end, no fallback; see app.py's _resolve_next_indices
+        public final int[] nextIndices; // this tile's outgoing edges -- empty means a genuine dead end
 
         public TileSpec(int x, int y, int plane, String tileType, String color, Integer orientation, Integer pathIndex, int[] nextIndices)
         {
@@ -740,9 +695,9 @@ public class ApiClient
     {
         public String gameId;
         public int latestSeq;
-        public String status; // LOBBY/ACTIVE/ENDED -- matches GamePhase's own names exactly, see RunePartyPlugin#syncRosterSnapshot
-        public String currentTurnRsn; // whose turn it currently is, null outside ACTIVE -- reconciled into RunePartyPlugin#currentTurnRsn on reconnect, see syncRosterSnapshot
-        public Integer lastDiceRoll; // most recent server-resolved roll -- reconciled into RunePartyPlugin#lastDiceRoll on reconnect, see syncRosterSnapshot
+        public String status; // LOBBY/ACTIVE/ENDED -- matches GamePhase's own names
+        public String currentTurnRsn; // whose turn it currently is, null outside ACTIVE
+        public Integer lastDiceRoll; // most recent server-resolved roll
         public List<RosterPlayerOut> players;
     }
 
@@ -752,11 +707,11 @@ public class ApiClient
         public String role; // PLAYER or SPECTATOR
         public boolean joined;
         public boolean online;
-        public String number; // turn-order position ("1", "2", ...), same field shape RosterReducer already expects
-        public String colorNumber; // host-chosen seat color while a PLAYER, "" once removed -- see RunePartyColor#forNumber
+        public String number; // turn-order position ("1", "2", ...)
+        public String colorNumber; // host-chosen seat color while a PLAYER, "" once removed
         public int coins;
         public int goldenGnomeCount;
-        public Map<String, Integer> items = new HashMap<>(); // itemKey -> count held, defaulted so an older server response without this field doesn't NPE
+        public Map<String, Integer> items = new HashMap<>(); // itemKey -> count held
     }
 
     public static class TileTypesResponse
@@ -769,7 +724,7 @@ public class ApiClient
         public String gameId;
         public String joinCode;
         public String hostRsn;
-        public String status; // LOBBY/ACTIVE/ENDED -- matches GamePhase's own names, same as RosterSnapshot#status
+        public String status; // LOBBY/ACTIVE/ENDED -- matches GamePhase's own names
     }
 
     public static class TileTypeOut
@@ -779,7 +734,7 @@ public class ApiClient
         public String colorHex;
         public String description;
         public boolean isModifier;
-        public boolean isMinigameTile; // only ever spawned by a mini-game's own board swap -- see addSetTileSubmenu
+        public boolean isMinigameTile; // only ever spawned by a mini-game's own board swap
     }
 
     private static class CreateGameResponse

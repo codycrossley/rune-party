@@ -16,19 +16,16 @@ import net.runelite.client.ui.overlay.outline.ModelOutlineRenderer;
 import net.runelite.client.util.Text;
 
 /** Outlines every seated PLAYER's model in their assigned RunePartyColor (derived from their turn
- * order, see RunePartyColor#forNumber) -- same ModelOutlineRenderer approach as Gnomeball's
- * PlayerOverlay, minus the field-boundary gating since Rune Party colors are a roster-wide
- * identity, not a "currently on the field" state -- plus a color-coded token hovering above their
- * head, with a pulsing glow in that same seat color (same breathing-alpha technique as Gnomeball's
- * TimerOverlay#renderPauseGlow) while it's their turn to roll, and a floating coin popup after a
- * standard/penalty tile reward. The retro dice-roll reveal lives in AnnouncementOverlay instead --
- * screen-centered so everyone can see it, not anchored to the roller's head. Spectators are left
- * unaltered.
+ * order) via ModelOutlineRenderer, plus a color-coded token hovering above their head, with a
+ * pulsing glow in that same seat color while it's their turn to roll, and a floating coin popup
+ * after a standard/penalty tile reward. The retro dice-roll reveal lives in AnnouncementOverlay
+ * instead -- screen-centered so everyone can see it, not anchored to the roller's head. Spectators
+ * are left unaltered.
  * <p>
  * While a Turf Wars round is active, both the outline and the token switch to that player's own
- * assigned color (RunePartyPlugin#getPlayerTeamColor) instead of their usual seat color, for every
- * seated player -- makes "who's on which team" readable at a glance for the whole round, not just
- * a banner shown once at the start (see AnnouncementOverlay's own team-assigned reveal). */
+ * assigned team color instead of their usual seat color, for every seated player -- makes "who's
+ * on which team" readable at a glance for the whole round, not just a banner shown once at the
+ * start. */
 public class PlayerOverlay extends Overlay
 {
     private static final int OUTLINE_WIDTH = 2;
@@ -52,8 +49,7 @@ public class PlayerOverlay extends Overlay
     private static final Color GOLDEN_GNOME_POPUP_COLOR = new Color(255, 215, 0);
     // Taller than the coin popup's own clearance so the two can stack without overlapping when
     // both fire close together -- a Golden Gnome purchase's own popup, then moments later the
-    // underlying tile's own coin popup (see RunePartyPlugin's GOLDEN_GNOME_PURCHASED/COINS_CHANGED
-    // handling -- confirm_arrival always resolves the tile's effect right after the offer settles).
+    // underlying tile's own coin popup.
     private static final int GOLDEN_GNOME_POPUP_CLEARANCE = 46;
     private static final int GOLDEN_GNOME_POPUP_MAX_RISE = 16;
 
@@ -97,12 +93,8 @@ public class PlayerOverlay extends Overlay
             if (plugin.isTurfWarsActive())
             {
                 // Recolors every seated player's own outline/token to their Turf Wars assigned
-                // color instead of their usual per-seat one, for the whole round (not just a
-                // start-of-round flash) -- makes "who's on which team" a glance at anyone's
-                // model, not just something you might have missed in the round-start banner (see
-                // AnnouncementOverlay's own team-assigned reveal, which only shows once, only to
-                // the local player). Falls back to the seat color if this player's own assignment
-                // hasn't landed yet (MINIGAME_TEAMS_ASSIGNED not replayed for them somehow).
+                // color instead of their usual per-seat one, for the whole round. Falls back to
+                // the seat color if this player's own assignment hasn't landed yet.
                 Color teamColor = plugin.getPlayerTeamColor(rsn);
                 if (teamColor != null) c = teamColor;
             }
@@ -165,13 +157,10 @@ public class PlayerOverlay extends Overlay
 
     /** Floats "+3" (or "-3" for a penalty tile, or a Coin Trap steal's -20/+20 on the victim/owner
      * respectively) above a player's head, then swaps to their new running total for the rest of
-     * the popup's life -- same client-side start/until-timestamp pattern as AnnouncementOverlay's
-     * turn banner (see RunePartyPlugin's enqueueCoinPopup, which stamps each CoinPopup's own
-     * start/until). {@code popup.start} can be stamped into the future -- see the "now < start"
+     * the popup's life. {@code popup.start} can be stamped into the future -- see the "now < start"
      * guard below -- when a Golden Gnome popup, or an earlier coin popup, for the same player is
-     * still showing, so this one waits its turn instead of overlapping it; nothing renders at all
-     * until that future start time actually arrives. A totalless popup (see CoinPopup's own doc --
-     * Coin Rush's mid-round "+2" flash, the only current one) never advances past the delta phase:
+     * still showing, so this one waits its turn instead of overlapping it. A totalless popup (see
+     * CoinPopup's own doc -- Coin Rush's mid-round "+2" flash) never advances past the delta phase:
      * there's no real total to show yet, the round only pays out in one lump sum at its end. */
     private void drawCoinPopup(Graphics2D g, Player p, RunePartyPlugin.CoinPopup popup)
     {
@@ -197,16 +186,11 @@ public class PlayerOverlay extends Overlay
     }
 
     /** Floats "+1 Golden Gnome" above a player's head after a purchase (or "-1 Golden Gnome" after
-     * a Jad smash penalty -- see GoldenGnomePresentation's own GOLDEN_GNOME_LOST handling), then
-     * swaps to their new running total ("N Golden Gnomes", or "1 Golden Gnome" singular) for the
-     * rest of the popup's life -- same shape and timing as drawCoinPopup (reuses RunePartyPlugin's
-     * COIN_POPUP_DELTA_PHASE_MS/FADE_MS directly rather than duplicating them, per how the feature
-     * was asked for: "similar to how the coins popup works"). Always the gain color regardless of
-     * sign -- unlike the coin popup, a loss here doesn't get its own separate feedback elsewhere
-     * (see the Jad smash chat message, not a whole outcome banner), so tinting it as a loss would
-     * make it the only signal of what happened rather than reinforcing one. Sits higher above the
-     * head than the coin popup (see GOLDEN_GNOME_POPUP_CLEARANCE) so the two never overlap when
-     * both are showing at once. */
+     * a Jad smash penalty), then swaps to their new running total ("N Golden Gnomes", or "1 Golden
+     * Gnome" singular) for the rest of the popup's life -- same shape and timing as drawCoinPopup.
+     * Always the gain color regardless of sign, since a loss here doesn't get its own separate
+     * feedback elsewhere. Sits higher above the head than the coin popup so the two never overlap
+     * when both are showing at once. */
     private void drawGoldenGnomePopup(Graphics2D g, Player p)
     {
         long now = System.currentTimeMillis();

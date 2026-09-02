@@ -9,12 +9,9 @@ import java.io.InputStream;
 import javax.imageio.ImageIO;
 import lombok.extern.slf4j.Slf4j;
 
-/** Client-side counterpart to the server's TeleBlockItem (see items/tele_block.py) -- spent on
- * another player rather than the user themselves, see requiresTarget/RunePartyPlugin#
- * beginItemTargeting. Stacks: a second Tele Block on an already-blocked player queues a second
- * skipped turn rather than overwriting the first -- see TURN_SKIPPED handling in
- * RunePartyPlugin/RosterReducer. Key must match the server's own TeleBlockItem registration
- * exactly, see that file. */
+/** Spent on another player rather than the user themselves (see requiresTarget). Stacks: a second
+ * Tele Block on an already-blocked player queues a second skipped turn rather than overwriting the
+ * first. */
 @Slf4j
 public class TeleBlockItem implements Item
 {

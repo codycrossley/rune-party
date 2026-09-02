@@ -16,12 +16,10 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Locks in RosterReducer's PLAYER_LEFT/syncFromRoster behavior against the server's own roster
- * model (see app.py's _apply_roster_event/PLAYER_LEFT and _finalize_roster) -- a departed PLAYER
- * is demoted to SPECTATOR (never deleted outright) with their seat color freed for a new player,
- * and a roster resync can always repair whatever apply() alone left behind. See
- * ARCHITECTURE_REVIEW.md C7 for the original drift this guards against regressing (apply() used to
- * delete the row entirely, and syncFromRoster couldn't resurrect it).
+ * Locks in RosterReducer's PLAYER_LEFT/syncFromRoster behavior -- a departed PLAYER is demoted to
+ * SPECTATOR (never deleted outright) with their seat color freed for a new player, and a roster
+ * resync can always repair whatever apply() alone left behind (apply() used to delete the row
+ * entirely, and syncFromRoster couldn't resurrect it).
  */
 public class RosterReducerTest
 {
@@ -83,9 +81,9 @@ public class RosterReducerTest
     public void goldenGnomeLostDecrementsTheRosterCount()
     {
         // Regression test: RosterReducer used to only fold GOLDEN_GNOME_PURCHASED, so a Jad smash
-        // penalty (GOLDEN_GNOME_LOST -- same {player, goldenGnomeCount} shape, see events.py's
-        // golden_gnome_lost) correctly decremented the server's own count but the roster/stats
-        // overlay kept showing the stale pre-loss total forever, since nothing ever re-applied it.
+        // penalty (GOLDEN_GNOME_LOST -- same {player, goldenGnomeCount} shape) correctly
+        // decremented the server's own count but the roster/stats overlay kept showing the stale
+        // pre-loss total forever, since nothing ever re-applied it.
         RosterReducer reducer = new RosterReducer();
         reducer.loadSnapshot(List.of(rosterPlayer("Zezima", "PLAYER", true, "1", "1")));
 
@@ -105,11 +103,10 @@ public class RosterReducerTest
     @Test
     public void syncFromRosterResurrectsARowApplyDeletedBefore()
     {
-        // Simulates the exact drift C7 flagged: some other client folded a PLAYER_LEFT under the
-        // *old* delete-based behavior before this fix landed (or any other path left the row
-        // missing) -- a fresh syncFromRoster must still be able to bring it back with the
-        // server's authoritative role/colorNumber, not just update fields on a row that already
-        // exists.
+        // Simulates a client that folded a PLAYER_LEFT under the old delete-based behavior before
+        // this fix landed (or any other path that left the row missing) -- a fresh syncFromRoster
+        // must still be able to bring it back with the server's authoritative role/colorNumber,
+        // not just update fields on a row that already exists.
         RosterReducer reducer = new RosterReducer();
 
         reducer.syncFromRoster(List.of(rosterPlayer("Zezima", "SPECTATOR", false, "", "2")));
@@ -123,11 +120,9 @@ public class RosterReducerTest
     /** Mirrors RunePartyPlugin's actual live flow (see handleEvent) rather than apply() in
      * isolation: apply() alone never reconstructs "number" or "colorNumber" from the event stream
      * -- neither PLAYER_JOINED nor ROLE_ASSIGNED's payload carries them, since the server only
-     * ever computes them fresh from the whole roster (see _finalize_roster's own doc). The client
-     * knows this and always follows a PLAYER_JOINED/ROLE_ASSIGNED/PLAYER_LEFT with a
-     * syncRosterSnapshot() call when live, which is what the syncFromRoster call below stands in
-     * for -- using this same fixture's expectedRoster as the "server's /roster response", since
-     * that's exactly what a real server replaying the same events would return. */
+     * ever computes them fresh from the whole roster. The client knows this and always follows a
+     * PLAYER_JOINED/ROLE_ASSIGNED/PLAYER_LEFT with a syncRosterSnapshot() call when live, which is
+     * what the syncFromRoster call below stands in for. */
     @Test
     public void fixtureRoundTripMatchesServer() throws IOException
     {

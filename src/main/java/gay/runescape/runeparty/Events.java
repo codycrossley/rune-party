@@ -1,10 +1,8 @@
 package gay.runescape.runeparty;
 
-/** One constant per event type string the server ever sends -- mirrors the server's own
- * events.EventType exactly (same names). Never compare against a raw string literal directly;
- * always reference it from here, so a typo or a rename on either side fails to compile instead of
- * silently falling through to a switch's default case. See ARCHITECTURE_REVIEW.md's X1 finding,
- * and check_event_parity.py, which asserts this set matches the server's own one-for-one. */
+/** One constant per event type string the server ever sends. Never compare against a raw string
+ * literal directly; always reference it from here, so a typo or rename fails to compile instead
+ * of silently falling through to a switch's default case. */
 public final class Events
 {
     private Events() {}
@@ -13,27 +11,21 @@ public final class Events
      * not itself a game event, but the same class of literal-that-should-be-a-constant. */
     public static final String EVENTS_BATCH = "EVENTS_BATCH";
 
-    /** Transport-level sentinel the server sends once it's finished flushing a connection's own
-     * backlog burst (see the server's game_events_ws) -- marks the point EventSocket flips from
-     * replaying missed history to genuinely live events (see EventSocket#onMessage). Not itself a
-     * game event, same as EVENTS_BATCH above. */
+    /** Transport-level sentinel the server sends once it's finished flushing a connection's
+     * backlog burst -- marks the point EventSocket flips from replaying missed history to
+     * genuinely live events. Not itself a game event, same as EVENTS_BATCH above. */
     public static final String CAUGHT_UP = "CAUGHT_UP";
 
-    /** Server-only bookkeeping (see the server's minigames/arena.py hazard loop) fired when a
-     * player is eliminated -- standing on a tile the instant it reaches red, or stepping off the
-     * arena after having been on it. Never dispatched on by any handler here; declared solely so
-     * check_event_parity.py's one-for-one assertion holds -- an eliminated player just doesn't get
-     * paid at the end, there's no other visible consequence this pass. */
+    /** Server-only bookkeeping fired when a player is eliminated from the Arena. Never dispatched
+     * on by any handler here -- an eliminated player just doesn't get paid at the end. */
     public static final String ARENA_PLAYER_ELIMINATED = "ARENA_PLAYER_ELIMINATED";
     public static final String COIN_RUSH_COLLECTED = "COIN_RUSH_COLLECTED";
     public static final String COIN_RUSH_SPAWN = "COIN_RUSH_SPAWN";
     public static final String COIN_TRAP_TRIGGERED = "COIN_TRAP_TRIGGERED";
     public static final String COINS_CHANGED = "COINS_CHANGED";
     public static final String DICE_ROLLED = "DICE_ROLLED";
-    /** Echo of the client's own submit-fishing-catch call (see ApiClient#submitFishingCatch) --
-     * the client already knows its own final tally the instant it sends it, so nothing here needs
-     * to react to the echo. Declared solely so check_event_parity.py's one-for-one assertion
-     * holds, same treatment as MINIGAME_BOARD_SWAPPED/ARENA_PLAYER_ELIMINATED above. */
+    /** Echo of the client's own submit-fishing-catch call -- the client already knows its own
+     * final tally the instant it sends it, so nothing here needs to react to the echo. */
     public static final String FISHING_CATCH_SUBMITTED = "FISHING_CATCH_SUBMITTED";
     public static final String GAME_ENDED = "GAME_ENDED";
     public static final String GAME_STARTED = "GAME_STARTED";
@@ -48,10 +40,9 @@ public final class Events
     public static final String JAD_AWAKENED = "JAD_AWAKENED";
     public static final String JAD_DISMISSED = "JAD_DISMISSED";
     public static final String JAD_SMASH_TRIGGERED = "JAD_SMASH_TRIGGERED";
-    /** Server-only bookkeeping (see the server's MinigameContext.swap_board) fired alongside the
-     * TILES_UNMARKED/TILES_MARKED pair a board swap actually renders as -- purely so the server can
-     * restore the real course later. Never dispatched on by any handler here; declared solely so
-     * check_event_parity.py's one-for-one assertion holds. */
+    /** Server-only bookkeeping fired alongside the TILES_UNMARKED/TILES_MARKED pair a board swap
+     * actually renders as, so the server can restore the real course later. Never dispatched on by
+     * any handler here. */
     public static final String MINIGAME_BOARD_SWAPPED = "MINIGAME_BOARD_SWAPPED";
     public static final String MINIGAME_COUNTDOWN_STARTED = "MINIGAME_COUNTDOWN_STARTED";
     public static final String MINIGAME_ENDED = "MINIGAME_ENDED";

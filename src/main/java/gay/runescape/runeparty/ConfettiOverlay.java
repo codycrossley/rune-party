@@ -16,19 +16,16 @@ import net.runelite.client.ui.overlay.OverlayPriority;
 
 /** A short confetti burst played once the end-game awards ceremony reveals the winner (see
  * {@link RunePartyPlugin#getConfettiUntil()}/{@link RunePartyPlugin#scheduleWinnerReveal}) --
- * ported from Gnomeball's own ConfettiOverlay, same particle simulation and per-frame wall-clock
- * delta stepping, just re-tinted to the winner's own RunePartyColor seat color instead of a
- * team's. RuneLite calls {@link #render} once per client render frame rather than on a fixed
- * tick, so the simulation steps itself using a measured wall-clock delta rather than assuming a
- * constant frame time.
+ * tinted to the winner's own RunePartyColor seat color. RuneLite calls {@link #render} once per
+ * client render frame rather than on a fixed tick, so the simulation steps itself using a measured
+ * wall-clock delta rather than assuming a constant frame time.
  * <p>
  * Also independently polls Turf Wars' own end-of-round burst ({@link RunePartyPlugin#
  * getTurfWarsConfettiUntil()}/{@link MinigamePresentation#triggerTurfWarsConfetti}) -- a second,
  * separately-tracked trigger window with its own dedup timestamp and its own fixed team-color
- * palette (via {@link #paletteFor}) rather than the seat-color one {@link #resolvePalette} builds
- * -- the first minigame-*round*-level burst in this codebase, not just the whole-game one. Both
- * triggers share the same particle simulation/draw below; whichever fires just adds its own batch
- * of particles on top of whatever's still settling from the other. */
+ * palette (via {@link #paletteFor}) rather than the seat-color one {@link #resolvePalette} builds.
+ * Both triggers share the same particle simulation/draw below; whichever fires just adds its own
+ * batch of particles on top of whatever's still settling from the other. */
 public class ConfettiOverlay extends Overlay
 {
     // Fallback burst for the rare case the winner's seat color can't be resolved (e.g. a stale
@@ -116,9 +113,9 @@ public class ConfettiOverlay extends Overlay
     }
 
     /** Shades/tints of the whole game's own winner's seat color (plus white) -- falls back to a
-     * fixed multi-color palette if the winner's color can't be resolved for whatever reason. See
-     * {@link #paletteFor} for the shared shade/tint logic this and Turf Wars' own fixed-team-color
-     * burst (see this class's own doc) both build on. */
+     * fixed multi-color palette if the winner's color can't be resolved. See {@link #paletteFor}
+     * for the shared shade/tint logic this and Turf Wars' own fixed-team-color burst both build
+     * on. */
     private Color[] resolvePalette()
     {
         String winnerRsn = plugin.getWinnerRsn();
@@ -127,11 +124,10 @@ public class ConfettiOverlay extends Overlay
         return seatColor == null ? FALLBACK_PALETTE : paletteFor(seatColor.awt);
     }
 
-    /** Shades/tints of {@code base} (plus white), same idea as Gnomeball's own team-colored burst
-     * -- shared by {@link #resolvePalette} (the whole-game winner's seat color) and Turf Wars' own
-     * end-of-round burst (a fixed RunePartyPlugin#TEAM_A_COLOR/TEAM_B_COLOR, see this class's own
-     * doc), so both bursts read as the same "shades of one color" style rather than two different
-     * visual languages. */
+    /** Shades/tints of {@code base} (plus white) -- shared by {@link #resolvePalette} (the
+     * whole-game winner's seat color) and Turf Wars' own end-of-round burst (a fixed
+     * RunePartyPlugin#TEAM_A_COLOR/TEAM_B_COLOR), so both bursts read as the same "shades of one
+     * color" style rather than two different visual languages. */
     private static Color[] paletteFor(Color base)
     {
         return new Color[] {

@@ -9,16 +9,10 @@ import java.io.InputStream;
 import javax.imageio.ImageIO;
 import lombok.extern.slf4j.Slf4j;
 
-/** Client-side counterpart to the server's HomeTeleportItem (see items/home_teleport.py) --
- * relocates the holder's own tracked board position straight to the Start tile the instant it's
- * used, but doesn't pay out the reward until they've actually walked their own character over
- * (COINS_CHANGED reason="start_tile" fires later, on RunePartyPlugin's own
- * confirmHomeTeleportArrival -- already recognized by the existing coin-popup handling, no new
- * client wiring needed for that half once it does fire). The "go stand on the physical tile" nudge
- * is covered for free: PLAYER_MOVED already drives TileOverlay#renderReturnToPositionArrow
- * generically regardless of what caused the move, so this item needs no bespoke indicator of its
- * own -- just the standard "You/&lt;rsn&gt; used &lt;item&gt;!" banner (see hasUseAnnouncement).
- * Key must match the server's own HomeTeleportItem registration exactly, see that file. */
+/** Relocates the holder's tracked board position straight to the Start tile the instant it's used,
+ * but doesn't pay out the reward until they've actually walked their character over. The "go stand
+ * on the tile" nudge is covered for free by TileOverlay's existing return-arrow, so this item needs
+ * no bespoke indicator -- just the standard use-announcement banner. */
 @Slf4j
 public class HomeTeleportItem implements Item
 {

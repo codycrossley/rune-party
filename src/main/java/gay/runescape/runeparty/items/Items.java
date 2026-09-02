@@ -4,16 +4,11 @@ import gay.runescape.runeparty.KeyedRegistry;
 
 import java.util.List;
 
-/** Client-side item registry -- keyed the same way the server's own registry is (see
- * app.py/items' REGISTRY), so RunePartyPanel/AnnouncementOverlay can look up the right Item for
- * whatever key an ITEM_GRANTED payload carried, or the player's own inventory holds. Add a new
- * item by dropping an Item implementation in this package and registering it here.
- */
+/** Client-side item registry, keyed to match the server's own item keys, so RunePartyPanel/
+ * AnnouncementOverlay can look up the right Item for whatever key an event payload carried. Add a
+ * new item by dropping an Item implementation in this package and registering it here. */
 public final class Items
 {
-    // Registered 4 times under different keys, matching the server's own REGISTRY (see
-    // items/__init__.py), purely so the wheel/inventory/use-flow have more than one option to
-    // actually cycle through while real items are still being designed.
     private static final KeyedRegistry<Item> REGISTRY = new KeyedRegistry<>("tele-block");
 
     static

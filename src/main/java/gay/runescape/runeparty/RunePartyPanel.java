@@ -14,10 +14,9 @@ import gay.runescape.runeparty.items.Item;
 import gay.runescape.runeparty.items.Items;
 import gay.runescape.runeparty.minigames.Minigames;
 
-/** Sidebar UI -- same CardLayout(Connect/In-Game) shape as GnomeballPanel in the sibling
- * gnomeball repo, content adapted to turn order/course-building instead of team assignment/field
- * zones. See RunePartyPlugin for the action methods every button here calls into, and
- * RunePartyPlugin#handleEvent for how server-pushed state flows back into refresh(). */
+/** Sidebar UI -- a CardLayout(Connect/In-Game) switching between the pre-join form and the
+ * in-game roster/controls. See RunePartyPlugin for the action methods every button here calls
+ * into, and RunePartyPlugin#handleEvent for how server-pushed state flows back into refresh(). */
 public class RunePartyPanel extends PluginPanel
 {
     private static final int BORDER = 8;
@@ -266,9 +265,9 @@ public class RunePartyPanel extends PluginPanel
         return card;
     }
 
-    /** Groups everything host-only (course building, start/end game) under one bordered card, same
-     * "HOST CONTROLS" grouping GnomeballPanel uses -- so a non-host roster member never sees a wall
-     * of buttons that don't apply to them, and a host sees their tools as one clearly-scoped unit. */
+    /** Groups everything host-only (course building, start/end game) under one bordered card, so a
+     * non-host roster member never sees a wall of buttons that don't apply to them, and a host
+     * sees their tools as one clearly-scoped unit. */
     private void buildHostControlsCard()
     {
         hostControlsCard.setLayout(new BoxLayout(hostControlsCard, BoxLayout.Y_AXIS));
@@ -330,11 +329,11 @@ public class RunePartyPanel extends PluginPanel
         minigamePanel.add(minigameControlSlot);
     }
 
-    /** Groups the item-use buttons under one titled, bordered card -- same "HOST CONTROLS" look
-     * buildHostControlsCard uses, just its own blue accent (matching PlaceholderItem's own icon
-     * color) instead of the host's orange/brown, so the two grouping cards read as distinct at a
-     * glance. Only itemsCard's own visibility is ever toggled (see refreshItemUse) -- itemUsePanel
-     * inside it stays permanently visible and just holds whichever buttons are currently built. */
+    /** Groups the item-use buttons under one titled, bordered card -- same look as
+     * buildHostControlsCard, just its own blue accent instead of the host's orange/brown, so the
+     * two grouping cards read as distinct at a glance. Only itemsCard's own visibility is ever
+     * toggled (see refreshItemUse) -- itemUsePanel inside it stays permanently visible and just
+     * holds whichever buttons are currently built. */
     private void buildItemsCard()
     {
         itemsCard.setLayout(new BoxLayout(itemsCard, BoxLayout.Y_AXIS));
@@ -466,18 +465,17 @@ public class RunePartyPanel extends PluginPanel
         // Only LOBBY/ACTIVE, matching toggleBoardView's own phase guard -- unlike showMapBtn,
         // not offered in ENDED (toggling would just no-op there). If board view somehow was still
         // active right as the game ended, RunePartyPlugin#resetState un-sticks it automatically
-        // the moment the player actually leaves, and a manual mouse drag always works regardless
-        // in the meantime (see toggleBoardView's own doc on why this is never truly "stuck").
+        // the moment the player actually leaves.
         viewBoardBtn.setVisible(phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE);
         viewBoardBtn.setText(plugin.isBoardViewActive() ? "Return to Normal View" : "View Board");
 
         // Gated on isMinigamePlayable(), not isMinigameActive() -- while the selection
         // spinner/instructions/ready-check sequence is still playing out in AnnouncementOverlay,
-        // this section stays hidden entirely (no panel presence at all), same as the Golden Gnome
-        // offer has none of its own either -- see RunePartyPlugin#isMinigamePlayable. Also gated on
-        // the active mini-game's own hasSidePanelPresence() -- a fully screen-driven mini-game
-        // (see TrueOrFalseMinigame's own doc) opts all the way out of this section, not just its
-        // own createControlPanel() slot, so its instructions text doesn't show here either.
+        // this section stays hidden entirely, same as the Golden Gnome offer has none of its own
+        // either. Also gated on the active mini-game's own hasSidePanelPresence() -- a fully
+        // screen-driven mini-game (see TrueOrFalseMinigame) opts all the way out of this section,
+        // not just its own createControlPanel() slot, so its instructions text doesn't show here
+        // either.
         String minigameKey = plugin.getMinigameKey();
         boolean showMinigamePanel = plugin.isMinigamePlayable()
             && minigameKey != null && Minigames.get(minigameKey).hasSidePanelPresence();
@@ -514,12 +512,10 @@ public class RunePartyPanel extends PluginPanel
 
     /** Shows one "Use &lt;item&gt; (x&lt;count&gt;)" button per distinct item the local player
      * holds, gated on isLocalPlayerReadyToRoll() -- the same "genuinely your turn to act" check
-     * the SPIN hint uses, and the same window the server's own use-item endpoint enforces -- so
-     * this section is entirely absent outside that window, once they hold nothing, or once
-     * isItemUsedThisTurn() is true (one item per turn, regardless of how many they still hold --
-     * see the server's own itemUsedThisTurn), matching how the mini-game section has no panel
-     * presence at all while its own sequence is still playing out. Rebuilt only when the held
-     * items actually change (see lastItemsKey), not on every refresh() call. */
+     * the SPIN hint uses -- so this section is entirely absent outside that window, once they hold
+     * nothing, or once isItemUsedThisTurn() is true (one item per turn, regardless of how many
+     * they still hold). Rebuilt only when the held items actually change (see lastItemsKey), not
+     * on every refresh() call. */
     private void refreshItemUse(List<RosterReducer.RosterEntry> entries)
     {
         // Mid-placement (see RunePartyPlugin#beginItemPlacement) takes over this card entirely --

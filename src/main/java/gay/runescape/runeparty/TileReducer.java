@@ -16,14 +16,9 @@ public class TileReducer
         public final String color;
         public final Integer orientation; // nullable -- reserved for future directional tiles
         public final Integer pathIndex; // nullable -- null only for a non-course decorative marker; every PATH/START/GOLDEN_GNOME_TILE/EVENT_TILE/JAD_TILE has one
-        /** This tile's own outgoing edges (pathIndex values) -- its *only* ones. Empty means a
-         * dead end, not an implied "next tile in line": there used to be a default (pathIndex + 1)
-         * % courseLength fallback here, removed because it made freehand tile placement silently
-         * auto-connect tiles the host never actually wired together (see
-         * RunePartyPlugin#setCustomTileAt's own doc). Every edge -- including a plain "continue to
-         * the next tile" one -- now has to be set explicitly via "Connect From"/"Connect To" (see
-         * RunePartyPlugin#connectCustomTiles). See TileReducer#resolveNextIndices, which just
-         * returns this as-is now. */
+        /** This tile's own outgoing edges (pathIndex values) -- its only ones. Empty means a dead
+         * end, not an implied "next tile in line" -- every edge, including a plain "continue to the
+         * next tile" one, has to be set explicitly via "Connect From"/"Connect To". */
         public final int[] nextIndices;
 
         public TileEntry(WorldPoint point, String tileType, String color, Integer orientation, Integer pathIndex, int[] nextIndices)
@@ -162,12 +157,9 @@ public class TileReducer
     }
 
     /** A tile's outgoing graph edges -- always exactly its own explicit nextIndices, never
-     * inferred (see TileEntry#nextIndices's own doc for why there's no default fallback anymore).
-     * Kept as its own method, rather than every caller reading entry.nextIndices directly, purely
-     * so callers read the same "this is the resolved edge set" vocabulary the server's own
-     * _resolve_next_indices uses -- route-line rendering here always agrees with what a roll can
-     * actually resolve to server-side (see ApiClient's DICE_ROLLED targetIndices) because both
-     * sides now do the exact same nothing-but-what's-explicit lookup. */
+     * inferred (see TileEntry#nextIndices's own doc). Kept as its own method, rather than every
+     * caller reading entry.nextIndices directly, so route-line rendering here always agrees with
+     * what a roll can actually resolve to server-side. */
     public int[] resolveNextIndices(TileEntry entry)
     {
         return entry.nextIndices;
@@ -175,11 +167,9 @@ public class TileReducer
 
     /** BFS shortest number of forward steps from fromPathIndex to toPathIndex along this course's
      * own graph (see resolveNextIndices) -- for RunePartyMapOverlay's own "N tiles away" hover
-     * detail, the client-side mirror of the same forward-walk server's own _reachable_within does
-     * for a dice roll. Null if toPathIndex genuinely isn't reachable at all (a dead end, or a gap
-     * in the course) -- every visited pathIndex is remembered so a looping course (the common case)
-     * can't spin forever re-treading ground it's already covered. 0 if the two indices are the
-     * same tile. */
+     * detail. Null if toPathIndex genuinely isn't reachable at all (a dead end, or a gap in the
+     * course) -- every visited pathIndex is remembered so a looping course can't spin forever
+     * re-treading ground it's already covered. 0 if the two indices are the same tile. */
     public Integer stepsBetween(int fromPathIndex, int toPathIndex)
     {
         if (fromPathIndex == toPathIndex) return 0;
