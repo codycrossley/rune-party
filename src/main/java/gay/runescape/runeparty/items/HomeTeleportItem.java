@@ -40,6 +40,14 @@ public class HomeTeleportItem implements Item
     }
 
     @Override
+    public String getEffectDescription(boolean isLocalPlayer)
+    {
+        return isLocalPlayer
+            ? "Teleports you to the Start tile -- walk over to collect the reward."
+            : "Teleports them to the Start tile -- they'll need to walk over to collect the reward.";
+    }
+
+    @Override
     public boolean hasUseAnnouncement()
     {
         return true;

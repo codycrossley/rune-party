@@ -15,10 +15,20 @@ final class ItemPresentation
 {
     private final RunePartyPlugin plugin;
 
+    // ---- "ITEM SPACE!" banner (server-driven, everyone sees it -- see scheduleItemBanner), same
+    // shape as MinigamePresentation's own minigameBanner/scheduleMinigameBanner: a pure title card
+    // chained just ahead of the wheel below, staying up past its own reservation so it's still
+    // visible above the wheel for the wheel's whole spin+reveal. ----
+    private final TimedBanner<Void> itemBanner = new TimedBanner<>();
     // ---- item wheel reveal (cosmetic-only timing, chained behind whatever turn-effect is already
     // showing -- see scheduleItemSpinner). Payload identifies who got what, needed by the reveal
     // text ("You got..."/"<rsn> got..."). ----
     private final TimedBanner<ItemSpinnerPayload> itemSpinner = new TimedBanner<>();
+    // ---- item effect description, chained right behind the wheel above -- see
+    // scheduleItemGrantDescription. Same payload shape as itemSpinner (who got what), reused here
+    // since AnnouncementOverlay needs the exact same rsn/itemKey to know whose item it's
+    // describing and what to say about it. ----
+    private final TimedBanner<ItemSpinnerPayload> itemGrantDescription = new TimedBanner<>();
     // ---- item cap announcement, chained the same way as the item spinner above. Fires instead of
     // the item wheel when ITEM_CAP_BLOCKED lands, so at most one of {itemSpinner.until,
     // itemCapBlocked.until} is ever "live" for the same landing. ----
@@ -56,7 +66,9 @@ final class ItemPresentation
                     String rsn = Json.requiredStr(e.payload, type, "player");
                     String itemKey = Json.requiredStr(e.payload, type, "itemKey");
                     String itemDisplayName = Json.requiredStr(e.payload, type, "itemDisplayName");
+                    scheduleItemBanner(RunePartyPlugin.ITEM_SPINNER_DURATION_MS);
                     scheduleItemSpinner(rsn, itemKey);
+                    scheduleItemGrantDescription(rsn, itemKey);
                     plugin.addChatMessage(rsn + " got " + itemDisplayName + "!");
                 }
                 break;
@@ -70,6 +82,7 @@ final class ItemPresentation
                 {
                     String rsn = Json.requiredStr(e.payload, type, "player");
                     Integer cap = Json.requiredInt(e.payload, type, "itemCap");
+                    scheduleItemBanner(0);
                     scheduleItemCapBlockedAnnouncement(rsn, cap != null ? cap : 0);
                     plugin.addChatMessage(rsn + " already has too many items!");
                 }
@@ -129,15 +142,43 @@ final class ItemPresentation
         }
     }
 
+    /** Schedules AnnouncementOverlay's "ITEM SPACE!" banner via scheduleAfterTurnEffects, same
+     * "MINIGAME!" shape scheduleMinigameBanner uses -- see that method's own doc for why this
+     * isn't an armBanner call. {@code lingerMs} is how much longer past its own
+     * ITEM_BANNER_DURATION_MS gate reservation the banner keeps rendering, so it stays visible
+     * over whatever comes next instead of vanishing the instant that reservation ends -- the item
+     * wheel's own full ITEM_SPINNER_DURATION_MS spin+reveal on the ITEM_GRANTED path (called right
+     * before scheduleItemSpinner, chaining the two through scheduleAfterTurnEffects' own
+     * synchronous gate reservation), or 0 on the ITEM_CAP_BLOCKED path, which has no wheel to
+     * linger over -- lingering there would just overlap the cap-blocked message that follows. */
+    private void scheduleItemBanner(long lingerMs)
+    {
+        itemBanner.task = plugin.scheduleAfterTurnEffects(itemBanner.task, RunePartyPlugin.ITEM_BANNER_DURATION_MS, () ->
+        {
+            long now = System.currentTimeMillis();
+            itemBanner.until = now + RunePartyPlugin.ITEM_BANNER_DURATION_MS + lingerMs;
+            plugin.extendTurnEffectGate(now + RunePartyPlugin.ITEM_BANNER_DURATION_MS);
+        });
+    }
+
     /** Schedules AnnouncementOverlay's item wheel reveal via scheduleAfterTurnEffects, so it waits
-     * behind whatever turn-effect visual is already showing (a coin popup from the same landing,
-     * the previous player's own effects still settling, etc.) instead of appearing on top of it.
-     * {@code rsn}/{@code itemKey} are captured here rather than read back off some "current grant"
-     * field, since -- unlike the mini-game key, which stays put for the whole mini-game -- an item
-     * grant is a one-off event with nothing else keeping track of it in between. */
+     * behind the "ITEM SPACE!" banner (scheduleItemBanner, called right before this) instead of
+     * both appearing at once. {@code rsn}/{@code itemKey} are captured here rather than read back
+     * off some "current grant" field, since -- unlike the mini-game key, which stays put for the
+     * whole mini-game -- an item grant is a one-off event with nothing else keeping track of it in
+     * between. */
     private void scheduleItemSpinner(String rsn, String itemKey)
     {
         plugin.armBanner(itemSpinner, RunePartyPlugin.ITEM_SPINNER_DURATION_MS, () -> new ItemSpinnerPayload(rsn, itemKey), true);
+    }
+
+    /** Schedules AnnouncementOverlay's "what this item does" announcement via
+     * scheduleAfterTurnEffects, so it waits behind the wheel (scheduleItemSpinner, called right
+     * before this) instead of appearing before the wheel's even settled -- the item-flow
+     * equivalent of the mini-game's own ready-check screen following its own selection spinner. */
+    private void scheduleItemGrantDescription(String rsn, String itemKey)
+    {
+        plugin.armBanner(itemGrantDescription, RunePartyPlugin.ITEM_GRANT_DESCRIPTION_DURATION_MS, () -> new ItemSpinnerPayload(rsn, itemKey), true);
     }
 
     /** Schedules AnnouncementOverlay's "already have N items" announcement via
@@ -170,7 +211,9 @@ final class ItemPresentation
 
     void reset()
     {
+        itemBanner.reset();
         itemSpinner.reset();
+        itemGrantDescription.reset();
         itemCapBlocked.reset();
         itemUsedAnnounce.reset();
         coinTrapAnnounce.reset();
@@ -179,10 +222,14 @@ final class ItemPresentation
     }
 
     // ---- getters, mirrored 1:1 by RunePartyPlugin's own facade under their original names ----
+    long getItemBannerUntil() { return itemBanner.until; }
     long getItemSpinnerStart() { return itemSpinner.start; }
     long getItemSpinnerUntil() { return itemSpinner.until; }
     String getItemGrantRsn() { return itemSpinner.payload != null ? itemSpinner.payload.rsn : null; }
     String getItemGrantKey() { return itemSpinner.payload != null ? itemSpinner.payload.itemKey : null; }
+    long getItemGrantDescriptionUntil() { return itemGrantDescription.until; }
+    String getItemGrantDescriptionRsn() { return itemGrantDescription.payload != null ? itemGrantDescription.payload.rsn : null; }
+    String getItemGrantDescriptionKey() { return itemGrantDescription.payload != null ? itemGrantDescription.payload.itemKey : null; }
     long getItemCapBlockedUntil() { return itemCapBlocked.until; }
     String getItemCapBlockedRsn() { return itemCapBlocked.payload != null ? itemCapBlocked.payload.rsn : null; }
     int getItemCapBlockedCap() { return itemCapBlocked.payload != null ? itemCapBlocked.payload.cap : 0; }
@@ -194,7 +241,8 @@ final class ItemPresentation
     WorldPoint getCoinTrapTriggerPoint() { return coinTrapTriggerPoint; }
     long getCoinTrapTriggerUntil() { return coinTrapTriggerUntil; }
 
-    /** Payload for the item wheel reveal -- see scheduleItemSpinner. */
+    /** Payload for the item wheel reveal and the grant-description banner right behind it -- see
+     * scheduleItemSpinner/scheduleItemGrantDescription. */
     private static final class ItemSpinnerPayload
     {
         final String rsn;

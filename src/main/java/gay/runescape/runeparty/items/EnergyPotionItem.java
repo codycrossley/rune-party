@@ -40,6 +40,14 @@ public class EnergyPotionItem implements Item
     }
 
     @Override
+    public String getEffectDescription(boolean isLocalPlayer)
+    {
+        return isLocalPlayer
+            ? "Adds +" + ROLL_BONUS + " to your next roll."
+            : "Adds +" + ROLL_BONUS + " to their next roll.";
+    }
+
+    @Override
     public boolean hasUseAnnouncement()
     {
         return true;

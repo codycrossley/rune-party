@@ -208,7 +208,9 @@ public class AnnouncementOverlay extends Overlay
         renderGoldenGnomeOutcome(g);
         renderJadEncounter(g);
         renderJadOutcome(g);
+        renderItemBanner(g);
         renderItemSpinner(g);
+        renderItemGrantDescription(g);
         renderItemCapBlocked(g);
         renderItemUsedAnnouncement(g);
         renderTeleBlockCastAnnouncement(g);
@@ -603,6 +605,21 @@ public class AnnouncementOverlay extends Overlay
         drawWheel(g, wheelEntries, targetIndex, rotationDeg, scale, alpha, spinning, selected.getDisplayName());
     }
 
+    /** Draws the "ITEM SPACE!" title card on ITEM_GRANTED -- same shape/treatment as
+     * renderMinigameBanner's own "MINIGAME!", chained just ahead of the item wheel below the
+     * identical way "MINIGAME!" leads into renderMinigameSpinner. */
+    private void renderItemBanner(Graphics2D g)
+    {
+        Float alpha = BannerAnim.fadeAlpha(plugin.getItemBannerUntil(), MINIGAME_FADE_MS);
+        if (alpha == null) return;
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 3;
+
+        g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
+        drawCenteredRainbowText(g, "ITEM SPACE!", RAINBOW_LETTER_COLORS, centerX, y, alpha);
+    }
+
     /** Draws the Item Space wheel -- same shared drawWheel routine as renderMinigameSpinner, one
      * segment per registered item. Reveals "You got &lt;item&gt;!" once settled. */
     private void renderItemSpinner(Graphics2D g)
@@ -630,6 +647,34 @@ public class AnnouncementOverlay extends Overlay
             : grantRsn + " got " + selected.getDisplayName() + "!";
 
         drawWheel(g, wheelEntries, targetIndex, rotationDeg, scale, alpha, spinning, revealText);
+    }
+
+    /** Draws the item's own name plus a short line describing what it does, once the wheel above
+     * has settled -- the item-flow counterpart to the mini-game's own ready-check screen following
+     * its spinner, just a fixed-duration announcement instead of a persistent one (an item has no
+     * "ready" step to wait on). Skips the subtitle entirely for an item with no description. */
+    private void renderItemGrantDescription(Graphics2D g)
+    {
+        Float alpha = BannerAnim.fadeAlpha(plugin.getItemGrantDescriptionUntil(), ITEM_USED_ANNOUNCE_FADE_MS);
+        if (alpha == null) return;
+        String rsn = plugin.getItemGrantDescriptionRsn();
+        Item item = Items.get(plugin.getItemGrantDescriptionKey());
+        if (rsn == null || item == null) return;
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 3;
+
+        boolean isLocal = isLocal(rsn);
+        String subtitle = item.getEffectDescription(isLocal);
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_TITLE_SIZE));
+        drawCenteredText(g, item.getDisplayName(), centerX, y, WELCOME_TITLE_COLOR, alpha);
+
+        if (subtitle != null)
+        {
+            g.setFont(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_SUBTITLE_SIZE));
+            drawCenteredText(g, subtitle, centerX, y + 28, Color.LIGHT_GRAY, alpha);
+        }
     }
 
     /** Fires instead of renderItemSpinner when the mover is already at the item cap -- no wheel,

@@ -9,6 +9,14 @@ import gay.runescape.runeparty.WheelEntry;
  * has no play UI, just an effect that fires the instant it's used. */
 public interface Item extends WheelEntry
 {
+    /** Short description of what this item does, shown right after it's granted from an Item
+     * Space (see AnnouncementOverlay#renderItemGrantDescription) -- phrased for the given viewer
+     * ("your"/"their"). Null skips the subtitle entirely. */
+    default String getEffectDescription(boolean isLocalPlayer)
+    {
+        return null;
+    }
+
     /** Whether AnnouncementOverlay should show a "You used/&lt;rsn&gt; used &lt;name&gt;!" banner
      * the moment this item's ITEM_USED lands. False by default -- most items already get feedback
      * from the coin popup, so most don't need a second banner. */

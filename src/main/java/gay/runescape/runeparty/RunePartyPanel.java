@@ -511,11 +511,12 @@ public class RunePartyPanel extends PluginPanel
     }
 
     /** Shows one "Use &lt;item&gt; (x&lt;count&gt;)" button per distinct item the local player
-     * holds, gated on isLocalPlayerReadyToRoll() -- the same "genuinely your turn to act" check
-     * the SPIN hint uses -- so this section is entirely absent outside that window, once they hold
-     * nothing, or once isItemUsedThisTurn() is true (one item per turn, regardless of how many
-     * they still hold). Rebuilt only when the held items actually change (see lastItemsKey), not
-     * on every refresh() call. */
+     * holds, or a plain "no items yet" line if they hold none -- visible for the whole game
+     * (any seated PLAYER, any turn), not just while there's something to click. Buttons themselves
+     * are disabled unless it's genuinely the local player's turn to act (isLocalPlayerReadyToRoll())
+     * and they haven't already used one this turn (isItemUsedThisTurn()) -- one item per turn,
+     * regardless of how many they still hold. Rebuilt only when the held items or that
+     * enabled/disabled state actually change (see lastItemsKey), not on every refresh() call. */
     private void refreshItemUse(List<RosterReducer.RosterEntry> entries)
     {
         // Mid-placement (see RunePartyPlugin#beginItemPlacement) takes over this card entirely --
@@ -585,16 +586,42 @@ public class RunePartyPanel extends PluginPanel
             }
         }
 
-        boolean showItems = plugin.isLocalPlayerReadyToRoll() && !plugin.isItemUsedThisTurn()
-            && localEntry != null && !localEntry.items.isEmpty();
-        itemsCard.setVisible(showItems);
-        if (!showItems)
+        // Visible for the whole game -- any seated, joined PLAYER, regardless of whose turn it is
+        // or whether they're currently holding anything -- rather than popping in/out as items are
+        // gained/spent. A spectator, or anyone before the game's actually ACTIVE, has no items of
+        // their own to ever show here.
+        boolean isSeatedPlayer = localEntry != null && localEntry.role == RunePartyRole.PLAYER && localEntry.joined;
+        boolean showItemsCard = plugin.getPhase() == GamePhase.ACTIVE && isSeatedPlayer;
+        itemsCard.setVisible(showItemsCard);
+        if (!showItemsCard)
         {
             lastItemsKey = null; // next activation always rebuilds fresh
             return;
         }
 
-        String key = buildItemsKey(localEntry.items);
+        if (localEntry.items.isEmpty())
+        {
+            String key = "empty";
+            if (key.equals(lastItemsKey)) return;
+            lastItemsKey = key;
+
+            itemUsePanel.removeAll();
+            JLabel none = new JLabel("No items yet -- land on an Item Space to get one.");
+            none.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+            none.setFont(FontManager.getRunescapeSmallFont());
+            none.setAlignmentX(LEFT_ALIGNMENT);
+            itemUsePanel.add(none);
+            itemUsePanel.revalidate();
+            itemUsePanel.repaint();
+            return;
+        }
+
+        // Buttons stay visible the whole time now, just disabled outside the "genuinely your turn,
+        // haven't already used one" window -- see isLocalPlayerReadyToRoll/isItemUsedThisTurn --
+        // folded into the rebuild key so a turn starting/ending re-enables/disables them without
+        // waiting on the held items themselves to change.
+        boolean canUseNow = plugin.isLocalPlayerReadyToRoll() && !plugin.isItemUsedThisTurn();
+        String key = "items:" + canUseNow + ":" + buildItemsKey(localEntry.items);
         if (key.equals(lastItemsKey)) return;
         lastItemsKey = key;
 
@@ -607,6 +634,7 @@ public class RunePartyPanel extends PluginPanel
             JButton useBtn = new JButton(verb + item.getDisplayName() + " (x" + held.getValue() + ")");
             useBtn.setAlignmentX(LEFT_ALIGNMENT);
             useBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+            useBtn.setEnabled(canUseNow);
             useBtn.addActionListener(e -> {
                 if (item.requiresPlacement()) plugin.beginItemPlacement(itemKey);
                 else if (item.requiresTarget()) plugin.beginItemTargeting(itemKey);

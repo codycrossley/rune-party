@@ -39,6 +39,12 @@ public class TeleBlockItem implements Item
     }
 
     @Override
+    public String getEffectDescription(boolean isLocalPlayer)
+    {
+        return "Use it on another player to skip their next turn.";
+    }
+
+    @Override
     public boolean requiresTarget()
     {
         return true;

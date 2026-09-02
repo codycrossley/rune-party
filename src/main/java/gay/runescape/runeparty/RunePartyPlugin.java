@@ -101,6 +101,11 @@ public class RunePartyPlugin extends Plugin
      * what actually gets stamped as minigameSpinnerUntil. */
     public static final long MINIGAME_SPINNER_DURATION_MS = MINIGAME_SPINNER_SPIN_PHASE_MS + MINIGAME_SPINNER_HOLD_MS;
 
+    /** How long AnnouncementOverlay's "ITEM SPACE!" banner stays up once it actually appears --
+     * server-driven, so every client shows it at the same moment. Same "MINIGAME!" shape as
+     * MINIGAME_BANNER_DURATION_MS -- see scheduleItemBanner. */
+    public static final long ITEM_BANNER_DURATION_MS = 2800;
+
     /** Same shape as MINIGAME_SPINNER_SPIN_PHASE_MS/HOLD_MS/DURATION_MS above, but for the Item
      * Space wheel (see ITEM_GRANTED handling/scheduleItemSpinner) -- kept as its own set of
      * constants rather than reusing the mini-game ones so each wheel's pacing can be tuned
@@ -109,6 +114,11 @@ public class RunePartyPlugin extends Plugin
     public static final long ITEM_SPINNER_SPIN_PHASE_MS = 4000;
     public static final long ITEM_SPINNER_HOLD_MS = 3000;
     public static final long ITEM_SPINNER_DURATION_MS = ITEM_SPINNER_SPIN_PHASE_MS + ITEM_SPINNER_HOLD_MS;
+
+    /** How long AnnouncementOverlay's "what this item does" announcement stays up once the wheel
+     * settles -- see scheduleItemGrantDescription, chained right behind the wheel's own reveal,
+     * the item-flow counterpart to the mini-game's own ready-check screen following its spinner. */
+    public static final long ITEM_GRANT_DESCRIPTION_DURATION_MS = 3500;
 
     /** How long AnnouncementOverlay's "already have N items" announcement stays up -- fired on
      * ITEM_CAP_BLOCKED instead of the item wheel (see scheduleItemCapBlockedAnnouncement), when a
@@ -3636,10 +3646,14 @@ public class RunePartyPlugin extends Plugin
     public boolean isMinigameSpinnerSkippedForClient() { return minigamePresentation.isMinigameSpinnerSkippedForClient(); }
     // Delegating facade -- ItemPresentation owns the actual state. Every name/signature below is
     // unchanged, so no external caller (AnnouncementOverlay, TileOverlay) needs to change.
+    public long getItemBannerUntil() { return itemPresentation.getItemBannerUntil(); }
     public long getItemSpinnerStart() { return itemPresentation.getItemSpinnerStart(); }
     public long getItemSpinnerUntil() { return itemPresentation.getItemSpinnerUntil(); }
     public String getItemGrantRsn() { return itemPresentation.getItemGrantRsn(); }
     public String getItemGrantKey() { return itemPresentation.getItemGrantKey(); }
+    public long getItemGrantDescriptionUntil() { return itemPresentation.getItemGrantDescriptionUntil(); }
+    public String getItemGrantDescriptionRsn() { return itemPresentation.getItemGrantDescriptionRsn(); }
+    public String getItemGrantDescriptionKey() { return itemPresentation.getItemGrantDescriptionKey(); }
     public long getItemCapBlockedUntil() { return itemPresentation.getItemCapBlockedUntil(); }
     public String getItemCapBlockedRsn() { return itemPresentation.getItemCapBlockedRsn(); }
     public int getItemCapBlockedCap() { return itemPresentation.getItemCapBlockedCap(); }
