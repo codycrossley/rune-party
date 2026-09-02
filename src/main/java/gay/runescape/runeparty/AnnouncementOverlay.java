@@ -806,7 +806,7 @@ public class AnnouncementOverlay extends Overlay
     }
 
     /** Draws one frame of a spinner wheel -- wedges, border, each entry's icon, a fixed pointer,
-     * and (once settled) {@code revealText} underneath in the rainbow treatment. Shared by
+     * and (once settled) {@code revealText} underneath in plain yellow. Shared by
      * renderMinigameSpinner and renderItemSpinner. */
     private <T extends WheelEntry> void drawWheel(Graphics2D g, List<T> wheelEntries, int targetIndex, float rotationDeg, float scale, float alpha, boolean spinning, String revealText)
     {
@@ -854,7 +854,7 @@ public class AnnouncementOverlay extends Overlay
         if (!spinning && revealText != null)
         {
             g.setFont(MARIO_PARTY_FONT.deriveFont(WHEEL_NAME_SIZE));
-            drawCenteredRainbowText(g, revealText, RAINBOW_LETTER_COLORS, cx, Math.round(cy + WHEEL_RADIUS + 50), alpha);
+            drawCenteredText(g, revealText, cx, Math.round(cy + WHEEL_RADIUS + 50), RAINBOW_YELLOW, alpha);
         }
     }
 

@@ -42,7 +42,7 @@ public class ArenaMinigame implements Minigame
     @Override
     public String getDisplayName()
     {
-        return "The Arena";
+        return "Flame Field";
     }
 
     /** A 4x4 grid of scattered red/green squares -- reads as "the grid, safe tiles and hazard

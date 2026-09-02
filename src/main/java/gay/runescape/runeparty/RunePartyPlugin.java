@@ -2000,7 +2000,7 @@ public class RunePartyPlugin extends Plugin
      * populated from the already-fetched catalog (getTileTypeCatalog) rather than a hardcoded
      * copy. Two kinds of catalog entry are filtered out: Golden Gnome/Coin Trap (isModifier) are
      * never host-authored directly, both are modifiers a separate dedicated flow places
-     * dynamically during real play; Arena Boundary and any future mini-game-only type
+     * dynamically during real play; Flame Field Boundary and any future mini-game-only type
      * (isMinigameTile) are never host-authored either, only ever spawned in bulk by a mini-game's
      * own board swap -- placing one here would just get swept away the next time a board swap
      * runs. */
