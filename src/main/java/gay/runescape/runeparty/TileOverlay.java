@@ -19,8 +19,11 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.awt.*;
 import java.awt.geom.Path2D;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Renders the course: committed tiles from TileReducer, plus a live placement/removal preview
  * while the host is building. A course is a one-tile-wide walked path, so every tile renders
@@ -28,10 +31,12 @@ import java.util.List;
  * from the tile's true boundary so adjacent tiles' outlines read as a clean grid rather than
  * doubled-up touching edges, with a connecting line drawn between consecutive path indices to make
  * the route itself legible. Several exceptions are genuinely connected regions rather than a
- * walked path: the Fishing Contest platform's FISHING_TILE block and Sandwich Rush's own
- * SANDWICH_RUSH_TILE grid each render as a single merged-area outline only, no per-tile fill
- * underneath (see renderFishingZoneOutline/renderArenaOutline) -- Sandwich Rush's tiles never
- * change color, so an individual fill per tile would just be noise. Turf Wars' own TURF_WARS_TILE
+ * walked path: the Fishing Contest platform's FISHING_TILE block, Sandwich Rush's own
+ * SANDWICH_RUSH_TILE grid, and Who's Your Jaddy?'s own two JADDY_TILE zones each render as a
+ * merged-area outline only, no per-tile fill underneath (see renderFishingZoneOutline/
+ * renderArenaOutline/renderColorGroupedOutlines) -- Sandwich Rush's tiles never change color, and
+ * a Jad's own zone has a huge 3D model standing on top of it either way, so an individual fill per
+ * tile would just be noise in both cases. Turf Wars' own TURF_WARS_TILE
  * grid also gets that same merged arena outline, but keeps an individual fill-only tile underneath
  * it (renderTurfWarsTile) since each tile's own color is real, meaningful state (which team
  * claimed it) -- all outlines still share roundedInsetPolygon so their corners read exactly the
@@ -177,6 +182,7 @@ public class TileOverlay extends Overlay
             if ("POND_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see models/PondModel
             if ("FISHING_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderFishingZoneOutline
             if ("SANDWICH_RUSH_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- these tiles never change color, so an individual fill per tile is just noise
+            if ("JADDY_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline per color instead, see renderColorGroupedOutlines below -- a Jad's own zone is a fixed-color area a huge model stands on top of, not a walked path, so a per-tile fill/outline would just be noise under it
             if ("TURF_WARS_TILE".equals(entry.tileType)) { renderTurfWarsTile(g, entry); continue; } // fill only, no per-tile outline, see renderTurfWarsTile
             Color base = resolveColor(entry.color, entry.tileType);
             renderOutlinedTile(g, entry.point, base, SOLID_STROKE);
@@ -185,6 +191,7 @@ public class TileOverlay extends Overlay
         renderFishingZoneOutline(g, entries);
         renderArenaOutline(g, entries, "TURF_WARS_TILE", TURF_WARS_ARENA_OUTLINE_COLOR);
         renderArenaOutline(g, entries, "SANDWICH_RUSH_TILE", SANDWICH_RUSH_ARENA_OUTLINE_COLOR);
+        renderColorGroupedOutlines(g, entries, "JADDY_TILE");
 
         goldenGnomeModel.update(entries);
         coinTrapModel.update(entries);
@@ -251,11 +258,46 @@ public class TileOverlay extends Overlay
      * corner, which is the region's true center. */
     private void renderArenaOutline(Graphics2D g, List<TileReducer.TileEntry> entries, String tileType, Color outlineColor)
     {
+        List<TileReducer.TileEntry> matching = new ArrayList<>();
+        for (TileReducer.TileEntry entry : entries)
+        {
+            if (tileType.equals(entry.tileType)) matching.add(entry);
+        }
+        renderBoundingBoxOutline(g, matching, outlineColor);
+    }
+
+    /** Draws one merged bounding-box outline per distinct color found among {@code tileType}'s own
+     * entries -- e.g. Who's Your Jaddy?'s two JADDY_TILE zones, one TEAM_A_COLOR, one
+     * TEAM_B_COLOR (see minigames/whos_your_jaddy.py). Same "whole connected region, not a walked
+     * path" merged-outline shape renderArenaOutline already gives a single tileType/single fixed
+     * color, generalized here to multiple simultaneous color groups sharing one tileType -- each
+     * group's own outline is drawn in that group's own resolved color, not a fixed neutral one, so
+     * each zone's boundary visually matches the tiles filling it. */
+    private void renderColorGroupedOutlines(Graphics2D g, List<TileReducer.TileEntry> entries, String tileType)
+    {
+        Map<String, List<TileReducer.TileEntry>> byColor = new HashMap<>();
+        for (TileReducer.TileEntry entry : entries)
+        {
+            if (!tileType.equals(entry.tileType) || entry.color == null) continue;
+            byColor.computeIfAbsent(entry.color, k -> new ArrayList<>()).add(entry);
+        }
+        for (Map.Entry<String, List<TileReducer.TileEntry>> group : byColor.entrySet())
+        {
+            renderBoundingBoxOutline(g, group.getValue(), resolveColor(group.getKey(), tileType));
+        }
+    }
+
+    /** Shared geometry behind renderArenaOutline/renderColorGroupedOutlines: one merged
+     * bounding-box outline spanning every entry passed in, in {@code outlineColor}. Neither caller
+     * has a single "center" tile to anchor on the way renderFishingZoneOutline's own POND_TILE-
+     * marked platform does -- built directly from the bounding box's own min/max corner tiles'
+     * LocalPoints instead, same reasoning renderArenaOutline's own original doc gave. */
+    private void renderBoundingBoxOutline(Graphics2D g, List<TileReducer.TileEntry> entries, Color outlineColor)
+    {
         Integer minX = null, maxX = null, minY = null, maxY = null;
         int plane = 0;
         for (TileReducer.TileEntry entry : entries)
         {
-            if (!tileType.equals(entry.tileType)) continue;
             WorldPoint p = entry.point;
             plane = p.getPlane();
             minX = (minX == null) ? p.getX() : Math.min(minX, p.getX());

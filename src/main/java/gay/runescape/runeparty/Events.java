@@ -40,6 +40,8 @@ public final class Events
     public static final String JAD_AWAKENED = "JAD_AWAKENED";
     public static final String JAD_DISMISSED = "JAD_DISMISSED";
     public static final String JAD_SMASH_TRIGGERED = "JAD_SMASH_TRIGGERED";
+    public static final String JADDY_ATTACK_TRIGGERED = "JADDY_ATTACK_TRIGGERED";
+    public static final String JADDY_DUEL_RESOLVED = "JADDY_DUEL_RESOLVED";
     /** Server-only bookkeeping fired alongside the TILES_UNMARKED/TILES_MARKED pair a board swap
      * actually renders as, so the server can restore the real course later. Never dispatched on by
      * any handler here. */

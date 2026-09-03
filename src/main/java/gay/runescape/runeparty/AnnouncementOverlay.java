@@ -219,8 +219,9 @@ public class AnnouncementOverlay extends Overlay
         renderMinigameSpinner(g);
         renderMinigameReadyCheck(g);
         renderTeamAssignedBanner(g);
+        renderJaddyResolvedBanner(g);
         if (RunePartyPlugin.ARENA_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.TURF_WARS_KEY.equals(plugin.getMinigameKey())
-            || RunePartyPlugin.SANDWICH_RUSH_KEY.equals(plugin.getMinigameKey()))
+            || RunePartyPlugin.SANDWICH_RUSH_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.JADDY_KEY.equals(plugin.getMinigameKey()))
         {
             renderArrivalGatherMessage(g);
         }
@@ -1006,8 +1007,55 @@ public class AnnouncementOverlay extends Overlay
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 2;
 
+        String text = RunePartyPlugin.JADDY_KEY.equals(plugin.getMinigameKey())
+            ? "Choose a side -- stand in the pink or teal zone!"
+            : "All players must stand within the arena!";
+
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE));
-        drawCenteredText(g, "All players must stand within the arena!", centerX, y, Color.WHITE, alpha);
+        drawCenteredText(g, text, centerX, y, Color.WHITE, alpha);
+    }
+
+    /** Draws the Who's Your Jaddy? duel-resolved reveal, up for JADDY_RESOLVED_BANNER_DURATION_MS
+     * once JADDY_DUEL_RESOLVED lands (matched to JADDY_DEATH_HOLD_MS, see that field's own doc, so
+     * this and the winning Jad's own standing idle loop disappear together). Personalized for
+     * whoever picked a side -- "Your team's Jad won!"/"The other team's Jad won!" -- based on which
+     * zone the local player was standing in at the exact resolution instant (see
+     * getJaddyResolvedLocalZoneColor's own doc), falling back to the plain "&lt;color&gt; Won!" for
+     * everyone else (spectators, or anyone who wasn't standing in either zone then). Individual coin
+     * gains still come from the ordinary COINS_CHANGED popup, same as every other flat-payout
+     * mini-game -- this banner is just the "who won" announcement. */
+    private void renderJaddyResolvedBanner(Graphics2D g)
+    {
+        Float alpha = BannerAnim.fadeAlpha(plugin.getJaddyResolvedBannerUntil(), MINIGAME_FADE_MS);
+        if (alpha == null) return;
+
+        String colorHex = plugin.getJaddyResolvedWinningColor();
+        if (colorHex == null) return;
+        Color color;
+        try { color = Color.decode(colorHex); }
+        catch (NumberFormatException e) { return; }
+
+        String localZoneHex = plugin.getJaddyResolvedLocalZoneColor();
+        String text;
+        if (localZoneHex == null)
+        {
+            String label = color.getRGB() == RunePartyPlugin.TEAM_A_COLOR.getRGB() ? "Pink"
+                : color.getRGB() == RunePartyPlugin.TEAM_B_COLOR.getRGB() ? "Teal" : "That Jad";
+            text = label + " Won!";
+        }
+        else
+        {
+            boolean localWon;
+            try { localWon = Color.decode(localZoneHex).getRGB() == color.getRGB(); }
+            catch (NumberFormatException e) { localWon = false; }
+            text = localWon ? "Your team's Jad won!" : "The other team's Jad won!";
+        }
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 2;
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_TITLE_SIZE));
+        drawCenteredText(g, text, centerX, y, color, alpha);
     }
 
     /** Draws the current True or False round's question, a live countdown to its answer deadline,

@@ -25,7 +25,10 @@ import net.runelite.client.util.Text;
  * While a Turf Wars round is active, both the outline and the token switch to that player's own
  * assigned team color instead of their usual seat color, for every seated player -- makes "who's
  * on which team" readable at a glance for the whole round, not just a banner shown once at the
- * start. */
+ * start. Who's Your Jaddy? gets the same treatment, just live rather than assigned once -- a
+ * player's own outline/token switches the instant their real WorldLocation lands on a JADDY_TILE
+ * zone, and switches right back the instant they step off it, since picking a side there is just
+ * standing on it (see RunePartyPlugin#getJaddyZoneColor). */
 public class PlayerOverlay extends Overlay
 {
     private static final int OUTLINE_WIDTH = 2;
@@ -97,6 +100,17 @@ public class PlayerOverlay extends Overlay
                 // the seat color if this player's own assignment hasn't landed yet.
                 Color teamColor = plugin.getPlayerTeamColor(rsn);
                 if (teamColor != null) c = teamColor;
+            }
+            else if (plugin.isJaddyActive())
+            {
+                // Same idea as Turf Wars above, but there's no assignment event at all here --
+                // whichever JADDY_TILE zone this player's own real WorldLocation currently sits on
+                // (a live board lookup, see RunePartyPlugin#getJaddyZoneColor) IS their team, purely
+                // for as long as they're standing there. Falls back to the seat color the instant
+                // they step off both zones (or before they've picked one at all), so switching
+                // sides mid-duel reads instantly rather than needing its own event.
+                Color zoneColor = plugin.getJaddyZoneColor(p.getWorldLocation());
+                if (zoneColor != null) c = zoneColor;
             }
             modelOutlineRenderer.drawOutline(p, OUTLINE_WIDTH,
                 new Color(c.getRed(), c.getGreen(), c.getBlue(), OUTLINE_ALPHA), OUTLINE_FEATHER);

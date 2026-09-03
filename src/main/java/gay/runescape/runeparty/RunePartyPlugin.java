@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.inject.Provides;
 import gay.runescape.runeparty.items.Items;
 import gay.runescape.runeparty.models.JadEncounter;
+import gay.runescape.runeparty.models.JaddyDuelModel;
 import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -283,6 +284,36 @@ public class RunePartyPlugin extends Plugin
         SANDWICH_RUSH_ITEM_ICON_RESOURCES = Collections.unmodifiableMap(icons);
     }
 
+    /** Client-side key for the Who's Your Jaddy? mini-game -- must match the server's own
+     * registration, same role ARENA_KEY/TURF_WARS_KEY/SANDWICH_RUSH_KEY play for their own
+     * mini-games. Used by AnnouncementOverlay to swap the generic "3...2...1...BEGIN!" countdown
+     * for the same arrival-gated gather message Arena/Turf Wars/Sandwich Rush already use, with its
+     * own "pick a side" wording. */
+    public static final String JADDY_KEY = "whos-your-jaddy";
+
+    /** TzTok-Jad's death animation -- new to this codebase, unlike JAD_SMASH_ANIMATION_ID/
+     * JAD_IDLE_ANIMATION_ID/JAD_BOW_ACKNOWLEDGE_ANIMATION_ID (all reused here from the single-Jad
+     * Jad Tile encounter, see JadPresentation/JadEncounter) -- played once, by the losing side's
+     * Jad, when JADDY_DUEL_RESOLVED lands (see models/JaddyDuelModel). */
+    public static final int JAD_DEATH_ANIMATION_ID = 2654;
+
+    /** How long an attack animation (JAD_BOW_ACKNOWLEDGE_ANIMATION_ID/JAD_SMASH_ANIMATION_ID,
+     * alternated per beat by the server's own JADDY_ATTACK_TRIGGERED) plays before both Jads return
+     * to their idle loop -- a first estimate, not measured, same caveat every other animation-hold
+     * constant in this class already carries. */
+    public static final long JADDY_ATTACK_ANIMATION_HOLD_MS = 1800;
+
+    /** How long the winning Jad keeps standing (looping JAD_IDLE_ANIMATION_ID) after the loser's
+     * own death animation finishes before both despawn -- purely client-timed, there's no separate
+     * server event marking "done" the way JAD_DISMISSED does for the single-Jad encounter. Matches
+     * JADDY_RESOLVED_BANNER_DURATION_MS so the "&lt;color&gt; wins!" banner and the winning Jad
+     * disappear together. */
+    public static final long JADDY_DEATH_HOLD_MS = 5000;
+
+    /** How long AnnouncementOverlay's "&lt;color&gt; wins!" duel-resolved banner stays up once
+     * JADDY_DUEL_RESOLVED lands -- matches JADDY_DEATH_HOLD_MS, see that field's own doc. */
+    public static final long JADDY_RESOLVED_BANNER_DURATION_MS = 5000;
+
     /** How long AnnouncementOverlay's team-assigned reveal banner stays up -- fired once, right
      * after MINIGAME_TEAMS_ASSIGNED lands for the local player (see MinigamePresentation#
      * triggerTeamAssignedBanner), same duration as MINIGAME_OVER_BANNER_DURATION_MS above (both
@@ -557,6 +588,7 @@ public class RunePartyPlugin extends Plugin
     private AnnouncementOverlay announcementOverlay;
     private ConfettiOverlay confettiOverlay;
     private JadEncounter jadEncounter;
+    private JaddyDuelModel jaddyDuelModel;
     private FishingCatchOverlay fishingCatchOverlay;
     private TurfWarsScoreOverlay turfWarsScoreOverlay;
     private SandwichRushHudOverlay sandwichRushHudOverlay;
@@ -765,6 +797,15 @@ public class RunePartyPlugin extends Plugin
     // thread) -- see refreshItemUse. A tick of staleness costs nothing here: OSRS positions only
     // ever change on tick boundaries anyway, so this is exactly as fresh as a live read would be.
     private volatile boolean standingOnTrackedPositionCached = false;
+    // Same reasoning/pattern as standingOnTrackedPositionCached immediately above -- Player#
+    // getWorldLocation() also asserts it's never invoked off the client thread, and
+    // getLocalJaddyZoneColorHex() needs the local player's own current position from handleEvent,
+    // which runs on EventSocket's own OkHttp WebSocket callback thread, not the client thread. An
+    // uncaught AssertionError thrown there doesn't just fail that one lookup -- it propagates out of
+    // OkHttp's own RealWebSocket#loopReader, killing that connection's entire read loop, which is
+    // indistinguishable from "the game stalled" until EventSocket's own reconnect eventually kicks
+    // in. A tick of staleness costs nothing here either, same reasoning that field's own doc gives.
+    private volatile WorldPoint lastKnownLocalPosition = null;
     // ---- board view (client-side camera state -- see toggleBoardView/restoreCameraFromBoardView,
     // the only writers). boardViewSavedPitch/Yaw/Zoom are only ever read/written from inside a
     // clientThread.invoke callback (same thread every writer already runs on), so no volatile
@@ -931,6 +972,9 @@ public class RunePartyPlugin extends Plugin
         jadEncounter = new JadEncounter(client, clientThread, this);
         overlayManager.add(jadEncounter);
 
+        jaddyDuelModel = new JaddyDuelModel(client, clientThread, this, tileReducer);
+        overlayManager.add(jaddyDuelModel);
+
         fishingCatchOverlay = new FishingCatchOverlay(this);
         overlayManager.add(fishingCatchOverlay);
 
@@ -977,6 +1021,7 @@ public class RunePartyPlugin extends Plugin
         if (announcementOverlay != null) overlayManager.remove(announcementOverlay);
         if (confettiOverlay != null) overlayManager.remove(confettiOverlay);
         if (jadEncounter != null) { jadEncounter.clear(); overlayManager.remove(jadEncounter); }
+        if (jaddyDuelModel != null) { jaddyDuelModel.clear(); overlayManager.remove(jaddyDuelModel); }
         if (fishingCatchOverlay != null) overlayManager.remove(fishingCatchOverlay);
         if (turfWarsScoreOverlay != null) overlayManager.remove(turfWarsScoreOverlay);
         if (sandwichRushHudOverlay != null) overlayManager.remove(sandwichRushHudOverlay);
@@ -2228,6 +2273,7 @@ public class RunePartyPlugin extends Plugin
         String self = localRsn();
         Player selfPlayer = client.getLocalPlayer();
         standingOnTrackedPositionCached = self != null && selfPlayer != null && isStandingOnTrackedPosition(selfPlayer, self);
+        lastKnownLocalPosition = selfPlayer != null ? selfPlayer.getWorldLocation() : null;
 
         // Runs independently of the turn engine below -- a Coin Rush round has no "whose turn is
         // it" at all, every seated player can be racing for a spawn at once, so this can't share
@@ -3282,6 +3328,54 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
+            case Events.JADDY_ATTACK_TRIGGERED:
+            {
+                // Purely cosmetic, no real state to fold -- this never touches a presentation class
+                // at all. Deliberately NOT gated on !catchingUp, unlike every other one-shot
+                // animation trigger in this switch: a client that drops connection (EventSocket
+                // auto-reconnects with full-jitter backoff, see that class's own doc) mid-fight and
+                // reconnects replays its whole missed backlog as catchingUp=true, and this event is
+                // the ONLY thing that ever updates a Jad's own health bar -- skipping it here left
+                // both Jads frozen at 100/100, idling forever with no explanation, for the rest of
+                // that round, on every client that so much as blipped its connection during a duel.
+                // Replaying every missed beat back-to-back like this can flicker through more than
+                // one attack animation/hitsplat in a single frame, but each Slot's own fields just
+                // get overwritten by the next update in the burst, so whatever's actually visible
+                // once the burst finishes still reflects the truth -- a strictly better outcome than
+                // freezing. See JADDY_DUEL_RESOLVED below for the same reasoning applied to the
+                // duel's own final outcome.
+                String attackingColor = Json.requiredStr(e.payload, type, "attackingColor");
+                String defendingColor = Json.requiredStr(e.payload, type, "defendingColor");
+                Integer animationId = Json.requiredInt(e.payload, type, "animationId");
+                Integer damage = Json.requiredInt(e.payload, type, "damage");
+                Integer defenderHp = Json.requiredInt(e.payload, type, "defenderHp");
+                Integer defenderMaxHp = Json.requiredInt(e.payload, type, "defenderMaxHp");
+                if (attackingColor != null && defendingColor != null && animationId != null
+                    && damage != null && defenderHp != null && defenderMaxHp != null)
+                {
+                    jaddyDuelModel.playAttack(attackingColor, defendingColor, animationId, damage, defenderHp, defenderMaxHp);
+                }
+                break;
+            }
+
+            case Events.JADDY_DUEL_RESOLVED:
+            {
+                minigamePresentation.apply(e, catchingUp);
+                // Deliberately NOT gated on !catchingUp -- see JADDY_ATTACK_TRIGGERED's own doc for
+                // the bug this fixes. This is the one animation trigger in this whole switch that's
+                // safe (and important) to always apply regardless of catch-up: it's a one-time
+                // terminal transition, not a replayable-many-times reveal, so there's no "flickering
+                // through history" risk the way JADDY_ATTACK_TRIGGERED's own burst-replay has -- a
+                // client that reconnects after the duel already resolved gets the correct final
+                // state (the right side dead, the other still standing) immediately, instead of
+                // never resolving at all. Only the celebratory "<color> Won!" banner itself
+                // (minigamePresentation.apply above) stays catch-up-suppressed, same convention
+                // every other banner in this file follows.
+                String winningColor = Json.requiredStr(e.payload, type, "winningColor");
+                if (winningColor != null) jaddyDuelModel.resolve(winningColor);
+                break;
+            }
+
             case Events.ITEM_GRANTED:
             case Events.ITEM_CAP_BLOCKED:
             {
@@ -3734,6 +3828,51 @@ public class RunePartyPlugin extends Plugin
      * round hasn't actually become playable. */
     public long getTurfWarsEndsAt() { return minigamePresentation.getTurfWarsEndsAt(); }
 
+    public boolean isJaddyActive() { return minigamePresentation.isJaddyActive(); }
+    /** The color hex of whichever Who's Your Jaddy? zone tile {@code pos} currently sits on, or
+     * null if {@code pos} isn't on either zone right now (no Jaddy round active, or the position is
+     * off both zones) -- a live board lookup, same "the board's own current state already is the
+     * answer" shape getTurfWarsTileCounts already uses, just per-point instead of tallied. Purely
+     * position-driven, not locked in at arrival -- a player can walk from one zone to the other at
+     * any point before the duel resolves and this (and the eventual payout, see
+     * minigames/whos_your_jaddy.py) both follow wherever they're actually standing. See
+     * PlayerOverlay, which recolors a seated player's own outline/token this way the instant their
+     * real WorldLocation lands inside either zone. */
+    public String getJaddyZoneColorHex(WorldPoint pos)
+    {
+        if (pos == null) return null;
+        for (TileReducer.TileEntry entry : tileReducer.snapshot())
+        {
+            if ("JADDY_TILE".equals(entry.tileType) && entry.color != null && pos.equals(entry.point))
+            {
+                return entry.color;
+            }
+        }
+        return null;
+    }
+    /** {@link #getJaddyZoneColorHex(WorldPoint)} decoded to an AWT {@link Color}, or null under the
+     * same conditions that returns null. */
+    public Color getJaddyZoneColor(WorldPoint pos)
+    {
+        String hex = getJaddyZoneColorHex(pos);
+        if (hex == null) return null;
+        try { return Color.decode(hex); }
+        catch (NumberFormatException e) { return null; }
+    }
+    /** {@link #getJaddyZoneColorHex(WorldPoint)} for the LOCAL player's own current position --
+     * used only to snapshot which side (if any) they'd picked at the exact instant a duel resolves
+     * (see MinigamePresentation#triggerJaddyResolvedBanner), so the "Your team's Jad won!" reveal
+     * reflects where they actually were then, not wherever they've wandered to by the time the
+     * banner itself renders. Reads lastKnownLocalPosition (cached once per tick from onGameTick,
+     * the client thread) rather than calling Player#getWorldLocation() directly -- this is called
+     * from handleEvent, which runs on EventSocket's own WebSocket callback thread, and that call
+     * asserts it's never invoked off the client thread. See lastKnownLocalPosition's own field doc
+     * -- this exact call, from this exact call site, is the bug that field was added to fix. */
+    public String getLocalJaddyZoneColorHex()
+    {
+        return getJaddyZoneColorHex(lastKnownLocalPosition);
+    }
+
     public String getTrueOrFalseQuestion() { return minigamePresentation.getTrueOrFalseQuestion(); }
     public int getTrueOrFalseRoundNumber() { return minigamePresentation.getTrueOrFalseRoundNumber(); }
     /** Who's answered the *current* round so far -- see renderTrueOrFalseQuestion's own
@@ -3791,6 +3930,9 @@ public class RunePartyPlugin extends Plugin
     public String getTeamAssignedBannerTeam() { return minigamePresentation.getTeamAssignedBannerTeam(); }
     public long getTurfWarsConfettiUntil() { return minigamePresentation.getTurfWarsConfettiUntil(); }
     public Color getTurfWarsConfettiColor() { return minigamePresentation.getTurfWarsConfettiColor(); }
+    public long getJaddyResolvedBannerUntil() { return minigamePresentation.getJaddyResolvedBannerUntil(); }
+    public String getJaddyResolvedWinningColor() { return minigamePresentation.getJaddyResolvedWinningColor(); }
+    public String getJaddyResolvedLocalZoneColor() { return minigamePresentation.getJaddyResolvedLocalZoneColor(); }
     // Delegating facade -- CeremonyPresentation owns the actual state. Every name/signature below
     // is unchanged, so no external caller (AnnouncementOverlay, ConfettiOverlay) needs to change.
     public List<RosterReducer.RosterEntry> getGameOverStandings() { return ceremonyPresentation.getGameOverStandings(); }

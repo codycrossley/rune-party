@@ -27,8 +27,21 @@ public final class RunePartyRender
      * {@code null} while any part isn't cached yet -- {@code Client#loadModelData} can return null
      * for a couple of frames right after the client starts -- callers should keep calling this
      * every frame until it succeeds, then cache the result themselves rather than re-merging every
-     * frame. */
+     * frame. Thin wrapper over {@link #loadNpcModelData}, for a caller that just wants the finished,
+     * lit model with no recolor of its own (see that method's own doc for a caller -- e.g.
+     * models/JaddyDuelModel -- that needs the raw, pre-lit data instead). */
     public static Model loadNpcModel(Client client, int npcId)
+    {
+        ModelData merged = loadNpcModelData(client, npcId);
+        return merged != null ? merged.light() : null;
+    }
+
+    /** Same merge as {@link #loadNpcModel}, but returns the raw, pre-lit {@link ModelData} instead
+     * of a finished {@link Model} -- for a caller that needs to recolor every face first (see
+     * models/CoinTrapModel#buildGoldModel's own doc on why recoloring needs the raw data, not a
+     * lit Model) before calling {@code ModelData#light()} itself. Same "null while not cached yet,
+     * keep calling every frame" contract as loadNpcModel. */
+    public static ModelData loadNpcModelData(Client client, int npcId)
     {
         NPCComposition comp = client.getNpcDefinition(npcId);
         if (comp == null) return null;
@@ -44,8 +57,7 @@ public final class RunePartyRender
             parts[i] = part;
         }
 
-        ModelData merged = parts.length == 1 ? parts[0] : client.mergeModels(parts);
-        return merged.light();
+        return parts.length == 1 ? parts[0] : client.mergeModels(parts);
     }
 
     /** The Jagex Angle Unit (0-2047 per revolution) a {@code RuneLiteObject} standing at {@code

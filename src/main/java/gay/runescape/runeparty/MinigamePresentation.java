@@ -146,6 +146,19 @@ final class MinigamePresentation
     private final Map<String, String> minigameTeamColors = new ConcurrentHashMap<>(); // lowercase rsn -> "#RRGGBB"
     private volatile long turfWarsRoundStartAt = 0;
 
+    // ---- Who's Your Jaddy? (server-driven duel resolution; the attack beats themselves have no
+    // state of their own, see RunePartyPlugin's own dedicated JADDY_ATTACK_TRIGGERED case).
+    // jaddyWinningColor is real state, applied catch-up or not -- whichever of TEAM_A_COLOR/
+    // TEAM_B_COLOR the surviving Jad's own zone was, or null before the duel resolves. Only the
+    // celebratory banner is cosmetic-only. ----
+    private volatile String jaddyWinningColor = null;
+    // Payload snapshotted eagerly the instant JADDY_DUEL_RESOLVED lands (see
+    // triggerJaddyResolvedBanner), not read lazily at fire time the way teamAssignedBanner's own
+    // supplier is -- MINIGAME_ENDED (which clears jaddyWinningColor below) can land close behind
+    // this event, and armBanner's own deferred callback would otherwise sometimes read jaddyWinningColor
+    // AFTER that clear already ran, rendering the banner with a null color for no visible reason.
+    private final TimedBanner<JaddyResolution> jaddyResolvedBanner = new TimedBanner<>();
+
     // ---- True or False (server-driven rounds). All real state, applied catch-up or not:
     // trueOrFalseQuestion/RoundNumber are the current round's own question text and 1-indexed
     // round number (null/0 once the round ends, until the next one starts or the mini-game itself
@@ -219,6 +232,12 @@ final class MinigamePresentation
                 {
                     minigameTeamColors.clear();
                     turfWarsRoundStartAt = 0;
+                }
+                // Same reasoning as Turf Wars' own reset above -- a fresh Jaddy duel hasn't
+                // resolved yet, regardless of catch-up.
+                if (RunePartyPlugin.JADDY_KEY.equals(minigameKey))
+                {
+                    jaddyWinningColor = null;
                 }
                 // Same reasoning as Coin Rush's own reset above. sandwichHeld/sandwichCount reset
                 // too -- a fresh round means nobody's holding anything and nobody's made a
@@ -489,6 +508,19 @@ final class MinigamePresentation
                 break;
             }
 
+            case Events.JADDY_DUEL_RESOLVED:
+            {
+                // Real state, applied catch-up or not -- a catching-up client still needs to know
+                // which side won even if it missed the attack sequence and death animation
+                // (RunePartyPlugin's own dedicated case handles those, skipped during catch-up).
+                jaddyWinningColor = Json.requiredStr(e.payload, type, "winningColor");
+                if (!catchingUp)
+                {
+                    triggerJaddyResolvedBanner();
+                }
+                break;
+            }
+
             default:
                 break;
         }
@@ -538,6 +570,9 @@ final class MinigamePresentation
         trueOrFalseRoundNumber = 0;
         trueOrFalseAnsweredRsns.clear();
         trueOrFalseMyAnswer = null;
+        // Same reasoning as the True or False cleanup just above -- no stale duel outcome should
+        // keep rendering once the mini-game itself has ended.
+        jaddyWinningColor = null;
         if (!catchingUp)
         {
             plugin.addChatMessage("Mini-game complete!");
@@ -705,6 +740,23 @@ final class MinigamePresentation
         }, true);
     }
 
+    /** Arms AnnouncementOverlay's Who's Your Jaddy? duel-resolved banner -- fired once, right when
+     * JADDY_DUEL_RESOLVED lands, chained via armBanner behind whatever's already reserving
+     * turnEffectGateUntil so it never stomps on an earlier reveal, same idiom
+     * triggerTeamAssignedBanner already uses. Both halves of the payload are captured right here,
+     * eagerly, rather than read lazily inside the Supplier the way teamAssignedBanner's own is --
+     * see jaddyResolvedBanner's own field doc for why that matters here specifically -- and the
+     * local player's own zone is a live board lookup that only means anything "at this instant",
+     * same reasoning minigames/whos_your_jaddy.py's own payout snapshots positions before its own
+     * hold rather than after. */
+    private void triggerJaddyResolvedBanner()
+    {
+        String winningColor = jaddyWinningColor;
+        String localZoneColor = plugin.getLocalJaddyZoneColorHex();
+        JaddyResolution resolution = new JaddyResolution(winningColor, localZoneColor);
+        plugin.armBanner(jaddyResolvedBanner, RunePartyPlugin.JADDY_RESOLVED_BANNER_DURATION_MS, () -> resolution, true);
+    }
+
     /** Whether the local player's own just-assigned color (minigameTeamColors, already folded in
      * by the MINIGAME_TEAMS_ASSIGNED case immediately above) is actually different from their own
      * existing RunePartyColor seat color -- see that case's own doc for why this gates
@@ -785,6 +837,8 @@ final class MinigamePresentation
         minigameRewardsBanner.reset();
         teamAssignedBanner.reset();
         turfWarsConfettiBanner.reset();
+        jaddyResolvedBanner.reset();
+        jaddyWinningColor = null;
         awaitingMinigameReadyFinish = false;
         awaitingTrueOrFalseYesFinish = false;
         awaitingTrueOrFalseNoFinish = false;
@@ -858,6 +912,15 @@ final class MinigamePresentation
     String getTeamAssignedBannerTeam() { return teamAssignedBanner.payload; }
     long getTurfWarsConfettiUntil() { return turfWarsConfettiBanner.until; }
     Color getTurfWarsConfettiColor() { return turfWarsConfettiBanner.payload; }
+    long getJaddyResolvedBannerUntil() { return jaddyResolvedBanner.until; }
+    /** The winning color half of the banner's own eagerly-snapshotted payload -- see
+     * jaddyResolvedBanner's own field doc for why this isn't just jaddyWinningColor read directly. */
+    String getJaddyResolvedWinningColor() { return jaddyResolvedBanner.payload != null ? jaddyResolvedBanner.payload.winningColor : null; }
+    /** The local player's own zone color hex at the exact instant the duel resolved, or null if
+     * they weren't standing in either zone then (including every spectator) -- lets
+     * AnnouncementOverlay phrase the reveal as "Your team's Jad won!"/"The other team's Jad won!"
+     * for whoever picked a side, falling back to the plain color name for everyone else. */
+    String getJaddyResolvedLocalZoneColor() { return jaddyResolvedBanner.payload != null ? jaddyResolvedBanner.payload.localZoneColor : null; }
 
     Map<Integer, WorldPoint> getCoinRushSpawns() { return coinRushSpawns; }
     Map<String, Integer> getCoinRushScores() { return coinRushScores; }
@@ -885,6 +948,7 @@ final class MinigamePresentation
     long getFishingContestEndsAt() { return fishingRoundStartAt != 0 ? fishingRoundStartAt + RunePartyPlugin.FISHING_CONTEST_DURATION_MS : 0; }
 
     boolean isTurfWarsActive() { return minigameActive && RunePartyPlugin.TURF_WARS_KEY.equals(minigameKey); }
+    boolean isJaddyActive() { return minigameActive && RunePartyPlugin.JADDY_KEY.equals(minigameKey); }
     /** This player's own assigned color hex, or null if minigameTeamColors hasn't been populated
      * yet for them (no Turf Wars round active, or MINIGAME_TEAMS_ASSIGNED hasn't landed yet this
      * round) -- takes an arbitrary rsn (not just the local player's own) so both
@@ -913,4 +977,20 @@ final class MinigamePresentation
     Boolean getTrueOrFalseLastCorrectAnswer() { return trueOrFalseLastCorrectAnswer; }
     List<TrueOrFalseResult> getTrueOrFalseLastResults() { return trueOrFalseLastResults; }
     long getTrueOrFalseRevealUntil() { return trueOrFalseRevealUntil; }
+
+    /** jaddyResolvedBanner's own payload -- see that field's own doc for why both halves are
+     * snapshotted eagerly at trigger time instead of read lazily. Never exposed outside this class
+     * directly, only decomposed via getJaddyResolvedWinningColor/getJaddyResolvedLocalZoneColor,
+     * same "private nested payload" shape JadPresentation's own OutcomePayload uses. */
+    private static final class JaddyResolution
+    {
+        final String winningColor;
+        final String localZoneColor; // null if the local player wasn't standing in either zone
+
+        JaddyResolution(String winningColor, String localZoneColor)
+        {
+            this.winningColor = winningColor;
+            this.localZoneColor = localZoneColor;
+        }
+    }
 }
