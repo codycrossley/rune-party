@@ -436,6 +436,53 @@ public class RunePartyPlugin extends Plugin
      * fading. */
     public static final long JAD_OUTCOME_BANNER_DURATION_MS = GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
 
+    /** How long AnnouncementOverlay's "CHANCE TILE!" title card stays up before the three-icon
+     * tableau below takes over -- same single-line-title treatment/duration idiom as
+     * ITEM_BANNER_DURATION_MS's own "ITEM SPACE!" card. See ChanceSpacePresentation's own
+     * scheduleAfterTurnEffects chain for how this leads into CHANCE_SPACE_ICON_STAGE_DURATION_MS. */
+    public static final long CHANCE_SPACE_TITLE_DURATION_MS = 1800;
+
+    /** Gap between each of the three Chance Tile tableau icons' own reveal (see
+     * ChanceSpacePresentation#buildIconStagePayload's randomized per-slot delay) -- staggered so
+     * they pop in one at a time rather than all at once, in a different order every time. Long
+     * enough (2s) that each icon actually registers as its own beat rather than a blur. */
+    public static final long CHANCE_SPACE_ICON_STAGE_STAGGER_MS = 2000;
+
+    /** How long a single Chance Tile tableau icon takes to pop in from oversized down to its
+     * resting scale, once its own staggered delay above has elapsed -- see
+     * AnnouncementOverlay#slotAnim's fade-in/scale-in window, shared by all three icons. */
+    public static final long CHANCE_SPACE_ICON_POP_MS = 250;
+
+    /** Extra pause after the last icon finishes popping in before the announcement text below the
+     * tableau starts fading in -- a short beat so the reveal doesn't feel like it's talking over
+     * its own icons. */
+    public static final long CHANCE_SPACE_TEXT_REVEAL_DELAY_MS = 300;
+
+    /** How long the announcement text (see ChanceSpacePresentation#buildAnnouncementLines) takes to
+     * fade in beneath the icon tableau, once CHANCE_SPACE_TEXT_REVEAL_DELAY_MS above has passed. */
+    public static final long CHANCE_SPACE_TEXT_FADE_MS = 400;
+
+    /** Offset from the start of the icon-tableau stage at which the announcement text begins fading
+     * in -- every icon's own delay/pop-in window plus the pause above. Single source of truth for
+     * AnnouncementOverlay#drawChanceSpaceAnnouncement's own fade-in timing and
+     * ChanceSpacePresentation's own deferred coin/gnome popup (see that class's own doc on why the
+     * real delta is held back until the sequence plays out) -- both need to agree on exactly when
+     * the reveal actually happens, so this is computed once, here, rather than separately by each. */
+    public static final long CHANCE_SPACE_TEXT_START_OFFSET_MS =
+        2 * CHANCE_SPACE_ICON_STAGE_STAGGER_MS + CHANCE_SPACE_ICON_POP_MS + CHANCE_SPACE_TEXT_REVEAL_DELAY_MS;
+
+    /** How long the icons and swap announcement hold together, fully visible, before the whole
+     * tableau fades out -- long enough to actually read both lines of text (a header plus one
+     * directional gift line). */
+    public static final long CHANCE_SPACE_TEXT_HOLD_MS = 6000;
+
+    /** Total lifetime of the Chance Tile icon-tableau banner: CHANCE_SPACE_TEXT_START_OFFSET_MS
+     * (every icon's own delay + pop-in time, plus the pause before text starts), the text's own
+     * fade-in, then the hold above. Must cover every icon's own delay + pop-in time and the text's
+     * own reveal, or either would get cut off fading out mid-reveal. */
+    public static final long CHANCE_SPACE_ICON_STAGE_DURATION_MS =
+        CHANCE_SPACE_TEXT_START_OFFSET_MS + CHANCE_SPACE_TEXT_FADE_MS + CHANCE_SPACE_TEXT_HOLD_MS;
+
     /** How long AnnouncementOverlay's "GAME OVER!" title card stays up -- the first step of the
      * end-game ceremony (see triggerGameOverSequence), gated behind scheduleAfterTurnEffects so it
      * waits out whatever round-complete/rewards recap the final MINIGAME_ENDED just queued --
@@ -606,6 +653,7 @@ public class RunePartyPlugin extends Plugin
     private ItemPresentation itemPresentation;
     private MinigamePresentation minigamePresentation;
     private JadPresentation jadPresentation;
+    private ChanceSpacePresentation chanceSpacePresentation;
     private RunePartyPanel panel;
     private NavigationButton navButton;
     private RunePartyMapOverlay mapOverlay;
@@ -950,6 +998,7 @@ public class RunePartyPlugin extends Plugin
         itemPresentation = new ItemPresentation(this);
         minigamePresentation = new MinigamePresentation(this);
         jadPresentation = new JadPresentation(this);
+        chanceSpacePresentation = new ChanceSpacePresentation(this);
 
         tileOverlay = new TileOverlay(client, config, this, tileReducer);
         overlayManager.add(tileOverlay);
@@ -2866,6 +2915,33 @@ public class RunePartyPlugin extends Plugin
         return uiTimerExec.schedule(action, delay, TimeUnit.MILLISECONDS);
     }
 
+    /** Reserves the turn-effect gate for a whole multi-stage sequence's {@code totalDurationMs} in
+     * one atomic step, and returns the delay (ms from now) before that reserved window begins --
+     * for a caller about to run several timed stages back-to-back (a title card, then a tableau,
+     * then...) that all need to land as one uninterrupted block.
+     * <p>
+     * A chain of individual scheduleAfterTurnEffects calls -- each stage only calling the next one
+     * from inside its own callback -- reserves the gate one stage at a time, discovering each later
+     * stage's own duration only once the previous stage's callback actually fires. That leaves a
+     * window, for as long as only the first stage's duration is reserved, where an unrelated event
+     * arriving mid-chain (e.g. the next round's MINIGAME_STARTED) reads a gate that doesn't know the
+     * later stages are coming yet, and schedules itself to land on top of them. Calling this once,
+     * synchronously, before scheduling any of the chain's own stages closes that window: every
+     * stage's own duration is already accounted for in the gate from the very first moment.
+     * <p>
+     * Callers should schedule each of their own stages via {@code uiTimerExec.schedule} directly, at
+     * this returned delay plus that stage's own cumulative offset into the sequence -- not via
+     * another scheduleAfterTurnEffects call per stage, which would read and extend the gate a second
+     * time on top of this reservation. */
+    long reserveTurnEffectGate(long totalDurationMs)
+    {
+        long now = System.currentTimeMillis();
+        long delay = turnEffectGateUntil > now ? (turnEffectGateUntil - now) + POST_TURN_EFFECT_GRACE_MS : 0;
+        extendTurnEffectGate(now + delay + totalDurationMs);
+        uiTimerExec.schedule(this::refreshPanel, delay + totalDurationMs, TimeUnit.MILLISECONDS);
+        return delay;
+    }
+
     /** Plain fixed-delay scheduling against uiTimerExec, with no turn-effect gating of its own --
      * unlike scheduleAfterTurnEffects, {@code action} just runs {@code delayMs} from now. Public
      * (unlike uiTimerExec itself, deliberately package-private) so a caller outside this package,
@@ -3265,8 +3341,15 @@ public class RunePartyPlugin extends Plugin
             }
 
             case Events.GOLDEN_GNOME_LOST:
+            case Events.GOLDEN_GNOME_WON:
             {
                 goldenGnomePresentation.apply(e, catchingUp);
+                break;
+            }
+
+            case Events.CHANCE_SPACE_TRIGGERED:
+            {
+                chanceSpacePresentation.apply(e, catchingUp);
                 break;
             }
 
@@ -3475,6 +3558,9 @@ public class RunePartyPlugin extends Plugin
                 // unconditionally above, catch-up or not) -- everything in this block is purely
                 // the popup's own cosmetics. "dev_adjust" gets the same treatment as any other
                 // unattended coin change.
+                // "chance_space" is deliberately excluded here -- ChanceSpacePresentation triggers
+                // its own coin popup manually (see its own applyDeferredDelta), at its own reveal's
+                // chosen moment rather than the instant this event arrives.
                 String coinsChangedReason = Json.requiredStr(e.payload, type, "reason");
                 if (!catchingUp && ("standard_tile".equals(coinsChangedReason) || "start_tile".equals(coinsChangedReason)
                     || "item".equals(coinsChangedReason) || "coin_trap".equals(coinsChangedReason)
@@ -3687,6 +3773,7 @@ public class RunePartyPlugin extends Plugin
         ceremonyPresentation.reset();
         goldenGnomePresentation.reset();
         jadPresentation.reset();
+        chanceSpacePresentation.reset();
         coinPopups.clear();
         diceRollRsn = null; diceRollValue = 0; diceRollBonus = 0; diceRollStart = 0; diceRollUntil = 0;
         if (rosterReducer != null) rosterReducer.reset();
@@ -3986,6 +4073,24 @@ public class RunePartyPlugin extends Plugin
     public long getGoldenGnomeMoveHideOldAt() { return goldenGnomePresentation.getMoveHideOldAt(); }
     public WorldPoint getGoldenGnomeMoveNewPoint() { return goldenGnomePresentation.getMoveNewPoint(); }
     public long getGoldenGnomeMoveShowNewAt() { return goldenGnomePresentation.getMoveShowNewAt(); }
+
+    /** Lets ChanceSpacePresentation's own deferred reveal show the Golden Gnome count popup at a
+     * time of its own choosing -- see GoldenGnomePresentation#showCountPopup's own doc. */
+    void showGoldenGnomeCountPopup(String rsn, int newTotal, int delta)
+    {
+        goldenGnomePresentation.showCountPopup(rsn, newTotal, delta);
+    }
+
+    public long getChanceSpaceTitleUntil() { return chanceSpacePresentation.getTitleUntil(); }
+    public long getChanceSpaceIconsStart() { return chanceSpacePresentation.getIconsStart(); }
+    public long getChanceSpaceIconsUntil() { return chanceSpacePresentation.getIconsUntil(); }
+    public String getChanceSpaceIconsLeftRsn() { return chanceSpacePresentation.getIconsLeftRsn(); }
+    public String getChanceSpaceIconsRightRsn() { return chanceSpacePresentation.getIconsRightRsn(); }
+    public String getChanceSpaceIconsOutcomeType() { return chanceSpacePresentation.getIconsOutcomeType(); }
+    public boolean isChanceSpaceIconsGnomeTransferred() { return chanceSpacePresentation.isIconsGnomeTransferred(); }
+    public String getChanceSpaceIconsArrowDirection() { return chanceSpacePresentation.getIconsArrowDirection(); }
+    public long[] getChanceSpaceIconsSlotDelayMs() { return chanceSpacePresentation.getIconsSlotDelayMs(); }
+    public String[] getChanceSpaceAnnouncementLines() { return chanceSpacePresentation.getAnnouncementLines(); }
 
     public String getJadEncounterRsn() { return jadPresentation.getEncounterRsn(); }
     public long getJadAwakenedAt() { return jadPresentation.getAwakenedAt(); }

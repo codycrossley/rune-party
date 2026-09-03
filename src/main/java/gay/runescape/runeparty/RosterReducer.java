@@ -75,6 +75,23 @@ public class RosterReducer
         return colorNumberByPlayer.getOrDefault(canonicalRsn.toLowerCase(Locale.ROOT), "");
     }
 
+    /** The real, already-folded total -- used by ChanceSpacePresentation's own deferred reveal to
+     * read the post-transfer amount straight from here instead of threading it through from the
+     * sibling COINS_CHANGED event, since this is always updated first (rosterReducer.apply runs
+     * unconditionally, before any per-type dispatch -- see RunePartyPlugin#handleEvent). */
+    public int getCoins(String canonicalRsn)
+    {
+        if (canonicalRsn == null) return 0;
+        return coinsByPlayer.getOrDefault(canonicalRsn.toLowerCase(Locale.ROOT), 0);
+    }
+
+    /** Same shape/reasoning as {@link #getCoins}, for a deferred Golden Gnome popup instead. */
+    public int getGoldenGnomeCount(String canonicalRsn)
+    {
+        if (canonicalRsn == null) return 0;
+        return goldenGnomeCountByPlayer.getOrDefault(canonicalRsn.toLowerCase(Locale.ROOT), 0);
+    }
+
     public Map<String, Integer> getItems(String canonicalRsn)
     {
         if (canonicalRsn == null) return Collections.emptyMap();
@@ -261,12 +278,13 @@ public class RosterReducer
             }
             case Events.GOLDEN_GNOME_PURCHASED:
             case Events.GOLDEN_GNOME_LOST:
+            case Events.GOLDEN_GNOME_WON:
             {
-                // Both carry the exact same {player, goldenGnomeCount} shape -- a purchase's own
-                // +1 and a Jad smash penalty's own -1 both just overwrite with the new running
-                // total, identically. Without this case, a lost Golden Gnome would decrement the
-                // real server-side count while the roster/stats overlay kept showing the stale
-                // pre-loss total forever.
+                // All three carry the exact same {player, goldenGnomeCount} shape -- a purchase's
+                // own +1, a Jad smash penalty's own -1, and a Chance Tile win's own +1 all just
+                // overwrite with the new running total, identically. Without this case, a lost (or
+                // won) Golden Gnome would change the real server-side count while the roster/stats
+                // overlay kept showing the stale total forever.
                 String playerRaw = Json.requiredStr(e.payload, type, "player");
                 if (playerRaw == null) return;
                 String key = canonicalKey(playerRaw);

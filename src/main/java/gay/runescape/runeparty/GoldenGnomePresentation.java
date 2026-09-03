@@ -9,8 +9,8 @@ import java.util.concurrent.TimeUnit;
  * RunePartyPlugin. Owns its own fields, folds its own event types via apply(), and clears itself
  * via reset(); RunePartyPlugin still exposes every getter under its original name, just delegating
  * here. Purchasing is a direct request/response triggered by a right-click menu entry rather than
- * an emote, so this class only ever reacts to what already happened (purchased/lost/moved), never
- * gates a pending decision. */
+ * an emote, so this class only ever reacts to what already happened (purchased/lost/won/moved),
+ * never gates a pending decision. */
 final class GoldenGnomePresentation
 {
     private final RunePartyPlugin plugin;
@@ -71,11 +71,15 @@ final class GoldenGnomePresentation
 
             case Events.GOLDEN_GNOME_LOST:
             {
-                // Jad's smash penalty, taken instead of coins when the player holds one -- same
-                // "+1"/running-total popup shape as a purchase, just a -1 delta and no outcome
-                // banner of its own (JadPresentation's own JAD_DISMISSED handling closes out the
-                // encounter; this is scoped to the popup and chat message only).
-                if (!catchingUp)
+                // Two causes share this exact event/shape -- Jad's smash penalty (taken instead of
+                // coins when the player holds one; JadPresentation's own outcome banner already
+                // announces "smashed" separately, see that class's own doc) and a Chance Tile gift
+                // given away by this player (ChanceSpacePresentation's own reveal announces that
+                // one, and shows this exact popup itself via showCountPopup at its own chosen
+                // moment -- showing it again here immediately would leak the outcome early and
+                // duplicate the chat line).
+                String reason = Json.safeStr(e.payload, "reason");
+                if (!catchingUp && !"chance_space".equals(reason))
                 {
                     String rsn = Json.requiredStr(e.payload, type, "player");
                     Integer total = Json.requiredInt(e.payload, type, "goldenGnomeCount");
@@ -84,7 +88,28 @@ final class GoldenGnomePresentation
                     popup.until = popup.start + RunePartyPlugin.COIN_POPUP_DURATION_MS;
                     plugin.extendTurnEffectGate(popup.until);
 
-                    plugin.addChatMessage("Jad smashes " + rsn + "! They lost their Golden Gnome!");
+                    plugin.addChatMessage(rsn + " lost their Golden Gnome!");
+                }
+                break;
+            }
+
+            case Events.GOLDEN_GNOME_WON:
+            {
+                // Chance Tile is this event's only cause today -- always deferred (see
+                // GOLDEN_GNOME_LOST's own doc just above), so this case never actually shows
+                // anything itself; kept as a real reason-gated branch (not just dropped) in case a
+                // future non-chance_space cause ever reuses this event.
+                String reason = Json.safeStr(e.payload, "reason");
+                if (!catchingUp && !"chance_space".equals(reason))
+                {
+                    String rsn = Json.requiredStr(e.payload, type, "player");
+                    Integer total = Json.requiredInt(e.payload, type, "goldenGnomeCount");
+                    popup.payload = new PopupPayload(rsn, total != null ? total : 0, 1);
+                    popup.start = System.currentTimeMillis();
+                    popup.until = popup.start + RunePartyPlugin.COIN_POPUP_DURATION_MS;
+                    plugin.extendTurnEffectGate(popup.until);
+
+                    plugin.addChatMessage(rsn + " won a Golden Gnome!");
                 }
                 break;
             }
@@ -124,6 +149,18 @@ final class GoldenGnomePresentation
             default:
                 break;
         }
+    }
+
+    /** Arms the count popup directly, bypassing apply()'s own event-driven timing -- for
+     * ChanceSpacePresentation's own deferred reveal (see GOLDEN_GNOME_LOST/WON's own doc above),
+     * which needs this exact "+1"/"-1" popup to land at its own reveal moment rather than the
+     * instant the underlying event actually arrived. */
+    void showCountPopup(String rsn, int newTotal, int delta)
+    {
+        popup.payload = new PopupPayload(rsn, newTotal, delta);
+        popup.start = System.currentTimeMillis();
+        popup.until = popup.start + RunePartyPlugin.COIN_POPUP_DURATION_MS;
+        plugin.extendTurnEffectGate(popup.until);
     }
 
     void reset()

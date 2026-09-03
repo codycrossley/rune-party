@@ -19,6 +19,7 @@ public final class Events
     /** Server-only bookkeeping fired when a player is eliminated from the Arena. Never dispatched
      * on by any handler here -- an eliminated player just doesn't get paid at the end. */
     public static final String ARENA_PLAYER_ELIMINATED = "ARENA_PLAYER_ELIMINATED";
+    public static final String CHANCE_SPACE_TRIGGERED = "CHANCE_SPACE_TRIGGERED";
     public static final String COIN_RUSH_COLLECTED = "COIN_RUSH_COLLECTED";
     public static final String COIN_RUSH_SPAWN = "COIN_RUSH_SPAWN";
     public static final String COIN_TRAP_TRIGGERED = "COIN_TRAP_TRIGGERED";
@@ -32,6 +33,7 @@ public final class Events
     public static final String GOLDEN_GNOME_LOST = "GOLDEN_GNOME_LOST";
     public static final String GOLDEN_GNOME_MOVED = "GOLDEN_GNOME_MOVED";
     public static final String GOLDEN_GNOME_PURCHASED = "GOLDEN_GNOME_PURCHASED";
+    public static final String GOLDEN_GNOME_WON = "GOLDEN_GNOME_WON";
     public static final String HOME_TELEPORT_ARMED = "HOME_TELEPORT_ARMED";
     public static final String HOME_TELEPORT_ARRIVED = "HOME_TELEPORT_ARRIVED";
     public static final String ITEM_CAP_BLOCKED = "ITEM_CAP_BLOCKED";

@@ -178,6 +178,16 @@ public final class CoursePreset
         }
     }
 
+    /** Swaps the tile at {@code index} to {@code tileType} in place, keeping its dx/dy/color/
+     * nextIndices -- the same "list position becomes pathIndex, only the type changes" idiom
+     * {@link #buildStandardLoop} uses for every one of its non-PATH tiles. */
+    private static void swapType(List<RelativeTile> tiles, int index, String tileType)
+    {
+        if (index >= tiles.size()) return;
+        RelativeTile t = tiles.get(index);
+        tiles.set(index, new RelativeTile(t.dx, t.dy, tileType, t.color, t.nextIndices));
+    }
+
     /**
      * A generated placeholder loop (a plain rectangular ring of PATH tiles, START at index 0) so
      * there's at least one non-empty, testable built-in course out of the box. Real courses are
@@ -186,7 +196,9 @@ public final class CoursePreset
      * baked in below (the perimeter walk's own "+1, wrapping at the end" order) -- there's no
      * implicit default to lean on. Also exercises a Golden Gnome modifier end-to-end (see
      * RelativeTile#decorative) two steps out from START, so it's reachable by almost any first
-     * roll, plus a Jad Tile at list index 10 (see JadEncounter).
+     * roll, plus a spread of every other course tile type (ITEM, JAD, PENALTY, EVENT, CHANCE)
+     * swapped in around the loop -- roughly Fally Park's own PATH-heavy proportions, just scaled
+     * down to this course's 36 real tiles, so the default course isn't just a bare ring of PATH.
      */
     public static CoursePreset buildStandardLoop()
     {
@@ -208,23 +220,19 @@ public final class CoursePreset
             tiles.set(0, new RelativeTile(first.dx, first.dy, "START", null, first.nextIndices));
         }
 
-        // Item Space, 4 steps out from START (distinct from the Golden Gnome tile below, 2 steps
-        // out) -- swapped in place the same way the very first tile above became START, so the
-        // default course is immediately testable without hand-building a custom one.
-        int itemTileIndex = 4;
-        if (tiles.size() > itemTileIndex)
-        {
-            RelativeTile itemTile = tiles.get(itemTileIndex);
-            tiles.set(itemTileIndex, new RelativeTile(itemTile.dx, itemTile.dy, "ITEM_TILE", null, itemTile.nextIndices));
-        }
-
-        // Jad Tile, 10 steps out from START -- same swap-in-place idiom as the Item Space above.
-        int jadTileIndex = 10;
-        if (tiles.size() > jadTileIndex)
-        {
-            RelativeTile jadTile = tiles.get(jadTileIndex);
-            tiles.set(jadTileIndex, new RelativeTile(jadTile.dx, jadTile.dy, "JAD_TILE", null, jadTile.nextIndices));
-        }
+        // Swapped in place, same idiom as index 0 becoming START above -- spread across all four
+        // sides of the perimeter rather than clustered on one, so no single stretch of the loop is
+        // all-PATH.
+        swapType(tiles, 4, "ITEM_TILE");
+        swapType(tiles, 7, "PENALTY_TILE");
+        swapType(tiles, 10, "JAD_TILE");
+        swapType(tiles, 15, "CHANCE_TILE");
+        swapType(tiles, 21, "EVENT_TILE");
+        swapType(tiles, 24, "PENALTY_TILE");
+        swapType(tiles, 27, "ITEM_TILE");
+        swapType(tiles, 29, "CHANCE_TILE");
+        swapType(tiles, 32, "PENALTY_TILE");
+        swapType(tiles, 34, "CHANCE_TILE");
 
         // Bake in every tile's own explicit "+1, wrapping at the end" edge -- must happen after
         // every tileType swap above and before the decorative Golden Gnome tile is appended below,

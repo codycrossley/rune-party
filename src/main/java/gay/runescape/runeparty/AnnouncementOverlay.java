@@ -1,15 +1,19 @@
 package gay.runescape.runeparty;
 
+import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.Color;
+import java.awt.Composite;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.Polygon;
 import java.awt.RenderingHints;
+import java.awt.Stroke;
 import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -30,6 +34,7 @@ import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
+import net.runelite.client.util.ImageUtil;
 
 /** Big, brief, screen-centered instructional banners -- e.g. "&lt;player&gt;'s Turn". */
 @Slf4j
@@ -169,6 +174,28 @@ public class AnnouncementOverlay extends Overlay
     private static final long GOLDEN_GNOME_OUTCOME_FADE_MS = DEFAULT_FADE_MS;
     private static final float GOLDEN_GNOME_OUTCOME_SIZE = 32f;
 
+    private static final long CHANCE_SPACE_ICON_STAGE_FADE_MS = DEFAULT_FADE_MS;
+    private static final int CHANCE_SPACE_ICON_SPACING = 160; // each player token's own x offset from center; the arrow sits at dead center
+    private static final int CHANCE_SPACE_TOKEN_RADIUS = 22;
+    private static final Stroke CHANCE_SPACE_TOKEN_BORDER = new BasicStroke(2.5f);
+    private static final float CHANCE_SPACE_TOKEN_NAME_SIZE = 16f;
+    private static final int CHANCE_SPACE_TOKEN_NAME_GAP = 18;
+    private static final int CHANCE_SPACE_ARROW_HALF_WIDTH = 12;
+    private static final int CHANCE_SPACE_ARROW_LENGTH = 70;
+    private static final int CHANCE_SPACE_ARROWHEAD_LENGTH = 16;
+    private static final Stroke CHANCE_SPACE_ARROW_SHAFT_STROKE = new BasicStroke(6f);
+    private static final int CHANCE_SPACE_ARROW_ITEM_CLEARANCE = 48; // gap between the arrow shaft and the coin/gnome icon above it
+    private static final int CHANCE_SPACE_ITEM_ICON_SIZE = 52; // 2x the original placeholder-art size
+    private static final Stroke CHANCE_SPACE_FIZZLE_STROKE = new BasicStroke(3f);
+    private static final int CHANCE_SPACE_ANNOUNCEMENT_TOP_GAP = 30; // gap below the token name labels before the announcement's own header line
+    private static final float CHANCE_SPACE_ANNOUNCEMENT_HEADER_SIZE = 22f;
+    private static final float CHANCE_SPACE_ANNOUNCEMENT_LINE_SIZE = 18f;
+    private static final int CHANCE_SPACE_ANNOUNCEMENT_LINE_HEIGHT = 26;
+    private static final float CHANCE_SPACE_BACKDROP_ALPHA = 0.55f; // slightly opaque, not a full screen dim
+    private static final int CHANCE_SPACE_BACKDROP_PADDING_X = 32;
+    private static final int CHANCE_SPACE_BACKDROP_PADDING_Y = 22;
+    private static final int CHANCE_SPACE_BACKDROP_ARC = 24;
+
     private static final float JAD_TAUNT_SIZE = 26f;
     private static final float JAD_COUNTDOWN_SIZE = 40f;
 
@@ -178,11 +205,19 @@ public class AnnouncementOverlay extends Overlay
     private final RunePartyConfig config;
     private final RunePartyPlugin plugin;
 
+    // The item drawn above the Chance Tile arrow -- see drawChanceSpaceArrow. Placeholder art for
+    // now (plain gold coin / gold circle-plus-hat "gnome"); swap either PNG in place at this same
+    // path/size and no code change is needed.
+    private final BufferedImage chanceSpaceCoinIcon;
+    private final BufferedImage chanceSpaceGnomeIcon;
+
     public AnnouncementOverlay(Client client, RunePartyConfig config, RunePartyPlugin plugin)
     {
         this.client = client;
         this.config = config;
         this.plugin = plugin;
+        this.chanceSpaceCoinIcon = ImageUtil.loadImageResource(getClass(), "chance_space/coin-icon.png");
+        this.chanceSpaceGnomeIcon = ImageUtil.loadImageResource(getClass(), "chance_space/golden-gnome-icon.png");
 
         setPosition(OverlayPosition.DYNAMIC);
         setLayer(OverlayLayer.ABOVE_SCENE);
@@ -206,6 +241,8 @@ public class AnnouncementOverlay extends Overlay
         renderTurnSkippedAnnouncement(g);
         renderSpinHint(g);
         renderGoldenGnomeOutcome(g);
+        renderChanceSpaceTitle(g);
+        renderChanceSpaceIcons(g);
         renderJadEncounter(g);
         renderJadOutcome(g);
         renderItemBanner(g);
@@ -501,6 +538,214 @@ public class AnnouncementOverlay extends Overlay
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OUTCOME_SIZE));
         drawCenteredText(g, text, client.getCanvasWidth() / 2, client.getCanvasHeight() / 3, color, alpha);
+    }
+
+    /** Draws the "CHANCE TILE!" title card -- same rainbow single-line treatment as "ITEM SPACE!"
+     * (renderItemBanner), the first of three Chance Tile reveal stages (see
+     * ChanceSpacePresentation's own scheduleAfterTurnEffects chain). */
+    private void renderChanceSpaceTitle(Graphics2D g)
+    {
+        Float alpha = BannerAnim.fadeAlpha(plugin.getChanceSpaceTitleUntil(), MINIGAME_FADE_MS);
+        if (alpha == null) return;
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 3;
+
+        g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
+        drawCenteredRainbowText(g, "CHANCE TILE!", RAINBOW_LETTER_COLORS, centerX, y, alpha);
+    }
+
+    /** Draws the second Chance Tile reveal stage: a player token on each side of the screen and,
+     * between them, an arrow carrying whichever item (coins or a Golden Gnome) actually moved, plus
+     * (once every icon's settled) the announcement text fading in underneath. Each of the three
+     * icons pops in independently once its own randomized delay
+     * (ChanceSpacePresentation#buildRevealPayload's slotDelayMs) has elapsed, via {@link
+     * #slotAnim} -- so the reveal order varies, even though the three screen positions never
+     * move. */
+    private void renderChanceSpaceIcons(Graphics2D g)
+    {
+        Float stageAlpha = BannerAnim.fadeAlpha(plugin.getChanceSpaceIconsUntil(), CHANCE_SPACE_ICON_STAGE_FADE_MS);
+        if (stageAlpha == null) return;
+
+        String leftRsn = plugin.getChanceSpaceIconsLeftRsn();
+        String rightRsn = plugin.getChanceSpaceIconsRightRsn();
+        String outcomeType = plugin.getChanceSpaceIconsOutcomeType();
+        String direction = plugin.getChanceSpaceIconsArrowDirection();
+        long[] slotDelayMs = plugin.getChanceSpaceIconsSlotDelayMs();
+        String[] announcementLines = plugin.getChanceSpaceAnnouncementLines();
+        if (leftRsn == null || rightRsn == null || outcomeType == null || direction == null || slotDelayMs == null) return;
+        boolean gnomeTransferred = plugin.isChanceSpaceIconsGnomeTransferred();
+
+        long elapsed = System.currentTimeMillis() - plugin.getChanceSpaceIconsStart();
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 2;
+
+        drawChanceSpaceBackdrop(g, announcementLines, centerX, y, stageAlpha);
+
+        float[] anim = slotAnim(elapsed, slotDelayMs[0], stageAlpha);
+        if (anim != null) drawChanceSpaceToken(g, leftRsn, centerX - CHANCE_SPACE_ICON_SPACING, y, anim[0], anim[1]);
+
+        anim = slotAnim(elapsed, slotDelayMs[1], stageAlpha);
+        if (anim != null) drawChanceSpaceArrow(g, direction, outcomeType, gnomeTransferred, centerX, y, anim[0], anim[1]);
+
+        anim = slotAnim(elapsed, slotDelayMs[2], stageAlpha);
+        if (anim != null) drawChanceSpaceToken(g, rightRsn, centerX + CHANCE_SPACE_ICON_SPACING, y, anim[0], anim[1]);
+
+        if (announcementLines != null) drawChanceSpaceAnnouncement(g, announcementLines, elapsed, centerX, y, stageAlpha);
+    }
+
+    /** A slightly opaque backdrop panel behind the whole tableau (tokens, arrow, and the
+     * announcement text once it appears) so the reveal stays readable over a busy game-world
+     * background. Sized wide enough for either the token span or the widest announcement line,
+     * whichever is bigger, and tall enough to run from just above the item icon at its very top
+     * down through the last announcement line -- both measured against their own rest-state
+     * (unscaled) sizes, not the brief pop-in overshoot, which is a fine amount of edge bleed for a
+     * backdrop. Fades in/out with the same stageAlpha as everything else it sits behind. */
+    private void drawChanceSpaceBackdrop(Graphics2D g, String[] lines, int centerX, int iconY, float stageAlpha)
+    {
+        int halfWidth = CHANCE_SPACE_ICON_SPACING + CHANCE_SPACE_TOKEN_RADIUS + CHANCE_SPACE_BACKDROP_PADDING_X;
+        if (lines != null && lines.length > 0)
+        {
+            g.setFont(FontManager.getRunescapeBoldFont().deriveFont(CHANCE_SPACE_ANNOUNCEMENT_HEADER_SIZE));
+            int widest = g.getFontMetrics().stringWidth(lines[0]);
+            g.setFont(FontManager.getRunescapeBoldFont().deriveFont(CHANCE_SPACE_ANNOUNCEMENT_LINE_SIZE));
+            for (int i = 1; i < lines.length; i++) widest = Math.max(widest, g.getFontMetrics().stringWidth(lines[i]));
+            halfWidth = Math.max(halfWidth, widest / 2 + CHANCE_SPACE_BACKDROP_PADDING_X);
+        }
+
+        int top = iconY - CHANCE_SPACE_ARROW_ITEM_CLEARANCE - CHANCE_SPACE_ITEM_ICON_SIZE / 2 - CHANCE_SPACE_BACKDROP_PADDING_Y;
+        int bottom = iconY + CHANCE_SPACE_TOKEN_RADIUS + CHANCE_SPACE_TOKEN_NAME_GAP + CHANCE_SPACE_ANNOUNCEMENT_TOP_GAP
+            + (lines != null ? lines.length : 0) * CHANCE_SPACE_ANNOUNCEMENT_LINE_HEIGHT + CHANCE_SPACE_BACKDROP_PADDING_Y;
+
+        g.setColor(RunePartyRender.withAlpha(Color.BLACK, stageAlpha * CHANCE_SPACE_BACKDROP_ALPHA));
+        g.fillRoundRect(centerX - halfWidth, top, halfWidth * 2, bottom - top, CHANCE_SPACE_BACKDROP_ARC, CHANCE_SPACE_BACKDROP_ARC);
+    }
+
+    /** The header + directional line(s) that fade in beneath the settled tableau -- see
+     * ChanceSpacePresentation#buildAnnouncementLines for their content. Starts fading in only after
+     * every icon has finished its own pop-in (two stagger gaps + one pop-in window) plus a short
+     * extra pause, so it never talks over the icons still animating in. */
+    private void drawChanceSpaceAnnouncement(Graphics2D g, String[] lines, long elapsed, int centerX, int iconY, float stageAlpha)
+    {
+        long local = elapsed - RunePartyPlugin.CHANCE_SPACE_TEXT_START_OFFSET_MS;
+        if (local < 0 || lines.length == 0) return;
+        float textAlpha = stageAlpha * Math.min(1f, local / (float) RunePartyPlugin.CHANCE_SPACE_TEXT_FADE_MS);
+
+        int y = iconY + CHANCE_SPACE_TOKEN_RADIUS + CHANCE_SPACE_TOKEN_NAME_GAP + CHANCE_SPACE_ANNOUNCEMENT_TOP_GAP;
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(CHANCE_SPACE_ANNOUNCEMENT_HEADER_SIZE));
+        drawCenteredText(g, lines[0], centerX, y, WELCOME_TITLE_COLOR, textAlpha);
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(CHANCE_SPACE_ANNOUNCEMENT_LINE_SIZE));
+        for (int i = 1; i < lines.length; i++)
+        {
+            y += CHANCE_SPACE_ANNOUNCEMENT_LINE_HEIGHT;
+            drawCenteredText(g, lines[i], centerX, y, Color.WHITE, textAlpha);
+        }
+    }
+
+    /** [scale, alpha] for one Chance Tile tableau icon at {@code elapsed} ms into the icon stage,
+     * given its own reveal {@code delayMs} -- null before that delay has passed. Pops in oversized
+     * then settles to scale 1 over CHANCE_SPACE_ICON_POP_MS, fading in over that same window --
+     * same "pop in big, settle down" idiom as the minigame wheel's own settle-scale animation. */
+    private static float[] slotAnim(long elapsed, long delayMs, float stageAlpha)
+    {
+        long local = elapsed - delayMs;
+        if (local < 0) return null;
+        float t = Math.min(1f, local / (float) RunePartyPlugin.CHANCE_SPACE_ICON_POP_MS);
+        return new float[]{1.3f - 0.3f * t, stageAlpha * t};
+    }
+
+    /** A player's seat-colored token plus their name underneath -- the screen-space, larger cousin
+     * of PlayerOverlay's own in-world overhead token, addressed purely by seat color rather than a
+     * real {@code Player} handle. */
+    private void drawChanceSpaceToken(Graphics2D g, String rsn, int cx, int cy, float scale, float alpha)
+    {
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
+        Color color = seatColor != null ? seatColor.awt : Color.WHITE;
+        int radius = Math.round(CHANCE_SPACE_TOKEN_RADIUS * scale);
+
+        g.setColor(RunePartyRender.withAlpha(color, alpha));
+        g.fillOval(cx - radius, cy - radius, radius * 2, radius * 2);
+        g.setStroke(CHANCE_SPACE_TOKEN_BORDER);
+        g.setColor(RunePartyRender.withAlpha(Color.BLACK, alpha));
+        g.drawOval(cx - radius, cy - radius, radius * 2, radius * 2);
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(CHANCE_SPACE_TOKEN_NAME_SIZE));
+        drawCenteredText(g, rsn, cx, cy + radius + CHANCE_SPACE_TOKEN_NAME_GAP, color, alpha);
+    }
+
+    /** The arrow between the two tokens, always pointing one way -- toward whichever side actually
+     * received the gift (see ChanceSpacePresentation#buildRevealPayload's own doc: both outcomes
+     * are a strict one-way gift now, never a mutual swap) -- with the item that moved -- coins or a
+     * Golden Gnome, see {@link #drawChanceSpaceCoinIcon}/{@link #drawChanceSpaceGnomeIcon} -- drawn
+     * above its center. */
+    private void drawChanceSpaceArrow(Graphics2D g, String direction, String outcomeType, boolean gnomeTransferred,
+                                       int cx, int cy, float scale, float alpha)
+    {
+        int halfWidth = Math.round(CHANCE_SPACE_ARROW_HALF_WIDTH * scale);
+        int length = Math.round(CHANCE_SPACE_ARROW_LENGTH * scale);
+        int headLength = Math.round(CHANCE_SPACE_ARROWHEAD_LENGTH * scale);
+        int dir = "LEFT".equals(direction) ? -1 : 1;
+
+        int tipX = cx + dir * length / 2;
+        int tailX = cx - dir * length / 2;
+        int headBaseX = tipX - dir * headLength;
+
+        g.setColor(RunePartyRender.withAlpha(Color.WHITE, alpha));
+        g.setStroke(CHANCE_SPACE_ARROW_SHAFT_STROKE);
+        // Stops at the arrowhead's own base, not its tip -- the shaft's stroke cap would otherwise
+        // poke past the triangle's sharp point instead of stopping cleanly where the head begins.
+        g.drawLine(tailX, cy, headBaseX, cy);
+        drawChanceSpaceArrowHead(g, tipX, cy, dir, halfWidth, headLength);
+
+        int itemY = cy - CHANCE_SPACE_ARROW_ITEM_CLEARANCE;
+        int itemSize = Math.round(CHANCE_SPACE_ITEM_ICON_SIZE * scale);
+        if ("coins".equals(outcomeType)) drawChanceSpaceCoinIcon(g, cx, itemY, itemSize, alpha);
+        else drawChanceSpaceGnomeIcon(g, cx, itemY, itemSize, alpha, gnomeTransferred);
+    }
+
+    private void drawChanceSpaceArrowHead(Graphics2D g, int tipX, int y, int dir, int halfWidth, int headLength)
+    {
+        int baseX = tipX - dir * headLength;
+        Polygon head = new Polygon();
+        head.addPoint(tipX, y);
+        head.addPoint(baseX, y - halfWidth);
+        head.addPoint(baseX, y + halfWidth);
+        g.fillPolygon(head);
+    }
+
+    /** Draws chanceSpaceCoinIcon centered on (cx, cy) at size x size -- placeholder art, see that
+     * field's own doc. RuneLite's Graphics2D already has bilinear interpolation on, so scaling this
+     * small a source image up/down for the tableau's pop-in animation stays smooth. */
+    private void drawChanceSpaceCoinIcon(Graphics2D g, int cx, int cy, int size, float alpha)
+    {
+        drawIconImage(g, chanceSpaceCoinIcon, cx, cy, size, alpha);
+    }
+
+    /** Draws chanceSpaceGnomeIcon the same way as the coin icon above, but dimmed with a red slash
+     * through it when a gnome swap fizzled (neither player held one) -- so the tableau still reads
+     * as "attempted, nothing moved" rather than a normal transfer. */
+    private void drawChanceSpaceGnomeIcon(Graphics2D g, int cx, int cy, int size, float alpha, boolean transferred)
+    {
+        float iconAlpha = transferred ? alpha : alpha * 0.4f;
+        drawIconImage(g, chanceSpaceGnomeIcon, cx, cy, size, iconAlpha);
+
+        if (!transferred)
+        {
+            int r = size / 2;
+            g.setStroke(CHANCE_SPACE_FIZZLE_STROKE);
+            g.setColor(RunePartyRender.withAlpha(new Color(220, 50, 50), alpha));
+            g.drawLine(cx - r, cy + r, cx + r, cy - r - size / 2);
+        }
+    }
+
+    private void drawIconImage(Graphics2D g, BufferedImage icon, int cx, int cy, int size, float alpha)
+    {
+        if (icon == null) return;
+        Composite previous = g.getComposite();
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, Math.min(1f, alpha))));
+        g.drawImage(icon, cx - size / 2, cy - size / 2, size, size, null);
+        g.setComposite(previous);
     }
 
     /** Draws the Jad encounter follow-up -- either the coin toll for bowing, or the "chose not to
