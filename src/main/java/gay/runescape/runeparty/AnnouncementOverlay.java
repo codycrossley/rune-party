@@ -258,7 +258,8 @@ public class AnnouncementOverlay extends Overlay
         renderTeamAssignedBanner(g);
         renderJaddyResolvedBanner(g);
         if (RunePartyPlugin.ARENA_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.TURF_WARS_KEY.equals(plugin.getMinigameKey())
-            || RunePartyPlugin.SANDWICH_RUSH_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.JADDY_KEY.equals(plugin.getMinigameKey()))
+            || RunePartyPlugin.SANDWICH_RUSH_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.JADDY_KEY.equals(plugin.getMinigameKey())
+            || RunePartyPlugin.HOT_POTATO_KEY.equals(plugin.getMinigameKey()))
         {
             renderArrivalGatherMessage(g);
         }

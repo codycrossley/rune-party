@@ -3,6 +3,7 @@ package gay.runescape.runeparty;
 import com.google.gson.Gson;
 import com.google.inject.Provides;
 import gay.runescape.runeparty.items.Items;
+import gay.runescape.runeparty.models.HotPotatoExplosionModel;
 import gay.runescape.runeparty.models.JadEncounter;
 import gay.runescape.runeparty.models.JaddyDuelModel;
 import java.awt.Color;
@@ -238,6 +239,15 @@ public class RunePartyPlugin extends Plugin
      * duration. Measured from MINIGAME_ROUND_BEGIN, same "everyone's local timer runs out at the
      * same moment" reasoning FISHING_CONTEST_DURATION_MS's own doc gives. */
     public static final long CLICK_CLICK_CLICK_DURATION_MS = 30000;
+
+    /** Client-side key for the Hot Potato mini-game -- must match the server's own registration,
+     * same role ARENA_KEY/FISHING_CONTEST_KEY/CLICK_CLICK_CLICK_KEY play for their own mini-games. */
+    public static final String HOT_POTATO_KEY = "hot-potato";
+
+    /** How long a whole Hot Potato round lasts -- must match the server's own round length.
+     * Measured from MINIGAME_ROUND_BEGIN, same "stamped instant + fixed duration" shape
+     * COIN_RUSH_DURATION_MS/CLICK_CLICK_CLICK_DURATION_MS already use. */
+    public static final long HOT_POTATO_DURATION_MS = 30000;
 
     /** Client-side key for the Turf Wars mini-game -- must match the server's own registration,
      * same role ARENA_KEY/FISHING_CONTEST_KEY play for their own mini-games. */
@@ -560,6 +570,7 @@ public class RunePartyPlugin extends Plugin
      * constant in this codebase already carries (see e.g. JAD_SMASH_ANIMATION_HOLD_MS's own doc). */
     public static final int TELE_BLOCK_IMPACT_SPOTANIM_HEIGHT = 100;
 
+
     /** How long after the "vanish" spotanim starts before the model actually disappears from its
      * old spot -- see TileOverlay#updateGoldenGnomeModels, which force-persists the old point past
      * when TileReducer already removed it (that removal is real state, applied the instant the
@@ -655,6 +666,8 @@ public class RunePartyPlugin extends Plugin
     private JaddyDuelModel jaddyDuelModel;
     private FishingCatchOverlay fishingCatchOverlay;
     private ClickClickClickOverlay clickClickClickOverlay;
+    private HotPotatoOverlay hotPotatoOverlay;
+    private HotPotatoExplosionModel hotPotatoExplosionModel;
     private TurfWarsScoreOverlay turfWarsScoreOverlay;
     private SandwichRushHudOverlay sandwichRushHudOverlay;
     private HardcodedCourseLauncherOverlay hardcodedCourseLauncherOverlay;
@@ -1061,6 +1074,13 @@ public class RunePartyPlugin extends Plugin
         clickClickClickOverlay = new ClickClickClickOverlay(this);
         overlayManager.add(clickClickClickOverlay);
 
+        hotPotatoOverlay = new HotPotatoOverlay(this);
+        overlayManager.add(hotPotatoOverlay);
+
+        // Not an Overlay itself -- see its own doc -- so no overlayManager registration, just a
+        // plain field spawn()ed directly from the HOT_POTATO_EXPLODED handler.
+        hotPotatoExplosionModel = new HotPotatoExplosionModel(client);
+
         turfWarsScoreOverlay = new TurfWarsScoreOverlay(this);
         overlayManager.add(turfWarsScoreOverlay);
 
@@ -1107,6 +1127,8 @@ public class RunePartyPlugin extends Plugin
         if (jaddyDuelModel != null) { jaddyDuelModel.clear(); overlayManager.remove(jaddyDuelModel); }
         if (fishingCatchOverlay != null) overlayManager.remove(fishingCatchOverlay);
         if (clickClickClickOverlay != null) overlayManager.remove(clickClickClickOverlay);
+        if (hotPotatoOverlay != null) overlayManager.remove(hotPotatoOverlay);
+        if (hotPotatoExplosionModel != null) hotPotatoExplosionModel.clear();
         if (turfWarsScoreOverlay != null) overlayManager.remove(turfWarsScoreOverlay);
         if (sandwichRushHudOverlay != null) overlayManager.remove(sandwichRushHudOverlay);
         if (hardcodedCourseLauncherOverlay != null) { hardcodedCourseLauncherOverlay.clear(); overlayManager.remove(hardcodedCourseLauncherOverlay); }
@@ -1556,6 +1578,21 @@ public class RunePartyPlugin extends Plugin
         if (self == null || gid == null || token == null) return;
 
         submitAction("Answer True or False", () -> apiClient.answerTrueOrFalse(gid, self, token, answer));
+    }
+
+    /** Passes the Hot Potato -- called from onAnimationChanged once the local player's own Spin
+     * emote finishes while isLocalPlayerHoldingHotPotato() was true. A 409 here (the round already
+     * ended, or someone else's own pass beat this one to the server first, which shouldn't be
+     * possible for the same holder but costs nothing to tolerate) is a definitive rejection, not a
+     * network hiccup, same as answerTrueOrFalse's own reasoning. */
+    private void passHotPotato()
+    {
+        String self = localRsn();
+        final String gid = gameId;
+        final String token = playerToken;
+        if (self == null || gid == null || token == null) return;
+
+        submitAction("Pass Hot Potato", () -> apiClient.passHotPotato(gid, self, token));
     }
 
     public void submitMinigameResult(int score)
@@ -2574,8 +2611,10 @@ public class RunePartyPlugin extends Plugin
 
     /** Rolls the dice once the local player's Spin emote finishes on their own turn, and, the same
      * way, responds to a pending Jad bow, a mini-game ready-check, the current True or False round
-     * once the matching YES/NO emote finishes, or a Fishing Contest catch roll once a Headbang
-     * emote finishes. Only reacts to the local player's own animation, since every client sees
+     * once the matching YES/NO emote finishes, a Fishing Contest catch roll once a Headbang emote
+     * finishes, or a Hot Potato pass once a Spin emote finishes while holding it (Spin's other
+     * meaning -- see isLocalPlayerReadyToRoll's own doc for why the two never overlap). Only reacts
+     * to the local player's own animation, since every client sees
      * every nearby player's AnimationChanged. Waits for the next animation change away from
      * whichever emote ID matched -- i.e. the emote actually finishing, not just starting -- so the
      * response never fires mid-emote; awaitingSpinFinish and awaitingHeadbangFinish here, plus
@@ -2596,8 +2635,20 @@ public class RunePartyPlugin extends Plugin
 
         if (anim == AnimationID.EMOTE_DANCE_SPIN)
         {
-            if (!isLocalPlayerReadyToRoll()) return;
-            awaitingSpinFinish = true;
+            // Spin is already the dice-roll gesture on a normal turn -- isLocalPlayerReadyToRoll()
+            // is always false while a mini-game is active (see its own doc), so there's no overlap
+            // between the two: Hot Potato only ever gets a look-in once a real turn couldn't be
+            // the reason for this Spin.
+            if (isLocalPlayerReadyToRoll())
+            {
+                awaitingSpinFinish = true;
+                return;
+            }
+            if (isLocalPlayerHoldingHotPotato())
+            {
+                minigamePresentation.armAwaitingHotPotatoPassFinish();
+                return;
+            }
             return;
         }
 
@@ -2666,6 +2717,11 @@ public class RunePartyPlugin extends Plugin
         {
             awaitingHeadbangFinish = false;
             performFishingCatchRoll();
+        }
+        else if (minigamePresentation.isAwaitingHotPotatoPassFinish())
+        {
+            minigamePresentation.clearAwaitingHotPotatoPassFinish();
+            passHotPotato();
         }
     }
 
@@ -2763,6 +2819,20 @@ public class RunePartyPlugin extends Plugin
         if (!TRUE_OR_FALSE_KEY.equals(minigamePresentation.getKey()) || !isMinigamePlayable() || minigamePresentation.getTrueOrFalseQuestion() == null) return false;
         String self = localRsn();
         return self != null && !minigamePresentation.getTrueOrFalseAnsweredRsns().contains(self.toLowerCase(Locale.ROOT));
+    }
+
+    /** Whether the local player is the current Hot Potato holder -- unlike every other
+     * isLocalPlayerAwaiting*() check here, this isn't a one-shot "answer once" gate: a holder can
+     * Spin-emote to pass at any moment right up until the round's own clock runs out from under
+     * them, as many times as this ever comes back true again (it never will for the same round,
+     * since passing hands it to someone else, but nothing here assumes that). See
+     * onAnimationChanged's own EMOTE_DANCE_SPIN case, the only caller. */
+    public boolean isLocalPlayerHoldingHotPotato()
+    {
+        if (!HOT_POTATO_KEY.equals(minigamePresentation.getKey()) || !isMinigamePlayable()) return false;
+        String self = localRsn();
+        String holder = minigamePresentation.getHotPotatoHolder();
+        return self != null && holder != null && self.equalsIgnoreCase(holder);
     }
 
     /** Whether {@code localPlayer} is standing on {@code rsn}'s tracked board position -- see
@@ -3605,6 +3675,26 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
+            case Events.HOT_POTATO_EXPLODED:
+            {
+                // minigamePresentation.apply folds the elimination itself (hotPotatoEliminatedRsns)
+                // unconditionally -- real state, needed immediately even for a catching-up client
+                // so PlayerOverlay's own skull indicator is correct from the first frame. The
+                // explosion effect/chat message below are a separate, one-shot reveal, gated on
+                // !catchingUp same as TELE_BLOCK_APPLIED's own impact spotanim above.
+                minigamePresentation.apply(e, catchingUp);
+                if (!catchingUp)
+                {
+                    String explodedRsn = Json.requiredStr(e.payload, type, "player");
+                    if (explodedRsn != null)
+                    {
+                        triggerHotPotatoExplosion(explodedRsn);
+                        addChatMessage(explodedRsn + "'s potato exploded! They're eliminated from this round.");
+                    }
+                }
+                break;
+            }
+
             case Events.GOLDEN_GNOME_MOVED:
             {
                 goldenGnomePresentation.apply(e, catchingUp);
@@ -3723,6 +3813,7 @@ public class RunePartyPlugin extends Plugin
             case Events.TRUE_OR_FALSE_ANSWERED:
             case Events.TRUE_OR_FALSE_ROUND_ENDED:
             case Events.MINIGAME_TEAMS_ASSIGNED:
+            case Events.HOT_POTATO_ASSIGNED:
             {
                 if (Events.MINIGAME_STARTED.equals(type))
                 {
@@ -3831,6 +3922,29 @@ public class RunePartyPlugin extends Plugin
     public void triggerSpotAnimOnPlayer(int spotAnimId, String rsn, int height)
     {
         triggerSpotAnimOnPlayer(spotAnimId, rsn, height, 0);
+    }
+
+    /** Plays the Hot Potato explosion effect (see models/HotPotatoExplosionModel) at {@code rsn}'s
+     * current location -- a snapshot at the moment it fires, not an actor-attached effect that
+     * follows them the way triggerSpotAnimOnPlayer's own spotanim does, matching "the spot of the
+     * explosion" rather than "on them" (they're eliminated either way, so there's nothing left to
+     * keep following). A no-op if {@code rsn} isn't currently a loaded/visible nearby actor. Always
+     * hops onto the client thread, so any caller off it can call this directly. */
+    public void triggerHotPotatoExplosion(String rsn)
+    {
+        if (rsn == null) return;
+        clientThread.invoke(() ->
+        {
+            for (Player p : client.getPlayers())
+            {
+                if (p == null || p.getName() == null) continue;
+                if (rsn.equalsIgnoreCase(Text.toJagexName(p.getName())))
+                {
+                    hotPotatoExplosionModel.spawn(p.getWorldLocation());
+                    return;
+                }
+            }
+        });
     }
 
     void refreshPanel()
@@ -3996,6 +4110,17 @@ public class RunePartyPlugin extends Plugin
     /** This round's own unique-tile-click count so far -- see ClickClickClickOverlay, the only
      * consumer. Client-local only -- nobody but the local player ever sees this. */
     public int getClickClickClickUniqueTileCount() { return clickClickClickTiles.size(); }
+
+    public boolean isHotPotatoActive() { return minigamePresentation.isHotPotatoActive(); }
+    /** The current holder's rsn, or null before the round's own initial random assignment lands --
+     * see HotPotatoOverlay and PlayerOverlay#drawToken, the two consumers. */
+    public String getHotPotatoHolder() { return minigamePresentation.getHotPotatoHolder(); }
+    /** When the current Hot Potato round's own clock runs out -- 0 if no round is active yet or the
+     * round hasn't actually become playable. */
+    public long getHotPotatoEndsAt() { return minigamePresentation.getHotPotatoEndsAt(); }
+    /** Lowercase rsns eliminated for the rest of this Hot Potato round -- see PlayerOverlay#
+     * drawToken, the only consumer. */
+    public Set<String> getHotPotatoEliminatedRsns() { return minigamePresentation.getHotPotatoEliminatedRsns(); }
 
     public boolean isTurfWarsActive() { return minigamePresentation.isTurfWarsActive(); }
     /** This round's own live tile tally, keyed by whatever color hex each tile is currently

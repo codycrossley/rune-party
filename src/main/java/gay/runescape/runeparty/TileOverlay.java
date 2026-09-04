@@ -79,6 +79,10 @@ public class TileOverlay extends Overlay
     // the two arenas read as visually distinct at a glance (matches SANDWICH_RUSH_TILE's own
     // served color).
     private static final Color SANDWICH_RUSH_ARENA_OUTLINE_COLOR = new Color(232, 163, 61, 180);
+    // Hot Potato's own arena outline -- a deeper, more reddish brown than Sandwich Rush's own warm
+    // gold, so the two read as visually distinct at a glance the same way Turf Wars/Sandwich Rush
+    // already do from each other.
+    private static final Color HOT_POTATO_ARENA_OUTLINE_COLOR = new Color(200, 120, 60, 190);
 
     private static final Stroke SOLID_STROKE   = new BasicStroke(3.5f);
     private static final Stroke PREVIEW_STROKE = new BasicStroke(3.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 10f, new float[]{7f, 5f}, 0f);
@@ -182,6 +186,7 @@ public class TileOverlay extends Overlay
             if ("POND_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see models/PondModel
             if ("FISHING_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderFishingZoneOutline
             if ("SANDWICH_RUSH_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- these tiles never change color, so an individual fill per tile is just noise
+            if ("HOT_POTATO_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- same "never change color, individual fill is just noise" reasoning as Sandwich Rush's own SANDWICH_RUSH_TILE
             if ("JADDY_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline per color instead, see renderColorGroupedOutlines below -- a Jad's own zone is a fixed-color area a huge model stands on top of, not a walked path, so a per-tile fill/outline would just be noise under it
             if ("TURF_WARS_TILE".equals(entry.tileType)) { renderTurfWarsTile(g, entry); continue; } // fill only, no per-tile outline, see renderTurfWarsTile
             Color base = resolveColor(entry.color, entry.tileType);
@@ -191,6 +196,7 @@ public class TileOverlay extends Overlay
         renderFishingZoneOutline(g, entries);
         renderArenaOutline(g, entries, "TURF_WARS_TILE", TURF_WARS_ARENA_OUTLINE_COLOR);
         renderArenaOutline(g, entries, "SANDWICH_RUSH_TILE", SANDWICH_RUSH_ARENA_OUTLINE_COLOR);
+        renderArenaOutline(g, entries, "HOT_POTATO_TILE", HOT_POTATO_ARENA_OUTLINE_COLOR);
         renderColorGroupedOutlines(g, entries, "JADDY_TILE");
 
         goldenGnomeModel.update(entries);

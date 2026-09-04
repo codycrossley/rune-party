@@ -426,6 +426,19 @@ public class ApiClient
         }
     }
 
+    /** Passes the Hot Potato -- only succeeds if the caller is the current holder. */
+    public void passHotPotato(String gameId, String playerRsn, String playerToken) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/hot-potato-pass", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Pass Hot Potato failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Course/board building
     // -------------------------------------------------------------------------

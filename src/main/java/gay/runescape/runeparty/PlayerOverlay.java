@@ -5,6 +5,8 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.Stroke;
+import java.awt.image.BufferedImage;
+import java.util.Locale;
 import net.runelite.api.Client;
 import net.runelite.api.Player;
 import net.runelite.api.Point;
@@ -13,6 +15,7 @@ import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.outline.ModelOutlineRenderer;
+import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
 
 /** Outlines every seated PLAYER's model in their assigned RunePartyColor (derived from their turn
@@ -44,6 +47,14 @@ public class PlayerOverlay extends Overlay
     private static final long GLOW_PULSE_PERIOD_MS = 1200;
     private static final int GLOW_RADIUS_PAD = 4; // how far the glow ring sits outside the token's own border
 
+    // Hot Potato's own holder-only token override -- see drawToken's own doc. A noticeably faster
+    // pulse than the on-turn glow above (450ms vs. 1200ms) so it reads as urgent rather than a
+    // calm breathing effect.
+    private static final long HOT_POTATO_FLASH_PERIOD_MS = 450;
+    private static final int HOT_POTATO_FLASH_RADIUS_BONUS = 6; // extra pixels of radius at the pulse's peak
+    private static final Color HOT_POTATO_SAFE_COLOR = new Color(255, 215, 0);
+    private static final Color HOT_POTATO_URGENT_COLOR = new Color(220, 30, 30);
+
     private static final Color COIN_POPUP_GAIN_COLOR = new Color(80, 220, 80);
     private static final Color COIN_POPUP_LOSS_COLOR = new Color(230, 70, 70);
     private static final int COIN_POPUP_CLEARANCE = 22; // gap above the token
@@ -56,11 +67,18 @@ public class PlayerOverlay extends Overlay
     private static final int GOLDEN_GNOME_POPUP_CLEARANCE = 46;
     private static final int GOLDEN_GNOME_POPUP_MAX_RISE = 16;
 
+    // Hot Potato's own elimination marker -- a persistent skull hovering above an eliminated
+    // player's token for the rest of the round (see drawHotPotatoEliminatedIcon), not a fading
+    // popup like the coin/Golden Gnome ones above.
+    private static final int HOT_POTATO_SKULL_ICON_SIZE = 18;
+    private static final int HOT_POTATO_SKULL_ICON_CLEARANCE = 12; // gap above the token's own top edge
+
     private final Client client;
     private final RunePartyConfig config;
     private final RunePartyPlugin plugin;
     private final RosterReducer roster;
     private final ModelOutlineRenderer modelOutlineRenderer;
+    private final BufferedImage hotPotatoSkullIcon;
 
     public PlayerOverlay(Client client, RunePartyConfig config, RunePartyPlugin plugin, RosterReducer roster, ModelOutlineRenderer modelOutlineRenderer)
     {
@@ -69,6 +87,7 @@ public class PlayerOverlay extends Overlay
         this.plugin = plugin;
         this.roster = roster;
         this.modelOutlineRenderer = modelOutlineRenderer;
+        this.hotPotatoSkullIcon = ImageUtil.loadImageResource(getClass(), "minigame_resources/skull.png");
 
         setPosition(OverlayPosition.DYNAMIC);
         setLayer(OverlayLayer.ABOVE_SCENE);
@@ -119,7 +138,20 @@ public class PlayerOverlay extends Overlay
             // thick border is suppressed then too, matching StatsOverlay's same carve-out.
             boolean onTurn = phase == GamePhase.ACTIVE && !plugin.isMinigameActive()
                 && rsn.equalsIgnoreCase(plugin.getCurrentTurnRsn());
-            drawToken(g, p, c, onTurn);
+            // Mutually exclusive with onTurn by construction -- isHotPotatoActive() implies a
+            // mini-game is active, which onTurn's own check above already rules out.
+            boolean holdingHotPotato = phase == GamePhase.ACTIVE && plugin.isHotPotatoActive() && plugin.isMinigamePlayable()
+                && rsn.equalsIgnoreCase(plugin.getHotPotatoHolder());
+            drawToken(g, p, c, onTurn, holdingHotPotato);
+
+            // Mutually exclusive with holdingHotPotato by construction -- once eliminated, a
+            // player can never hold the potato again (see app.py's hot_potato_pass/hot_potato.py's
+            // own random-explosion reassignment, both of which exclude the eliminated set).
+            if (phase == GamePhase.ACTIVE && plugin.isHotPotatoActive()
+                && plugin.getHotPotatoEliminatedRsns().contains(rsn.toLowerCase(Locale.ROOT)))
+            {
+                drawHotPotatoEliminatedIcon(g, p);
+            }
 
             RunePartyPlugin.CoinPopup coinPopup = phase == GamePhase.ACTIVE ? plugin.getCoinPopup(rsn) : null;
             if (coinPopup != null)
@@ -136,37 +168,68 @@ public class PlayerOverlay extends Overlay
         return null;
     }
 
-    private void drawToken(Graphics2D g, Player p, Color color, boolean onTurn)
+    /** holdingHotPotato overrides the token's own fill color and radius while true: a fast pulse
+     * between HOT_POTATO_URGENT_COLOR and HOT_POTATO_SAFE_COLOR (blended by how much of the whole
+     * round's own clock is left, see plugin.getHotPotatoEndsAt), growing and shrinking in size the
+     * same way -- there's no per-holder deadline to track toward (the potato explodes on a random
+     * schedule server-side, see hot_potato.py's own doc), so this is purely a lively "you have it,
+     * watch out" cue, not a countdown. Makes the one player everyone needs to watch read as an
+     * unmistakable "hot" beacon from across the arena. Mutually exclusive with onTurn by
+     * construction (see render()'s own doc on that), so there's no priority to decide between the
+     * two beyond a plain if/else. */
+    private void drawToken(Graphics2D g, Player p, Color color, boolean onTurn, boolean holdingHotPotato)
     {
-        int yOffset = p.getLogicalHeight() + TOKEN_RADIUS + TOKEN_HEAD_CLEARANCE;
+        int radius = TOKEN_RADIUS;
+        Color fillColor = color;
+        if (holdingHotPotato)
+        {
+            long endsAt = plugin.getHotPotatoEndsAt();
+            long remainingMs = endsAt != 0 ? Math.max(0, endsAt - System.currentTimeMillis()) : RunePartyPlugin.HOT_POTATO_DURATION_MS;
+            float remainingFraction = Math.min(1f, remainingMs / (float) RunePartyPlugin.HOT_POTATO_DURATION_MS);
+            fillColor = lerpColor(HOT_POTATO_URGENT_COLOR, HOT_POTATO_SAFE_COLOR, remainingFraction);
+
+            float pulse = BannerAnim.pulse(System.currentTimeMillis(), HOT_POTATO_FLASH_PERIOD_MS);
+            radius = TOKEN_RADIUS + Math.round(pulse * HOT_POTATO_FLASH_RADIUS_BONUS);
+        }
+
+        int yOffset = p.getLogicalHeight() + radius + TOKEN_HEAD_CLEARANCE;
         Point loc = p.getCanvasTextLocation(g, "", yOffset);
         if (loc == null) return;
 
         int cx = loc.getX();
         int cy = loc.getY();
 
-        g.setColor(color);
-        g.fillOval(cx - TOKEN_RADIUS, cy - TOKEN_RADIUS, TOKEN_RADIUS * 2, TOKEN_RADIUS * 2);
+        g.setColor(fillColor);
+        g.fillOval(cx - radius, cy - radius, radius * 2, radius * 2);
 
         if (onTurn)
         {
             int glowAlpha = (int) (100 + 155 * BannerAnim.pulse(System.currentTimeMillis(), GLOW_PULSE_PERIOD_MS));
-            int glowRadius = TOKEN_RADIUS + GLOW_RADIUS_PAD;
+            int glowRadius = radius + GLOW_RADIUS_PAD;
 
             g.setStroke(TOKEN_GLOW_STROKE);
-            g.setColor(RunePartyRender.withAlpha(color, glowAlpha));
+            g.setColor(RunePartyRender.withAlpha(fillColor, glowAlpha));
             g.drawOval(cx - glowRadius, cy - glowRadius, glowRadius * 2, glowRadius * 2);
 
             g.setStroke(TOKEN_BORDER_ON_TURN);
             g.setColor(COLOR_TURN_BORDER);
-            g.drawOval(cx - TOKEN_RADIUS, cy - TOKEN_RADIUS, TOKEN_RADIUS * 2, TOKEN_RADIUS * 2);
+            g.drawOval(cx - radius, cy - radius, radius * 2, radius * 2);
         }
         else
         {
             g.setStroke(TOKEN_BORDER);
             g.setColor(Color.BLACK);
-            g.drawOval(cx - TOKEN_RADIUS, cy - TOKEN_RADIUS, TOKEN_RADIUS * 2, TOKEN_RADIUS * 2);
+            g.drawOval(cx - radius, cy - radius, radius * 2, radius * 2);
         }
+    }
+
+    private static Color lerpColor(Color a, Color b, float t)
+    {
+        t = Math.max(0f, Math.min(1f, t));
+        int r = Math.round(a.getRed() + (b.getRed() - a.getRed()) * t);
+        int gr = Math.round(a.getGreen() + (b.getGreen() - a.getGreen()) * t);
+        int bl = Math.round(a.getBlue() + (b.getBlue() - a.getBlue()) * t);
+        return new Color(r, gr, bl);
     }
 
     /** Floats "+3" (or "-3" for a penalty tile, or a Coin Trap steal's -20/+20 on the victim/owner
@@ -227,5 +290,23 @@ public class PlayerOverlay extends Overlay
 
         int a = Math.max(0, Math.min(255, (int) (alpha * 255)));
         RunePartyRender.drawShadowed(g, text, loc.getX(), loc.getY(), GOLDEN_GNOME_POPUP_COLOR, a);
+    }
+
+    /** Hovers hotPotatoSkullIcon just above an eliminated player's own (normal-size, no-longer-
+     * flashing) token, for as long as they stay eliminated -- unlike every popup above, this has no
+     * fade/rise of its own, it's a plain persistent marker for the rest of the round. Anchored the
+     * same "TOKEN_RADIUS + TOKEN_HEAD_CLEARANCE" clearance drawCoinPopup's own yOffset uses, plus
+     * this icon's own small gap on top, then drawn upward from that point (image bottom at the
+     * anchor) the same way text grows upward from its own baseline there. */
+    private void drawHotPotatoEliminatedIcon(Graphics2D g, Player p)
+    {
+        if (hotPotatoSkullIcon == null) return;
+
+        int yOffset = p.getLogicalHeight() + TOKEN_RADIUS + TOKEN_HEAD_CLEARANCE + HOT_POTATO_SKULL_ICON_CLEARANCE;
+        Point loc = p.getCanvasTextLocation(g, "", yOffset);
+        if (loc == null) return;
+
+        g.drawImage(hotPotatoSkullIcon, loc.getX() - HOT_POTATO_SKULL_ICON_SIZE / 2, loc.getY() - HOT_POTATO_SKULL_ICON_SIZE,
+            HOT_POTATO_SKULL_ICON_SIZE, HOT_POTATO_SKULL_ICON_SIZE, null);
     }
 }

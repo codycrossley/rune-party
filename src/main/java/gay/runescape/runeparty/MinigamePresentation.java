@@ -69,6 +69,7 @@ final class MinigamePresentation
     private volatile boolean awaitingMinigameReadyFinish = false;
     private volatile boolean awaitingTrueOrFalseYesFinish = false;
     private volatile boolean awaitingTrueOrFalseNoFinish = false;
+    private volatile boolean awaitingHotPotatoPassFinish = false;
     // ---- minigame banner (server-driven, everyone sees it -- see MINIGAME_STARTED handling) ----
     private final TimedBanner<Void> minigameBanner = new TimedBanner<>();
     // ---- minigame-over banner (server-driven, everyone sees it). Fires for every mini-game, no
@@ -78,8 +79,27 @@ final class MinigamePresentation
     // ---- mini-game final-score recap (server-driven, everyone sees it). Shown after
     // minigameOverBanner above and before minigameRewardsBanner below -- "how did everyone do"
     // comes before "what did that earn you", see triggerMinigameScoreBanner for how the three
-    // chain. ----
+    // chain. Only shown for a mini-game in SCORE_BANNER_ELIGIBLE_KEYS below -- see that set's own
+    // doc for which ones qualify and why. ----
     private final TimedBanner<List<MinigameScore>> minigameScoreBanner = new TimedBanner<>();
+
+    // Mini-games whose MINIGAME_ENDED "results" carry a real, varying per-player count worth
+    // showing as a "FINAL SCORE" recap -- coins collected, correct answers, catches, tiles
+    // claimed, sandwiches made, unique tiles clicked. Deliberately excludes every mini-game whose
+    // own server-side payout is pay_out_flat (Arena's survive/eliminated, Hot Potato's who-was-
+    // holding-it, Who's Your Jaddy?'s which-side-won) or an empty pay_out_top tally (Who's Your
+    // Jaddy?'s own other resolution path) -- those only ever produce a binary "did you get the
+    // flat reward or not" result, not a real score, so a recap here would just show everyone tied
+    // at the same number (or 0), which isn't information worth a whole extra banner. See
+    // handleMinigameEnded, the only reader.
+    private static final Set<String> SCORE_BANNER_ELIGIBLE_KEYS = Set.of(
+        RunePartyPlugin.COIN_RUSH_KEY,
+        RunePartyPlugin.TRUE_OR_FALSE_KEY,
+        RunePartyPlugin.FISHING_CONTEST_KEY,
+        RunePartyPlugin.TURF_WARS_KEY,
+        RunePartyPlugin.SANDWICH_RUSH_KEY,
+        RunePartyPlugin.CLICK_CLICK_CLICK_KEY
+    );
     // ---- round-complete banner (server-driven, everyone sees it). Its payload is the upcoming
     // round -- the one about to start, same number getCurrentRound() would return live --
     // snapshotted at trigger time so it stays stable through the banner's own display window. ----
@@ -192,6 +212,19 @@ final class MinigamePresentation
     private volatile List<TrueOrFalseResult> trueOrFalseLastResults = Collections.emptyList();
     private volatile long trueOrFalseRevealUntil = 0;
 
+    // ---- Hot Potato (server-driven holder assignment). hotPotatoHolder is real state, applied
+    // catch-up or not: a catching-up client must know who's holding it right now, same as any other
+    // real per-round state elsewhere in this class -- null before the round's own initial random
+    // assignment lands. hotPotatoRoundStartAt is the wall-clock moment the round actually began,
+    // same single-stamp-off-MINIGAME_ROUND_BEGIN shape coinRushRoundStartAt/turfWarsRoundStartAt
+    // already use. hotPotatoEliminatedRsns is real state too, applied catch-up or not: once
+    // someone's caught holding it when the server's own random explosion timer goes off
+    // (HOT_POTATO_EXPLODED), they're out for the rest of the round -- see PlayerOverlay#drawToken's
+    // own skull indicator, the only reader. ----
+    private volatile String hotPotatoHolder = null;
+    private volatile long hotPotatoRoundStartAt = 0;
+    private final Set<String> hotPotatoEliminatedRsns = ConcurrentHashMap.newKeySet(); // lowercase rsn
+
     MinigamePresentation(RunePartyPlugin plugin)
     {
         this.plugin = plugin;
@@ -281,6 +314,15 @@ final class MinigamePresentation
                     trueOrFalseLastResults = Collections.emptyList();
                     trueOrFalseRevealUntil = 0;
                 }
+                // Same reasoning as every other mini-game's own reset above -- a fresh Hot Potato
+                // instance starts with no holder assigned yet (see run()'s own initial
+                // HOT_POTATO_ASSIGNED, the only writer) and hasn't become playable yet either.
+                if (RunePartyPlugin.HOT_POTATO_KEY.equals(minigameKey))
+                {
+                    hotPotatoHolder = null;
+                    hotPotatoRoundStartAt = 0;
+                    hotPotatoEliminatedRsns.clear();
+                }
                 if (!catchingUp)
                 {
                     scheduleMinigameBanner();
@@ -351,6 +393,10 @@ final class MinigamePresentation
                 if (RunePartyPlugin.SANDWICH_RUSH_KEY.equals(minigameKey))
                 {
                     sandwichRushRoundStartAt = System.currentTimeMillis();
+                }
+                if (RunePartyPlugin.HOT_POTATO_KEY.equals(minigameKey))
+                {
+                    hotPotatoRoundStartAt = System.currentTimeMillis();
                 }
                 // Unconditional, unlike the Coin-Rush-specific stamp above -- every mini-game fires
                 // this event, so this flips true regardless of which one is active. See its own
@@ -543,6 +589,38 @@ final class MinigamePresentation
                 break;
             }
 
+            case Events.HOT_POTATO_ASSIGNED:
+            {
+                // Real state, applied catch-up or not -- a catching-up client must know who's
+                // holding it right now, same as any other real per-round state elsewhere in this
+                // class. Fires for the round's own initial random holder, every player-initiated
+                // pass, and the server's own random-explosion force-reassignment alike (see
+                // hot_potato.py's own doc -- one event type covers all three).
+                String rsn = Json.requiredStr(e.payload, type, "player");
+                if (rsn != null)
+                {
+                    hotPotatoHolder = rsn;
+                    if (!catchingUp)
+                    {
+                        plugin.addChatMessage(rsn + " is holding the hot potato!");
+                    }
+                }
+                break;
+            }
+
+            case Events.HOT_POTATO_EXPLODED:
+            {
+                // Real state, applied catch-up or not -- a catching-up client must know who's
+                // already eliminated so PlayerOverlay's own flame indicator is correct immediately,
+                // not just once a fresh explosion happens to land while they're connected. The
+                // explosion spotanim/chat message are a separate, one-shot reveal handled by
+                // RunePartyPlugin's own dedicated case for this event (see that switch), gated on
+                // !catchingUp there -- this fold is unconditional on purpose.
+                String rsn = Json.requiredStr(e.payload, type, "player");
+                if (rsn != null) hotPotatoEliminatedRsns.add(rsn.toLowerCase(Locale.ROOT));
+                break;
+            }
+
             default:
                 break;
         }
@@ -558,8 +636,10 @@ final class MinigamePresentation
     void handleMinigameEnded(JsonObject payload, boolean catchingUp, int maxRounds, int completedRoundsAfterIncrement)
     {
         // Reads minigameKey before anything below touches it -- see triggerTurfWarsConfetti's own
-        // doc for why this has to happen first.
-        if (!catchingUp && RunePartyPlugin.TURF_WARS_KEY.equals(minigameKey))
+        // doc for why this has to happen first, and SCORE_BANNER_ELIGIBLE_KEYS's own check below,
+        // the other reader of this same captured value.
+        String endedKey = minigameKey;
+        if (!catchingUp && RunePartyPlugin.TURF_WARS_KEY.equals(endedKey))
         {
             triggerTurfWarsConfetti();
         }
@@ -599,7 +679,10 @@ final class MinigamePresentation
         {
             plugin.addChatMessage("Mini-game complete!");
             triggerMinigameOverBanner();
-            triggerMinigameScoreBanner(payload);
+            if (SCORE_BANNER_ELIGIBLE_KEYS.contains(endedKey))
+            {
+                triggerMinigameScoreBanner(payload);
+            }
             triggerMinigameRewardsBanner(payload);
             // Skipped on the game's last round -- GAME_ENDED fires right behind this same
             // MINIGAME_ENDED and triggerGameOverSequence reveals the very same standings itself,
@@ -878,6 +961,7 @@ final class MinigamePresentation
         awaitingMinigameReadyFinish = false;
         awaitingTrueOrFalseYesFinish = false;
         awaitingTrueOrFalseNoFinish = false;
+        awaitingHotPotatoPassFinish = false;
         minigameActive = false;
         minigameInstructions = null;
         minigameKey = null;
@@ -900,6 +984,9 @@ final class MinigamePresentation
         sandwichRushRoundStartAt = 0;
         fishingRoundStartAt = 0;
         clickClickClickRoundStartAt = 0;
+        hotPotatoHolder = null;
+        hotPotatoRoundStartAt = 0;
+        hotPotatoEliminatedRsns.clear();
         minigameTeamColors.clear();
         turfWarsRoundStartAt = 0;
         trueOrFalseQuestion = null;
@@ -917,12 +1004,15 @@ final class MinigamePresentation
     void armAwaitingMinigameReadyFinish() { awaitingMinigameReadyFinish = true; }
     void armAwaitingTrueOrFalseYesFinish() { awaitingTrueOrFalseYesFinish = true; }
     void armAwaitingTrueOrFalseNoFinish() { awaitingTrueOrFalseNoFinish = true; }
+    void armAwaitingHotPotatoPassFinish() { awaitingHotPotatoPassFinish = true; }
     boolean isAwaitingMinigameReadyFinish() { return awaitingMinigameReadyFinish; }
     boolean isAwaitingTrueOrFalseYesFinish() { return awaitingTrueOrFalseYesFinish; }
     boolean isAwaitingTrueOrFalseNoFinish() { return awaitingTrueOrFalseNoFinish; }
+    boolean isAwaitingHotPotatoPassFinish() { return awaitingHotPotatoPassFinish; }
     void clearAwaitingMinigameReadyFinish() { awaitingMinigameReadyFinish = false; }
     void clearAwaitingTrueOrFalseYesFinish() { awaitingTrueOrFalseYesFinish = false; }
     void clearAwaitingTrueOrFalseNoFinish() { awaitingTrueOrFalseNoFinish = false; }
+    void clearAwaitingHotPotatoPassFinish() { awaitingHotPotatoPassFinish = false; }
 
     // ---- getters, mirrored 1:1 by RunePartyPlugin's own facade under their original names ----
     boolean isActive() { return minigameActive; }
@@ -992,6 +1082,17 @@ final class MinigamePresentation
      * onGameTick's own click-click-click section compares against this to decide when to submit
      * the local player's final tally. */
     long getClickClickClickEndsAt() { return clickClickClickRoundStartAt != 0 ? clickClickClickRoundStartAt + RunePartyPlugin.CLICK_CLICK_CLICK_DURATION_MS : 0; }
+
+    boolean isHotPotatoActive() { return minigameActive && RunePartyPlugin.HOT_POTATO_KEY.equals(minigameKey); }
+    /** The current holder's rsn, or null before the round's own initial random assignment lands. */
+    String getHotPotatoHolder() { return hotPotatoHolder; }
+    /** Lowercase rsns eliminated for the rest of this Hot Potato round -- see PlayerOverlay#
+     * drawToken, the only reader. */
+    Set<String> getHotPotatoEliminatedRsns() { return hotPotatoEliminatedRsns; }
+    /** When the current Hot Potato round's own clock runs out -- 0 if no round is active yet or the
+     * round hasn't actually become playable, same "stamped instant + fixed duration" shape
+     * getCoinRushEndsAt already uses. */
+    long getHotPotatoEndsAt() { return hotPotatoRoundStartAt != 0 ? hotPotatoRoundStartAt + RunePartyPlugin.HOT_POTATO_DURATION_MS : 0; }
 
     boolean isTurfWarsActive() { return minigameActive && RunePartyPlugin.TURF_WARS_KEY.equals(minigameKey); }
     boolean isJaddyActive() { return minigameActive && RunePartyPlugin.JADDY_KEY.equals(minigameKey); }
