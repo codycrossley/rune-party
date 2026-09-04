@@ -243,6 +243,22 @@ public class ApiClient
         }
     }
 
+    /** Submits the local player's final Click, Click, Click unique-tile-click tally. Fired once
+     * per round, when the local 30-second timer elapses -- same one-shot shape as
+     * submitFishingCatch. */
+    public void submitClickClickClickResult(String gameId, String playerRsn, String playerToken, int uniqueTiles) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("uniqueTiles", uniqueTiles);
+
+        try (Response resp = post("/v1/games/" + gameId + "/submit-click-click-click-result", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Submit Click, Click, Click result failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     /** Buys the Golden Gnome standing at (x, y, plane). A free side-action during the local
      * player's pending roll, triggered by a right-click menu entry rather than an emote -- doesn't
      * touch pendingRoll or advance the turn, so confirmArrival is still a separate call afterward.

@@ -20,6 +20,9 @@ public final class Events
      * on by any handler here -- an eliminated player just doesn't get paid at the end. */
     public static final String ARENA_PLAYER_ELIMINATED = "ARENA_PLAYER_ELIMINATED";
     public static final String CHANCE_SPACE_TRIGGERED = "CHANCE_SPACE_TRIGGERED";
+    /** Echo of the client's own submit-click-click-click-result call -- same "already knows its
+     * own final tally" reasoning as FISHING_CATCH_SUBMITTED's own doc just below. */
+    public static final String CLICK_CLICK_CLICK_RESULT_SUBMITTED = "CLICK_CLICK_CLICK_RESULT_SUBMITTED";
     public static final String COIN_RUSH_COLLECTED = "COIN_RUSH_COLLECTED";
     public static final String COIN_RUSH_SPAWN = "COIN_RUSH_SPAWN";
     public static final String COIN_TRAP_TRIGGERED = "COIN_TRAP_TRIGGERED";

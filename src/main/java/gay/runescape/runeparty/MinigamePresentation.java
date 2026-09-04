@@ -75,6 +75,11 @@ final class MinigamePresentation
     // payload of its own -- just a beat between the round actually ending and the rewards recap
     // taking over, see triggerMinigameRewardsBanner for how the two chain. ----
     private final TimedBanner<Void> minigameOverBanner = new TimedBanner<>();
+    // ---- mini-game final-score recap (server-driven, everyone sees it). Shown after
+    // minigameOverBanner above and before minigameRewardsBanner below -- "how did everyone do"
+    // comes before "what did that earn you", see triggerMinigameScoreBanner for how the three
+    // chain. ----
+    private final TimedBanner<List<MinigameScore>> minigameScoreBanner = new TimedBanner<>();
     // ---- round-complete banner (server-driven, everyone sees it). Its payload is the upcoming
     // round -- the one about to start, same number getCurrentRound() would return live --
     // snapshotted at trigger time so it stays stable through the banner's own display window. ----
@@ -133,6 +138,14 @@ final class MinigamePresentation
     // counts themselves are never reported to the server mid-round, so they have no counterpart
     // here -- only RunePartyPlugin's own local fields track those. ----
     private volatile long fishingRoundStartAt = 0;
+
+    // ---- Click, Click, Click (entirely client-local tile clicks, see RunePartyPlugin#
+    // onMenuEntryAdded's own click-interception) -- this class only tracks the round's own start,
+    // same "wall-clock moment the round actually began, stamped from MINIGAME_ROUND_BEGIN" shape
+    // fishingRoundStartAt uses. Click tallies themselves are never reported to the server
+    // mid-round, so they have no counterpart here -- only RunePartyPlugin's own local field tracks
+    // that. ----
+    private volatile long clickClickClickRoundStartAt = 0;
 
     // ---- Turf Wars (server-driven team-color assignment; tile ownership itself is never folded
     // here at all, see RunePartyPlugin#getTurfWarsTileCounts, which tallies TileReducer's own
@@ -225,6 +238,11 @@ final class MinigamePresentation
                 if (RunePartyPlugin.FISHING_CONTEST_KEY.equals(minigameKey))
                 {
                     fishingRoundStartAt = 0;
+                }
+                // Same reasoning as Fishing Contest's own reset just above.
+                if (RunePartyPlugin.CLICK_CLICK_CLICK_KEY.equals(minigameKey))
+                {
+                    clickClickClickRoundStartAt = 0;
                 }
                 // Same reasoning as Coin Rush's own reset above. minigameTeamColors starts fresh
                 // too -- a new round's assignment hasn't been announced yet.
@@ -321,6 +339,10 @@ final class MinigamePresentation
                 if (RunePartyPlugin.FISHING_CONTEST_KEY.equals(minigameKey))
                 {
                     fishingRoundStartAt = System.currentTimeMillis();
+                }
+                if (RunePartyPlugin.CLICK_CLICK_CLICK_KEY.equals(minigameKey))
+                {
+                    clickClickClickRoundStartAt = System.currentTimeMillis();
                 }
                 if (RunePartyPlugin.TURF_WARS_KEY.equals(minigameKey))
                 {
@@ -577,6 +599,7 @@ final class MinigamePresentation
         {
             plugin.addChatMessage("Mini-game complete!");
             triggerMinigameOverBanner();
+            triggerMinigameScoreBanner(payload);
             triggerMinigameRewardsBanner(payload);
             // Skipped on the game's last round -- GAME_ENDED fires right behind this same
             // MINIGAME_ENDED and triggerGameOverSequence reveals the very same standings itself,
@@ -712,6 +735,18 @@ final class MinigamePresentation
         plugin.armBanner(minigameOverBanner, RunePartyPlugin.MINIGAME_OVER_BANNER_DURATION_MS, () -> null, true);
     }
 
+    /** Arms AnnouncementOverlay's mini-game final-score recap ("how did everyone do") -- called
+     * from handleMinigameEnded, parsing its own "results" list eagerly, same "fixed, already-landed
+     * event, nothing to gain from lazy re-parsing" reasoning triggerMinigameRewardsBanner's own doc
+     * gives. armBanner chains this behind whatever's already reserved turnEffectGateUntil -- the
+     * "MINIGAME OVER!" banner above -- and extends it further so the rewards recap right behind
+     * this one waits its turn too. */
+    private void triggerMinigameScoreBanner(JsonObject payload)
+    {
+        List<MinigameScore> scores = Json.safeMinigameScores(payload, "results");
+        plugin.armBanner(minigameScoreBanner, RunePartyPlugin.MINIGAME_SCORE_BANNER_DURATION_MS, () -> scores, true);
+    }
+
     /** Arms AnnouncementOverlay's mini-game rewards recap ("who got what") -- called from
      * handleMinigameEnded, parsing its own "payouts" list eagerly (payload is a fixed,
      * already-landed MINIGAME_ENDED event, so there's nothing to gain from re-parsing it lazily)
@@ -832,6 +867,7 @@ final class MinigamePresentation
     {
         minigameBanner.reset();
         minigameOverBanner.reset();
+        minigameScoreBanner.reset();
         if (minigameSpinnerTask != null) { minigameSpinnerTask.cancel(false); minigameSpinnerTask = null; }
         roundCompleteBanner.reset();
         minigameRewardsBanner.reset();
@@ -863,6 +899,7 @@ final class MinigamePresentation
         sandwichCollectSubmitted.clear();
         sandwichRushRoundStartAt = 0;
         fishingRoundStartAt = 0;
+        clickClickClickRoundStartAt = 0;
         minigameTeamColors.clear();
         turfWarsRoundStartAt = 0;
         trueOrFalseQuestion = null;
@@ -902,6 +939,8 @@ final class MinigamePresentation
     boolean isRoundBegun() { return minigameRoundBegun; }
     long getMinigameBannerUntil() { return minigameBanner.until; }
     long getMinigameOverBannerUntil() { return minigameOverBanner.until; }
+    long getMinigameScoreBannerUntil() { return minigameScoreBanner.until; }
+    List<MinigameScore> getMinigameScores() { return minigameScoreBanner.payload != null ? minigameScoreBanner.payload : Collections.emptyList(); }
     long getRoundCompleteBannerUntil() { return roundCompleteBanner.until; }
     int getRoundCompleteRoundNumber() { return roundCompleteBanner.payload != null ? roundCompleteBanner.payload : 0; }
     long getMinigameRewardsBannerUntil() { return minigameRewardsBanner.until; }
@@ -946,6 +985,13 @@ final class MinigamePresentation
      * fishing section compares against this to decide when to submit the local player's final
      * tally. */
     long getFishingContestEndsAt() { return fishingRoundStartAt != 0 ? fishingRoundStartAt + RunePartyPlugin.FISHING_CONTEST_DURATION_MS : 0; }
+
+    boolean isClickClickClickActive() { return minigameActive && RunePartyPlugin.CLICK_CLICK_CLICK_KEY.equals(minigameKey); }
+    /** When the current Click, Click, Click round's own local click-timer should stop -- 0 if no
+     * round is active yet or the round hasn't actually become playable. RunePartyPlugin#
+     * onGameTick's own click-click-click section compares against this to decide when to submit
+     * the local player's final tally. */
+    long getClickClickClickEndsAt() { return clickClickClickRoundStartAt != 0 ? clickClickClickRoundStartAt + RunePartyPlugin.CLICK_CLICK_CLICK_DURATION_MS : 0; }
 
     boolean isTurfWarsActive() { return minigameActive && RunePartyPlugin.TURF_WARS_KEY.equals(minigameKey); }
     boolean isJaddyActive() { return minigameActive && RunePartyPlugin.JADDY_KEY.equals(minigameKey); }

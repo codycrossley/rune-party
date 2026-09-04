@@ -269,6 +269,7 @@ public class AnnouncementOverlay extends Overlay
         renderTrueOrFalseReveal(g);
         renderTrueOrFalseQuestion(g);
         renderMinigameOverBanner(g);
+        renderMinigameScoreBanner(g);
         renderMinigameRewardsBanner(g);
         renderRoundCompleteBanner(g);
         renderDiceRoll(g);
@@ -1415,6 +1416,45 @@ public class AnnouncementOverlay extends Overlay
             lineY += lineHeight;
         }
         return lineY;
+    }
+
+    /** Draws the mini-game final-score recap -- "FINAL SCORE", then every seated player with the
+     * score they earned this round, highest first, each name in its own seat color (see
+     * drawPlayerRows) so it reads like a personal standings list rather than a flat report.
+     * Score's own meaning varies per mini-game (unique tiles clicked, anchovies caught, correct
+     * answers, ...) -- this banner doesn't need to know which, it just shows the raw number every
+     * mini-game's own pay_out/pay_out_flat/pay_out_top already produces in MINIGAME_ENDED's
+     * "results" list. Shown after renderMinigameOverBanner and before renderMinigameRewardsBanner,
+     * so players see how they did before finding out what (if anything) that earned them. */
+    private void renderMinigameScoreBanner(Graphics2D g)
+    {
+        Float alpha = BannerAnim.fadeAlpha(plugin.getMinigameScoreBannerUntil(), MINIGAME_REWARDS_FADE_MS);
+        if (alpha == null) return;
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 3;
+
+        g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_REWARDS_TITLE_SIZE));
+        drawCenteredRainbowText(g, "FINAL SCORE", RAINBOW_LETTER_COLORS, centerX, y, alpha);
+
+        Map<String, Integer> scoreByRsn = new HashMap<>();
+        for (MinigameScore score : plugin.getMinigameScores())
+        {
+            scoreByRsn.put(score.rsn.toLowerCase(), score.score);
+        }
+
+        List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
+        players.sort(Comparator
+            .comparingInt((RosterReducer.RosterEntry e) -> scoreByRsn.getOrDefault(e.rsn.toLowerCase(), 0))
+            .reversed()
+            .thenComparing(e -> e.number));
+
+        Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(MINIGAME_REWARDS_LINE_SIZE);
+        Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(MINIGAME_REWARDS_LINE_SIZE);
+        drawPlayerRows(g, players, nameFont, statsFont, (entry, i) -> "",
+            entry -> "   " + scoreByRsn.getOrDefault(entry.rsn.toLowerCase(), 0) + " pts",
+            entry -> Color.LIGHT_GRAY,
+            centerX, y + 40, MINIGAME_REWARDS_LINE_HEIGHT, alpha);
     }
 
     /** Draws the mini-game rewards recap -- "REWARDS", then every seated player with the coins they

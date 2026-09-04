@@ -23,6 +23,7 @@ public final class Minigames
         REGISTRY.register(new TurfWarsMinigame());
         REGISTRY.register(new SandwichRushMinigame());
         REGISTRY.register(new WhosYourJaddyMinigame());
+        REGISTRY.register(new ClickClickClickMinigame());
     }
 
     public static Minigame get(String key)

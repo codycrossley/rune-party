@@ -229,6 +229,16 @@ public class RunePartyPlugin extends Plugin
      * bounded wait expects. */
     public static final long FISHING_CONTEST_DURATION_MS = 30000;
 
+    /** Client-side key for the Click, Click, Click mini-game -- must match the server's own
+     * registration, same role ARENA_KEY/FISHING_CONTEST_KEY play for their own mini-games. */
+    public static final String CLICK_CLICK_CLICK_KEY = "click-click-click";
+
+    /** How long a Click, Click, Click round's own local click-tallying window runs before the
+     * local player's final unique-tile count gets submitted -- must match the server's own
+     * duration. Measured from MINIGAME_ROUND_BEGIN, same "everyone's local timer runs out at the
+     * same moment" reasoning FISHING_CONTEST_DURATION_MS's own doc gives. */
+    public static final long CLICK_CLICK_CLICK_DURATION_MS = 30000;
+
     /** Client-side key for the Turf Wars mini-game -- must match the server's own registration,
      * same role ARENA_KEY/FISHING_CONTEST_KEY play for their own mini-games. */
     public static final String TURF_WARS_KEY = "turf-wars";
@@ -366,12 +376,19 @@ public class RunePartyPlugin extends Plugin
      * other back-to-back banner pair here already uses). */
     public static final long MINIGAME_OVER_BANNER_DURATION_MS = 3000;
 
+    /** How long AnnouncementOverlay's mini-game final-score recap ("how did everyone do") stays up
+     * -- triggered on MINIGAME_ENDED (see triggerMinigameScoreBanner), shown *after* the "MINIGAME
+     * OVER!" banner above and *before* the rewards recap below: chained via the same armBanner/
+     * turnEffectGateUntil sequencing every other back-to-back banner pair here already uses, so
+     * players see how they scored before finding out what (if anything) that earned them. */
+    public static final long MINIGAME_SCORE_BANNER_DURATION_MS = 6000;
+
     /** How long AnnouncementOverlay's mini-game rewards recap ("who got what") stays up -- also
      * triggered on MINIGAME_ENDED (see triggerMinigameRewardsBanner), but shown *after* the
-     * "MINIGAME OVER!" banner above and *before* the round recap: both scheduleRoundCompleteBanner
-     * and triggerMinigameRewardsBanner defer via scheduleAfterTurnEffects/armBanner, which wait on
-     * turnEffectGateUntil -- extended by whichever banner armed most recently -- so all three never
-     * overlap. */
+     * "MINIGAME OVER!" banner and the final-score recap above, and *before* the round recap: all
+     * of scheduleRoundCompleteBanner/triggerMinigameRewardsBanner/triggerMinigameScoreBanner defer
+     * via scheduleAfterTurnEffects/armBanner, which wait on turnEffectGateUntil -- extended by
+     * whichever banner armed most recently -- so none of them ever overlap. */
     public static final long MINIGAME_REWARDS_BANNER_DURATION_MS = 7500;
 
     /** How long AnnouncementOverlay's Golden Gnome outcome banner ("You got a Golden Gnome!")
@@ -637,6 +654,7 @@ public class RunePartyPlugin extends Plugin
     private JadEncounter jadEncounter;
     private JaddyDuelModel jaddyDuelModel;
     private FishingCatchOverlay fishingCatchOverlay;
+    private ClickClickClickOverlay clickClickClickOverlay;
     private TurfWarsScoreOverlay turfWarsScoreOverlay;
     private SandwichRushHudOverlay sandwichRushHudOverlay;
     private HardcodedCourseLauncherOverlay hardcodedCourseLauncherOverlay;
@@ -811,6 +829,19 @@ public class RunePartyPlugin extends Plugin
     private volatile boolean fishingCatchSubmitted = false;
     private int shrimpCount = 0;
     private int anchovyCount = 0;
+    // ---- Click, Click, Click (entirely client-local until the one final submission -- clicks are
+    // never reported per-click). Every left-click on bare ground while this mini-game is playable
+    // records that WorldPoint here (see onMenuEntryAdded's own Click, Click, Click branch /
+    // registerClickClickClickTile) -- there's no "start clicking" state beyond the round itself
+    // being playable. clickClickClickTiles is owned solely by the client thread
+    // (registerClickClickClickTile runs from a menu-entry click callback, same thread as
+    // onGameTick's submission check), same single-writer assumption shrimpCount/anchovyCount
+    // already rely on, so a plain HashSet is fine here. clickClickClickSubmitted guards the
+    // one-time end-of-round submission (see onGameTick) and is reset on MINIGAME_STARTED, set
+    // defensively on MINIGAME_ENDED too in case a round ends abnormally (host force-end) before
+    // the local 30-second timer would have fired the submission itself. ----
+    private volatile boolean clickClickClickSubmitted = false;
+    private final Set<WorldPoint> clickClickClickTiles = new HashSet<>();
     // Real state, applied catch-up or not: whether the current turn's player has already spent
     // their one-item-per-turn allowance -- reset on every TURN_STARTED, set by ITEM_USED. Mirrors
     // the server's own itemUsedThisTurn.
@@ -1027,6 +1058,9 @@ public class RunePartyPlugin extends Plugin
         fishingCatchOverlay = new FishingCatchOverlay(this);
         overlayManager.add(fishingCatchOverlay);
 
+        clickClickClickOverlay = new ClickClickClickOverlay(this);
+        overlayManager.add(clickClickClickOverlay);
+
         turfWarsScoreOverlay = new TurfWarsScoreOverlay(this);
         overlayManager.add(turfWarsScoreOverlay);
 
@@ -1072,6 +1106,7 @@ public class RunePartyPlugin extends Plugin
         if (jadEncounter != null) { jadEncounter.clear(); overlayManager.remove(jadEncounter); }
         if (jaddyDuelModel != null) { jaddyDuelModel.clear(); overlayManager.remove(jaddyDuelModel); }
         if (fishingCatchOverlay != null) overlayManager.remove(fishingCatchOverlay);
+        if (clickClickClickOverlay != null) overlayManager.remove(clickClickClickOverlay);
         if (turfWarsScoreOverlay != null) overlayManager.remove(turfWarsScoreOverlay);
         if (sandwichRushHudOverlay != null) overlayManager.remove(sandwichRushHudOverlay);
         if (hardcodedCourseLauncherOverlay != null) { hardcodedCourseLauncherOverlay.clear(); overlayManager.remove(hardcodedCourseLauncherOverlay); }
@@ -1832,6 +1867,57 @@ public class RunePartyPlugin extends Plugin
             .onClick(me -> placeCoinTrapAt(point));
     }
 
+    /** Same "Walk here" -> custom RUNELITE entry idiom as addPresetMenuEntries/
+     * addItemPlacementMenuEntries, but here the whole point is that the player never actually
+     * walks: appending this entry after "Walk here" makes it the new default left-click action
+     * (see onMenuEntryAdded's own gating), so a rapid-fire clicking spree just records tiles in
+     * place instead of sending the local player running across the map to the last one clicked.
+     * "Walk here" itself is left untouched -- a player who genuinely wants to walk can still
+     * right-click and pick it explicitly. */
+    private void addClickClickClickMenuEntry()
+    {
+        Tile tile = client.getTopLevelWorldView().getSelectedSceneTile();
+        if (tile == null) return;
+        WorldPoint point = tile.getWorldLocation();
+        if (point == null) return;
+
+        client.createMenuEntry(-1)
+            .setOption("<col=00FF00>Click!</col>")
+            .setTarget("")
+            .setType(MenuAction.RUNELITE)
+            .onClick(me -> registerClickClickClickTile(point));
+    }
+
+    /** Records one Click, Click, Click tile click -- called from the synthetic "Click!" menu entry
+     * (see addClickClickClickMenuEntry). Re-checks isClickClickClickActive()/
+     * clickClickClickSubmitted here on top of that method's own gate, since the round could have
+     * ended in the moment between the menu opening and this entry actually being clicked. A
+     * repeat click on an already-recorded tile is a harmless no-op -- clickClickClickTiles is a
+     * Set, so the running unique count (read live by ClickClickClickOverlay) never double-counts
+     * one. */
+    private void registerClickClickClickTile(WorldPoint point)
+    {
+        if (!isClickClickClickActive() || clickClickClickSubmitted) return;
+        clickClickClickTiles.add(point);
+    }
+
+    /** Fires the local player's final Click, Click, Click unique-tile tally off to the server --
+     * called exactly once per round, from onGameTick the moment its own local 30-second timer
+     * elapses. Same "snapshot at call time, no retry on failure" shape submitFishingCatch already
+     * uses. */
+    private void submitClickClickClickResult()
+    {
+        String self = localRsn();
+        final String gid = gameId;
+        final String token = playerToken;
+        final int uniqueTiles = clickClickClickTiles.size();
+        if (self == null || gid == null || token == null) return;
+
+        submitAction("Submit Click, Click, Click result",
+            () -> apiClient.submitClickClickClickResult(gid, self, token, uniqueTiles),
+            e -> addChatMessage("Failed to submit your Click, Click, Click result: " + e.getMessage()));
+    }
+
     private static final String GOLDEN_GNOME_PURCHASE_OPTION = "<col=00FF00>Purchase Golden Gnome</col>";
 
     /** The Golden Gnome's own point if the mouse is genuinely over its model's real clickbox (see
@@ -2373,6 +2459,20 @@ public class RunePartyPlugin extends Plugin
             }
         }
 
+        // Same shape as the Fishing Contest check just above: this only watches the local
+        // 30-second timer (anchored to MINIGAME_ROUND_BEGIN) and fires the single submission once
+        // it elapses -- individual clicks are recorded from the synthetic "Click!" menu entry
+        // instead (see registerClickClickClickTile).
+        if (isClickClickClickActive() && !clickClickClickSubmitted)
+        {
+            long endsAt = getClickClickClickEndsAt();
+            if (endsAt != 0 && System.currentTimeMillis() >= endsAt)
+            {
+                clickClickClickSubmitted = true;
+                submitClickClickClickResult();
+            }
+        }
+
         // Also independent of the turn engine below -- unlike a rolled destination (pendingRoll,
         // only ever true on the local player's own turn), a Home Teleport arrival can still be
         // owed well after the turn it was armed on, whosever turn it currently is (see
@@ -2464,6 +2564,11 @@ public class RunePartyPlugin extends Plugin
         if (phase == GamePhase.ACTIVE && itemPlacementKey != null)
         {
             addItemPlacementMenuEntries();
+            return;
+        }
+        if (phase == GamePhase.ACTIVE && isClickClickClickActive() && isMinigamePlayable())
+        {
+            addClickClickClickMenuEntry();
         }
     }
 
@@ -3636,6 +3741,10 @@ public class RunePartyPlugin extends Plugin
                     anchovyCount = 0;
                     fishingCatchSubmitted = false;
                     awaitingHeadbangFinish = false;
+                    // Same reasoning as Fishing Contest's own reset just above -- a fresh Click,
+                    // Click, Click instance starts with no clicks and no submission.
+                    clickClickClickTiles.clear();
+                    clickClickClickSubmitted = false;
                 }
                 minigamePresentation.apply(e, catchingUp);
                 break;
@@ -3653,6 +3762,7 @@ public class RunePartyPlugin extends Plugin
                 // before this client's own local timer ever got the chance to submit this itself.
                 fishingCatchSubmitted = true;
                 awaitingHeadbangFinish = false;
+                clickClickClickSubmitted = true;
                 minigamePresentation.handleMinigameEnded(e.payload, catchingUp, maxRounds, completedRounds);
                 break;
 
@@ -3879,6 +3989,14 @@ public class RunePartyPlugin extends Plugin
     public int getShrimpCount() { return shrimpCount; }
     public int getAnchovyCount() { return anchovyCount; }
 
+    public boolean isClickClickClickActive() { return minigamePresentation.isClickClickClickActive(); }
+    /** When the current Click, Click, Click round's own local click-timer should stop -- 0 if no
+     * round is active yet or the round hasn't actually become playable. */
+    public long getClickClickClickEndsAt() { return minigamePresentation.getClickClickClickEndsAt(); }
+    /** This round's own unique-tile-click count so far -- see ClickClickClickOverlay, the only
+     * consumer. Client-local only -- nobody but the local player ever sees this. */
+    public int getClickClickClickUniqueTileCount() { return clickClickClickTiles.size(); }
+
     public boolean isTurfWarsActive() { return minigamePresentation.isTurfWarsActive(); }
     /** This round's own live tile tally, keyed by whatever color hex each tile is currently
      * claimed in (2 keys for an even-count 2-team round, up to 8 for an odd-count free-for-all),
@@ -4008,6 +4126,8 @@ public class RunePartyPlugin extends Plugin
     public long getWelcomeBannerUntil() { return welcomeBanner.until; }
     public long getMinigameBannerUntil() { return minigamePresentation.getMinigameBannerUntil(); }
     public long getMinigameOverBannerUntil() { return minigamePresentation.getMinigameOverBannerUntil(); }
+    public long getMinigameScoreBannerUntil() { return minigamePresentation.getMinigameScoreBannerUntil(); }
+    public List<MinigameScore> getMinigameScores() { return minigamePresentation.getMinigameScores(); }
     public long getGameStartBannerUntil() { return gameStartBanner.until; }
     public long getRoundCompleteBannerUntil() { return minigamePresentation.getRoundCompleteBannerUntil(); }
     public int getRoundCompleteRoundNumber() { return minigamePresentation.getRoundCompleteRoundNumber(); }

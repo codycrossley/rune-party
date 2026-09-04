@@ -125,6 +125,29 @@ public final class Json
         return out;
     }
 
+    /** Reads MINIGAME_ENDED's "results" list -- {@code [{"player": rsn, "score": int}, ...]} --
+     * one entry per player the mini-game's own pay_out/pay_out_flat/pay_out_top scored, regardless
+     * of whether that score actually earned them anything (see MinigameScore's own doc). Never
+     * null, only empty. */
+    public static List<MinigameScore> safeMinigameScores(JsonObject o, String key)
+    {
+        if (o == null || !o.has(key) || o.get(key).isJsonNull() || !o.get(key).isJsonArray()) return Collections.emptyList();
+        JsonArray arr = o.get(key).getAsJsonArray();
+        List<MinigameScore> out = new ArrayList<>(arr.size());
+        for (int i = 0; i < arr.size(); i++)
+        {
+            try
+            {
+                JsonObject entry = arr.get(i).getAsJsonObject();
+                String rsn = safeStr(entry, "player");
+                Integer score = safeInt(entry, "score");
+                if (rsn != null && score != null) out.add(new MinigameScore(rsn, score));
+            }
+            catch (Exception ignored) { /* skip malformed entry */ }
+        }
+        return out;
+    }
+
     /** Parses a TRUE_OR_FALSE_ROUND_ENDED payload's "results" list. {@code answer} is nullable
      * (missing/null JSON means the player never answered that round at all, not that they
      * answered false). */
