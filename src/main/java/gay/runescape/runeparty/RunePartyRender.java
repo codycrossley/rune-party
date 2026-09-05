@@ -88,7 +88,7 @@ public final class RunePartyRender
     /** Draws {@code text} once in black at (x+1, y+1), then again in {@code color} at (x, y) --
      * the shadow-then-draw idiom shared by PlayerOverlay's coin/Golden-Gnome popups and
      * TileOverlay's return-arrow label. Not a fit for every "draw text with a shadow" site in this
-     * codebase -- CoinRushTimerOverlay and AnnouncementOverlay each have real behavioral
+     * codebase -- CoinRushScoreboardOverlay and AnnouncementOverlay each have real behavioral
      * differences (a different offset, a dimmed shadow, layout chaining), so they stay separate. */
     static void drawShadowed(Graphics2D g, String text, int x, int y, Color color, int alpha)
     {

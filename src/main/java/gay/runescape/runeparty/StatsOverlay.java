@@ -3,11 +3,8 @@ package gay.runescape.runeparty;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
@@ -21,10 +18,11 @@ import net.runelite.client.ui.overlay.components.TitleComponent;
  * that player's own RunePartyColor with the current turn highlighted on the stats side -- a ranked
  * view lives in AnnouncementOverlay's post-round "Current Standings" recap instead, so this
  * persistent HUD stays stable/scannable rather than reshuffling every time someone's coin total
- * changes. One exception: for exactly as long as a Coin Rush round is playable, this same panel is
- * temporarily taken over by a live per-round scoreboard instead (see renderCoinRushScoreboard) --
- * that race genuinely does reshuffle turn-by-turn, so the stability tradeoff above doesn't apply
- * there. Purely a renderer over RosterReducer/RunePartyPlugin -- all the totals it reads are
+ * changes. Hidden outright for the entire time any mini-game is active (banner through rewards
+ * recap) -- a mini-game gets its own dedicated overlay for whatever it needs to show live (see
+ * e.g. CoinRushScoreboardOverlay, TurfWarsScoreOverlay, HotPotatoOverlay, SandwichRushHudOverlay),
+ * rather than this persistent HUD being repurposed/hijacked the way it briefly was for Coin Rush.
+ * Purely a renderer over RosterReducer/RunePartyPlugin -- all the totals it reads are
  * server-mutated, this class never computes or guesses one itself. */
 public class StatsOverlay extends Overlay
 {
@@ -33,9 +31,8 @@ public class StatsOverlay extends Overlay
     private static final Color COLOR_NAME_FALLBACK = Color.LIGHT_GRAY; // used only if a seat color can't be resolved
 
     // PanelComponent's own default width is too narrow for "PlayerName" plus "123 coins, 8 GG" on
-    // one line, which was wrapping to a 2nd line. Package-private so CoinRushTimerOverlay can
-    // position itself just past this panel's own right edge.
-    static final int PANEL_WIDTH = 220;
+    // one line, which was wrapping to a 2nd line.
+    private static final int PANEL_WIDTH = 220;
 
     private final RunePartyConfig config;
     private final RunePartyPlugin plugin;
@@ -60,19 +57,14 @@ public class StatsOverlay extends Overlay
         GamePhase phase = plugin.getPhase();
         if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE && phase != GamePhase.ENDED) return null;
 
+        // Hidden outright for as long as any mini-game is active -- see this class's own doc for
+        // why (a mini-game's own dedicated overlay shows whatever it needs to instead).
+        if (plugin.isMinigameActive()) return null;
+
         // seatedPlayers() excludes both spectators and a host-added PLAYER who hasn't run the join
         // flow themselves yet, keeping this HUD to players actually in the game right now.
         List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
         if (players.isEmpty()) return null;
-
-        // A Coin Rush round temporarily takes over this HUD entirely -- see
-        // renderCoinRushScoreboard -- for exactly as long as isMinigamePlayable() says the round
-        // is actually underway, rather than the instant isCoinRushActive() alone goes true (which
-        // includes the ready-check/countdown window, when there's no live tally yet worth showing).
-        if (plugin.isCoinRushActive() && plugin.isMinigamePlayable())
-        {
-            return renderCoinRushScoreboard(g, players);
-        }
 
         // Turn order, not ranked -- a ranked view lives in AnnouncementOverlay's post-round
         // "Current Standings" recap instead, so this persistent HUD reads left-to-right the same
@@ -99,10 +91,9 @@ public class StatsOverlay extends Overlay
         String currentTurn = plugin.getCurrentTurnRsn();
         for (RosterReducer.RosterEntry entry : players)
         {
-            // A mini-game isn't anyone's "turn" -- everyone submits a result independently -- so
-            // suppress the turn highlight entirely while one's active rather than leaving the last
-            // roller looking like they're still up.
-            boolean onTurn = phase == GamePhase.ACTIVE && !plugin.isMinigameActive() && entry.rsn.equalsIgnoreCase(currentTurn);
+            // isMinigameActive() is already ruled out above, so onTurn only ever needs the plain
+            // "is it genuinely their turn" check here.
+            boolean onTurn = phase == GamePhase.ACTIVE && entry.rsn.equalsIgnoreCase(currentTurn);
 
             // Name always reads in the player's own seat color -- whose turn it is is shown on the
             // stats side instead, so the two pieces of information never fight for the same color.
@@ -115,44 +106,6 @@ public class StatsOverlay extends Overlay
                 .leftColor(nameColor)
                 .right(entry.coins + " coins, " + entry.goldenGnomeCount + " GG")
                 .rightColor(statsColor)
-                .build());
-        }
-
-        return panelComponent.render(g);
-    }
-
-    /** Temporarily replaces the normal roster view for exactly as long as a Coin Rush round is
-     * playable -- a live "who's got how many coins this round" tally instead of the persistent
-     * total-coins/Golden Gnome view, since that actually reshuffles turn-by-turn. The round's own
-     * countdown lives in its own dedicated CoinRushTimerOverlay instead of a line here. Sorted by
-     * this round's own score, highest first (ties broken by turn order) -- unlike the persistent
-     * HUD's deliberately-stable turn-order sort, a leaderboard is exactly the one place re-sorting
-     * by whoever's currently ahead is the whole point. */
-    private Dimension renderCoinRushScoreboard(Graphics2D g, List<RosterReducer.RosterEntry> players)
-    {
-        Map<String, Integer> scores = plugin.getCoinRushScores();
-        players.sort(Comparator
-            .comparing((RosterReducer.RosterEntry e) -> scores.getOrDefault(e.rsn.toLowerCase(Locale.ROOT), 0))
-            .reversed()
-            .thenComparing(e -> e.number));
-
-        panelComponent.getChildren().clear();
-        panelComponent.getChildren().add(TitleComponent.builder()
-            .text("COIN RUSH")
-            .color(COLOR_TURN)
-            .build());
-
-        for (RosterReducer.RosterEntry entry : players)
-        {
-            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
-            Color nameColor = seatColor != null ? seatColor.awt : COLOR_NAME_FALLBACK;
-            int score = scores.getOrDefault(entry.rsn.toLowerCase(Locale.ROOT), 0);
-
-            panelComponent.getChildren().add(LineComponent.builder()
-                .left(entry.rsn)
-                .leftColor(nameColor)
-                .right(score + (score == 1 ? " coin" : " coins"))
-                .rightColor(COLOR_NORMAL)
                 .build());
         }
 

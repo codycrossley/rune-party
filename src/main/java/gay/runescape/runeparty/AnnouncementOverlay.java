@@ -240,6 +240,8 @@ public class AnnouncementOverlay extends Overlay
         renderTurnAnnouncement(g);
         renderTurnSkippedAnnouncement(g);
         renderSpinHint(g);
+        renderReturnToPositionHint(g);
+        renderStartHereHint(g);
         renderGoldenGnomeOutcome(g);
         renderChanceSpaceTitle(g);
         renderChanceSpaceIcons(g);
@@ -399,6 +401,38 @@ public class AnnouncementOverlay extends Overlay
         x = drawLeftAlignedText(g, prefix, x, y, SPIN_HINT_COLOR, alpha);
         x = drawLeftAlignedText(g, rsn, x, y, nameColor, alpha);
         drawLeftAlignedText(g, suffix, x, y, SPIN_HINT_COLOR, alpha);
+    }
+
+    /** The on-screen text half of TileOverlay's own "Return Here!" arrow -- shown under the exact
+     * same condition (see RunePartyPlugin#isLocalPlayerAwaitingReturnToPosition), in the same
+     * pulsing, duration-less style/position as the Spin hint above. The two never show at once --
+     * this requires the local player NOT standing on their tracked tile, the Spin hint requires the
+     * opposite -- so sharing the same screen slot never conflicts. */
+    private void renderReturnToPositionHint(Graphics2D g)
+    {
+        if (!plugin.isLocalPlayerAwaitingReturnToPosition()) return;
+
+        float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), SPIN_HINT_PULSE_PERIOD_MS);
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(SPIN_HINT_SIZE));
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 4 + 40;
+        drawCenteredText(g, "Return to your tile to roll the dice!", centerX, y, SPIN_HINT_COLOR, alpha);
+    }
+
+    /** The on-screen text half of TileOverlay's own "Start Here!" arrow -- shown under the exact
+     * same condition (turn order hasn't begun yet), broadcast to everyone the same way the arrow
+     * itself is, not personalized to whether this particular viewer has already reached the tile.
+     * Same pulsing style/position as the Spin hint/return-to-position hint above -- mutually
+     * exclusive with both, since neither of those can fire before turn order has begun. */
+    private void renderStartHereHint(Graphics2D g)
+    {
+        if (plugin.getPhase() != GamePhase.ACTIVE || plugin.getCurrentTurnRsn() != null) return;
+
+        float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), SPIN_HINT_PULSE_PERIOD_MS);
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(SPIN_HINT_SIZE));
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 4 + 40;
+        drawCenteredText(g, "Head to the Start Tile to begin!", centerX, y, SPIN_HINT_COLOR, alpha);
     }
 
     /** Draws the Jad encounter -- the awakening announcement, Jad's taunt, a cosmetic countdown to

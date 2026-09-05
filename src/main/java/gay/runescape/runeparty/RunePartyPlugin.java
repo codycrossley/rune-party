@@ -658,7 +658,7 @@ public class RunePartyPlugin extends Plugin
     private TileReducer tileReducer;
     private TileOverlay tileOverlay;
     private StatsOverlay statsOverlay;
-    private CoinRushTimerOverlay coinRushTimerOverlay;
+    private CoinRushScoreboardOverlay coinRushScoreboardOverlay;
     private PlayerOverlay playerOverlay;
     private AnnouncementOverlay announcementOverlay;
     private ConfettiOverlay confettiOverlay;
@@ -1050,8 +1050,8 @@ public class RunePartyPlugin extends Plugin
         statsOverlay = new StatsOverlay(config, this);
         overlayManager.add(statsOverlay);
 
-        coinRushTimerOverlay = new CoinRushTimerOverlay(config, this);
-        overlayManager.add(coinRushTimerOverlay);
+        coinRushScoreboardOverlay = new CoinRushScoreboardOverlay(this);
+        overlayManager.add(coinRushScoreboardOverlay);
 
         playerOverlay = new PlayerOverlay(client, config, this, rosterReducer, modelOutlineRenderer);
         overlayManager.add(playerOverlay);
@@ -1119,7 +1119,7 @@ public class RunePartyPlugin extends Plugin
         uiTimerExec.shutdownNow();
         if (tileOverlay != null) { tileOverlay.clearGoldenGnomeModels(); tileOverlay.clearCoinRushModels(); tileOverlay.clearSandwichItemModels(); tileOverlay.clearPondModels(); tileOverlay.clearTableModels(); overlayManager.remove(tileOverlay); }
         if (statsOverlay != null) overlayManager.remove(statsOverlay);
-        if (coinRushTimerOverlay != null) overlayManager.remove(coinRushTimerOverlay);
+        if (coinRushScoreboardOverlay != null) overlayManager.remove(coinRushScoreboardOverlay);
         if (playerOverlay != null) overlayManager.remove(playerOverlay);
         if (announcementOverlay != null) overlayManager.remove(announcementOverlay);
         if (confettiOverlay != null) overlayManager.remove(confettiOverlay);
@@ -2746,6 +2746,23 @@ public class RunePartyPlugin extends Plugin
         if (self == null || !self.equalsIgnoreCase(currentTurnRsn)) return false;
 
         return standingOnTrackedPositionCached;
+    }
+
+    /** Whether the local player needs to walk back to their own tracked board position before they
+     * can roll again -- it's their turn, no roll is pending, no mini-game is running, and they're
+     * not currently standing where TURN_STARTED left them (e.g. they wandered off toward the
+     * Golden Gnome, or just walked off after landing last round). Mirrors TileOverlay#
+     * renderReturnToPositionArrow's own gating (the in-world "Return Here!" arrow) for
+     * AnnouncementOverlay#renderReturnToPositionHint's own on-screen text reminder -- that arrow
+     * itself still resolves the local player's position live every frame rather than reading
+     * standingOnTrackedPositionCached the way this does, so the two can differ by up to one tick
+     * in edge cases, same tolerance every other cached-vs-live check in this file already accepts. */
+    public boolean isLocalPlayerAwaitingReturnToPosition()
+    {
+        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive()) return false;
+        String self = localRsn();
+        if (self == null || !self.equalsIgnoreCase(currentTurnRsn)) return false;
+        return !standingOnTrackedPositionCached;
     }
 
     /** Whether the table is genuinely waiting on someone's roll right now -- the same gating

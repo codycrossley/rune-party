@@ -21,11 +21,11 @@ import net.runelite.client.util.ImageUtil;
  * drawToken), just drawn flat here instead of anchored to a 3D model -- with the potato icon
  * floating above whichever one currently holds it. Deliberately minimalist: no names under the
  * tokens, the color alone (matching each player's own seat color everywhere else in this codebase)
- * is enough to tell them apart at a glance. A countdown mirrors CoinRushTimerOverlay's own urgency
- * coloring, and a "SPIN to pass it!" hint appears only for the local player while they're the one
- * holding it (see RunePartyPlugin#isLocalPlayerHoldingHotPotato) -- everyone else just watches the
- * row for who to keep an eye on. The holder's own in-world token also flashes -- see PlayerOverlay#
- * drawToken -- so this overview is never the only place that's visible. */
+ * is enough to tell them apart at a glance. A countdown mirrors CoinRushScoreboardOverlay's own
+ * urgency coloring, and a "SPIN to pass it!" hint appears only for the local player while they're
+ * the one holding it (see RunePartyPlugin#isLocalPlayerHoldingHotPotato) -- everyone else just
+ * watches the row for who to keep an eye on. The holder's own in-world token also flashes -- see
+ * PlayerOverlay#drawToken -- so this overview is never the only place that's visible. */
 public class HotPotatoOverlay extends Overlay
 {
     private static final int TOKEN_RADIUS = 12;

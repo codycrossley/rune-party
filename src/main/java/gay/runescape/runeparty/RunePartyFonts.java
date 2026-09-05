@@ -8,7 +8,8 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.ui.FontManager;
 
 /** Shared font resources for the whole plugin -- currently just the Mario Party-style display font
- * used by both AnnouncementOverlay and CoinRushTimerOverlay. */
+ * used by AnnouncementOverlay and most of the per-mini-game overlays (CoinRushScoreboardOverlay,
+ * HotPotatoOverlay, ...). */
 @Slf4j
 final class RunePartyFonts
 {
