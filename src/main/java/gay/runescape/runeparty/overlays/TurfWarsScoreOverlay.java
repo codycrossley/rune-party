@@ -1,5 +1,6 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.overlays;
 
+import gay.runescape.runeparty.RunePartyPlugin;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
@@ -115,7 +116,7 @@ public class TurfWarsScoreOverlay extends Overlay
         int scoresHeight = rows.isEmpty() ? 0 : rows.size() * rowHeight + (rows.size() - 1) * ENTRY_ROW_GAP;
         int height = PADDING_Y * 2 + titleFm.getHeight() + ROW_GAP + scoresHeight + ROW_GAP + countdownFm.getHeight();
 
-        Color border = plugin.getPlayerTeamColor(plugin.localRsn());
+        Color border = plugin.getPlayerTeamColor(plugin.getLocalRsn());
         if (border == null) border = NEUTRAL_BORDER;
 
         g.setColor(BACKGROUND);

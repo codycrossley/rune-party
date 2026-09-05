@@ -1,4 +1,9 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.overlays;
+
+import gay.runescape.runeparty.HardcodedCourse;
+import gay.runescape.runeparty.RunePartyPlugin;
+import gay.runescape.runeparty.SceneObjectSet;
+import gay.runescape.runeparty.TileReducer;
 
 import java.awt.Dimension;
 import java.awt.Graphics2D;
@@ -66,7 +71,7 @@ public final class HardcodedCourseLauncherOverlay extends Overlay
      * actual visible silhouette from whatever angle/distance it's being viewed at. A RuneLiteObject
      * has no clickbox of its own otherwise. Height comes from Perspective#getTileHeight, not the
      * object's own getZ() -- that field is never populated by setLocation. */
-    HardcodedCourse hoveredCourse(Point canvasPoint)
+    public HardcodedCourse hoveredCourse(Point canvasPoint)
     {
         if (canvasPoint == null || plugin.getGameId() != null) return null;
 

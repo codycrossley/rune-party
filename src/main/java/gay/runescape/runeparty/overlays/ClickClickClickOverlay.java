@@ -1,4 +1,8 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.overlays;
+
+import gay.runescape.runeparty.RunePartyColor;
+import gay.runescape.runeparty.RunePartyFonts;
+import gay.runescape.runeparty.RunePartyPlugin;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -68,7 +72,7 @@ public class ClickClickClickOverlay extends Overlay
         Font numberFont = RunePartyFonts.MARIO_PARTY.deriveFont(NUMBER_SIZE);
         String numberText = String.valueOf(plugin.getClickClickClickUniqueTileCount());
 
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(plugin.localRsn()));
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(plugin.getLocalRsn()));
         Color numberColor = seatColor != null ? seatColor.awt : NUMBER_COLOR_FALLBACK;
 
         g.setFont(labelFont);

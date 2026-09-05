@@ -1,4 +1,7 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.overlays;
+
+import gay.runescape.runeparty.RosterReducer;
+import gay.runescape.runeparty.RunePartyPlugin;
 
 import java.awt.AlphaComposite;
 import java.awt.BasicStroke;

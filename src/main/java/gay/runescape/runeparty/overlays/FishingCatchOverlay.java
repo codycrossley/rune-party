@@ -1,4 +1,6 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.overlays;
+
+import gay.runescape.runeparty.RunePartyPlugin;
 
 import java.awt.BasicStroke;
 import java.awt.Color;

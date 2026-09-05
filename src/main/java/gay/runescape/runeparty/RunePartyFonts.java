@@ -9,13 +9,13 @@ import net.runelite.client.ui.FontManager;
 
 /** Shared font resources for the whole plugin -- currently just the Mario Party-style display font
  * used by AnnouncementOverlay and most of the per-mini-game overlays (CoinRushScoreboardOverlay,
- * HotPotatoOverlay, ...). */
+ * HotPotatoOverlay, ...). Public since its own callers live in the separate overlays subpackage. */
 @Slf4j
-final class RunePartyFonts
+public final class RunePartyFonts
 {
     // Loaded once at class-init; falls back to the client's own bold font if the resource is
     // missing, so a packaging mistake degrades gracefully instead of crashing.
-    static final Font MARIO_PARTY = load();
+    public static final Font MARIO_PARTY = load();
 
     private static Font load()
     {

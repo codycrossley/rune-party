@@ -1,4 +1,10 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.overlays;
+
+import gay.runescape.runeparty.GamePhase;
+import gay.runescape.runeparty.RosterReducer;
+import gay.runescape.runeparty.RunePartyColor;
+import gay.runescape.runeparty.RunePartyConfig;
+import gay.runescape.runeparty.RunePartyPlugin;
 
 import java.awt.Color;
 import java.awt.Dimension;

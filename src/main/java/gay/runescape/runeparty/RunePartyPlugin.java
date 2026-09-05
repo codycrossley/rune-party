@@ -4,8 +4,21 @@ import com.google.gson.Gson;
 import com.google.inject.Provides;
 import gay.runescape.runeparty.items.Items;
 import gay.runescape.runeparty.models.HotPotatoExplosionModel;
-import gay.runescape.runeparty.models.JadEncounter;
-import gay.runescape.runeparty.models.JaddyDuelModel;
+import gay.runescape.runeparty.overlays.AnnouncementOverlay;
+import gay.runescape.runeparty.overlays.ClickClickClickOverlay;
+import gay.runescape.runeparty.overlays.CoinRushScoreboardOverlay;
+import gay.runescape.runeparty.overlays.ConfettiOverlay;
+import gay.runescape.runeparty.overlays.FishingCatchOverlay;
+import gay.runescape.runeparty.overlays.HardcodedCourseLauncherOverlay;
+import gay.runescape.runeparty.overlays.HotPotatoOverlay;
+import gay.runescape.runeparty.overlays.JadEncounter;
+import gay.runescape.runeparty.overlays.JaddyDuelModel;
+import gay.runescape.runeparty.overlays.PlayerOverlay;
+import gay.runescape.runeparty.overlays.RunePartyMapOverlay;
+import gay.runescape.runeparty.overlays.SandwichRushHudOverlay;
+import gay.runescape.runeparty.overlays.StatsOverlay;
+import gay.runescape.runeparty.overlays.TileOverlay;
+import gay.runescape.runeparty.overlays.TurfWarsScoreOverlay;
 import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -2064,7 +2077,7 @@ public class RunePartyPlugin extends Plugin
      * addGoldenGnomePurchaseMenuEntry and TileOverlay's own arrow, the only two readers. Scans
      * tileReducer's live snapshot directly rather than caching, same "the reducer is the one
      * source of truth" reasoning models/GoldenGnomeModel's own update() already follows. */
-    WorldPoint findGoldenGnomeTilePoint()
+    public WorldPoint findGoldenGnomeTilePoint()
     {
         for (TileReducer.TileEntry entry : tileReducer.snapshot())
         {
@@ -2306,7 +2319,7 @@ public class RunePartyPlugin extends Plugin
      * which shows a player which tile that is. Resolves the armed pathIndex back through
      * tileReducer's own live snapshot, returning null rather than a stale point if that tile's
      * since been removed out from under the armed state. */
-    WorldPoint getCourseConnectFromPoint()
+    public WorldPoint getCourseConnectFromPoint()
     {
         Integer fromIndex = courseConnectFromIndex;
         if (fromIndex == null) return null;

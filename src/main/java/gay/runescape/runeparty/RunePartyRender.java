@@ -8,14 +8,10 @@ import net.runelite.api.ModelData;
 import net.runelite.api.NPCComposition;
 import net.runelite.api.coords.WorldPoint;
 
-/** Small rendering helpers shared across overlays/dialogs -- {@code withAlpha} and the
+/** Small rendering helpers shared across the overlays package -- {@code withAlpha} and the
  * "black shadow offset one pixel, then the real color on top" idiom, previously duplicated at
- * several call sites.
- * <p>
- * {@code loadNpcModel}/{@code orientationFacing} were added for JadEncounter but are generic
- * enough for any NPC-model-based tile effect to reuse, which is why both are {@code public} while
- * the rest of this class stays package-private -- JadEncounter lives under models/, a different
- * package. */
+ * several call sites. Public throughout: every caller (TileOverlay, PlayerOverlay,
+ * AnnouncementOverlay, ...) lives in that separate overlays subpackage, not this one. */
 public final class RunePartyRender
 {
     private RunePartyRender()
@@ -72,14 +68,14 @@ public final class RunePartyRender
         return Math.floorMod(jau, 2048);
     }
 
-    static Color withAlpha(Color c, int alpha)
+    public static Color withAlpha(Color c, int alpha)
     {
         return new Color(c.getRed(), c.getGreen(), c.getBlue(), alpha);
     }
 
     /** Clamped to [0, 255] before handing java.awt.Color a component value, in case a caller's
      * alpha arithmetic drifts fractionally outside [0f, 1f]. */
-    static Color withAlpha(Color c, float alpha)
+    public static Color withAlpha(Color c, float alpha)
     {
         int a = Math.max(0, Math.min(255, (int) (alpha * 255)));
         return new Color(c.getRed(), c.getGreen(), c.getBlue(), a);
@@ -90,7 +86,7 @@ public final class RunePartyRender
      * TileOverlay's return-arrow label. Not a fit for every "draw text with a shadow" site in this
      * codebase -- CoinRushScoreboardOverlay and AnnouncementOverlay each have real behavioral
      * differences (a different offset, a dimmed shadow, layout chaining), so they stay separate. */
-    static void drawShadowed(Graphics2D g, String text, int x, int y, Color color, int alpha)
+    public static void drawShadowed(Graphics2D g, String text, int x, int y, Color color, int alpha)
     {
         g.setColor(withAlpha(Color.BLACK, alpha));
         g.drawString(text, x + 1, y + 1);
