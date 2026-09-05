@@ -2,7 +2,6 @@ package gay.runescape.runeparty.overlays;
 
 import gay.runescape.runeparty.RunePartyColor;
 import gay.runescape.runeparty.RunePartyPlugin;
-import gay.runescape.runeparty.RunePartyRender;
 
 import java.awt.Color;
 import java.awt.Dimension;

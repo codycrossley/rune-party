@@ -1,4 +1,6 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.courses;
+
+import gay.runescape.runeparty.net.ApiClient;
 
 import net.runelite.api.coords.WorldPoint;
 

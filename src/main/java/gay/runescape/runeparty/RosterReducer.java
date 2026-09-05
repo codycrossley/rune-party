@@ -1,5 +1,9 @@
 package gay.runescape.runeparty;
 
+import gay.runescape.runeparty.net.ApiClient;
+import gay.runescape.runeparty.net.Events;
+import gay.runescape.runeparty.net.Json;
+
 import net.runelite.client.util.Text;
 
 import java.util.*;

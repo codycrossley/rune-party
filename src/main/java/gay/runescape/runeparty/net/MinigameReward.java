@@ -1,4 +1,4 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.net;
 
 /** One entry in a MINIGAME_ENDED payload's "payouts" list -- see Json#safeMinigameRewards. */
 public class MinigameReward

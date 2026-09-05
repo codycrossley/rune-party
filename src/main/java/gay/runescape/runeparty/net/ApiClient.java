@@ -1,8 +1,9 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.net;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import gay.runescape.runeparty.RunePartyRole;
 import okhttp3.*;
 import java.io.IOException;
 import java.util.Collections;

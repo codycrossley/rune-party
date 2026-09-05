@@ -1,4 +1,12 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.presentation;
+
+import gay.runescape.runeparty.TileReducer;
+import gay.runescape.runeparty.RunePartyPlugin;
+import gay.runescape.runeparty.TimedBanner;
+
+import gay.runescape.runeparty.net.ApiClient;
+import gay.runescape.runeparty.net.Events;
+import gay.runescape.runeparty.net.Json;
 
 import net.runelite.api.coords.WorldPoint;
 
@@ -11,7 +19,7 @@ import java.util.concurrent.TimeUnit;
  * here. Purchasing is a direct request/response triggered by a right-click menu entry rather than
  * an emote, so this class only ever reacts to what already happened (purchased/lost/won/moved),
  * never gates a pending decision. */
-final class GoldenGnomePresentation
+public final class GoldenGnomePresentation
 {
     private final RunePartyPlugin plugin;
 
@@ -34,12 +42,12 @@ final class GoldenGnomePresentation
     private volatile WorldPoint moveNewPoint = null;
     private volatile long moveShowNewAt = 0; // model force-hidden at moveNewPoint until this passes, even though TileReducer already has it
 
-    GoldenGnomePresentation(RunePartyPlugin plugin)
+    public GoldenGnomePresentation(RunePartyPlugin plugin)
     {
         this.plugin = plugin;
     }
 
-    void apply(ApiClient.EventOut e, boolean catchingUp)
+    public void apply(ApiClient.EventOut e, boolean catchingUp)
     {
         String type = e.type.toUpperCase(Locale.ROOT);
         switch (type)
@@ -155,7 +163,7 @@ final class GoldenGnomePresentation
      * ChanceSpacePresentation's own deferred reveal (see GOLDEN_GNOME_LOST/WON's own doc above),
      * which needs this exact "+1"/"-1" popup to land at its own reveal moment rather than the
      * instant the underlying event actually arrived. */
-    void showCountPopup(String rsn, int newTotal, int delta)
+    public void showCountPopup(String rsn, int newTotal, int delta)
     {
         popup.payload = new PopupPayload(rsn, newTotal, delta);
         popup.start = System.currentTimeMillis();
@@ -163,7 +171,7 @@ final class GoldenGnomePresentation
         plugin.extendTurnEffectGate(popup.until);
     }
 
-    void reset()
+    public void reset()
     {
         outcome.reset();
         popup.reset();
@@ -174,18 +182,18 @@ final class GoldenGnomePresentation
     }
 
     // ---- getters, mirrored 1:1 by RunePartyPlugin's own facade under their original names ----
-    String getOutcome() { return outcome.payload != null ? outcome.payload.outcome : null; }
-    String getOutcomeRsn() { return outcome.payload != null ? outcome.payload.rsn : null; }
-    long getOutcomeBannerUntil() { return outcome.until; }
-    String getPopupRsn() { return popup.payload != null ? popup.payload.rsn : null; }
-    int getPopupNewTotal() { return popup.payload != null ? popup.payload.newTotal : 0; }
-    int getPopupDelta() { return popup.payload != null ? popup.payload.delta : 1; }
-    long getPopupStart() { return popup.start; }
-    long getPopupUntil() { return popup.until; }
-    WorldPoint getMoveOldPoint() { return moveOldPoint; }
-    long getMoveHideOldAt() { return moveHideOldAt; }
-    WorldPoint getMoveNewPoint() { return moveNewPoint; }
-    long getMoveShowNewAt() { return moveShowNewAt; }
+    public String getOutcome() { return outcome.payload != null ? outcome.payload.outcome : null; }
+    public String getOutcomeRsn() { return outcome.payload != null ? outcome.payload.rsn : null; }
+    public long getOutcomeBannerUntil() { return outcome.until; }
+    public String getPopupRsn() { return popup.payload != null ? popup.payload.rsn : null; }
+    public int getPopupNewTotal() { return popup.payload != null ? popup.payload.newTotal : 0; }
+    public int getPopupDelta() { return popup.payload != null ? popup.payload.delta : 1; }
+    public long getPopupStart() { return popup.start; }
+    public long getPopupUntil() { return popup.until; }
+    public WorldPoint getMoveOldPoint() { return moveOldPoint; }
+    public long getMoveHideOldAt() { return moveHideOldAt; }
+    public WorldPoint getMoveNewPoint() { return moveNewPoint; }
+    public long getMoveShowNewAt() { return moveShowNewAt; }
 
     /** Payload for the Golden Gnome purchase outcome banner ("You got a Golden Gnome!"). outcome
      * is always "purchased" in practice -- carried as a real field rather than a hardcoded string

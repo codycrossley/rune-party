@@ -1,5 +1,23 @@
 package gay.runescape.runeparty;
 
+import gay.runescape.runeparty.courses.CoursePreset;
+import gay.runescape.runeparty.courses.HardcodedCourse;
+
+import gay.runescape.runeparty.presentation.CeremonyPresentation;
+import gay.runescape.runeparty.presentation.ChanceSpacePresentation;
+import gay.runescape.runeparty.presentation.GoldenGnomePresentation;
+import gay.runescape.runeparty.presentation.ItemPresentation;
+import gay.runescape.runeparty.presentation.JadPresentation;
+import gay.runescape.runeparty.presentation.MinigamePresentation;
+import gay.runescape.runeparty.net.MinigameReward;
+import gay.runescape.runeparty.net.MinigameScore;
+
+import gay.runescape.runeparty.net.ApiClient;
+import gay.runescape.runeparty.net.EventSocket;
+import gay.runescape.runeparty.net.EventListener;
+import gay.runescape.runeparty.net.Events;
+import gay.runescape.runeparty.net.Json;
+
 import com.google.gson.Gson;
 import com.google.inject.Provides;
 import gay.runescape.runeparty.items.Items;
@@ -583,7 +601,6 @@ public class RunePartyPlugin extends Plugin
      * constant in this codebase already carries (see e.g. JAD_SMASH_ANIMATION_HOLD_MS's own doc). */
     public static final int TELE_BLOCK_IMPACT_SPOTANIM_HEIGHT = 100;
 
-
     /** How long after the "vanish" spotanim starts before the model actually disappears from its
      * old spot -- see TileOverlay#updateGoldenGnomeModels, which force-persists the old point past
      * when TileReducer already removed it (that removal is real state, applied the instant the
@@ -685,7 +702,7 @@ public class RunePartyPlugin extends Plugin
     private SandwichRushHudOverlay sandwichRushHudOverlay;
     private HardcodedCourseLauncherOverlay hardcodedCourseLauncherOverlay;
     private RosterReducer rosterReducer;
-    ApiClient apiClient; // package-private: presenters (MinigamePresentation) issue their own requests
+    public ApiClient apiClient; // public: presenters in the minigames subpackage issue their own requests
     private EventSocket eventSocket;
 
     // Per-feature presenter objects -- each owns its own fields, folds its own event types via
@@ -722,12 +739,12 @@ public class RunePartyPlugin extends Plugin
     // Dedicated to delayed, purely-cosmetic UI timers (see scheduleTurnAnnouncement) -- kept
     // separate from `executor` above so a pending delay can never queue behind (or block) a real
     // network call.
-    // Package-private: presenters (GoldenGnomePresentation's GOLDEN_GNOME_MOVED handling,
-    // MinigamePresentation's MINIGAME_COUNTDOWN_STARTED handling) schedule their own raw nested
-    // delayed callbacks against this, not just through scheduleAfterTurnEffects/armBanner. A
-    // caller outside this package (e.g. models/JadEncounter) can't reach this field directly --
-    // see scheduleDelayed for that path instead.
-    final ScheduledExecutorService uiTimerExec = Executors.newSingleThreadScheduledExecutor(r ->
+    // Public: presenters in the presentation subpackage (GoldenGnomePresentation's
+    // GOLDEN_GNOME_MOVED handling, MinigamePresentation's MINIGAME_COUNTDOWN_STARTED handling)
+    // schedule their own raw nested delayed callbacks against this, not just through
+    // scheduleAfterTurnEffects/armBanner. A caller with no reason to reach it directly (e.g.
+    // models/JadEncounter) should still prefer scheduleDelayed instead.
+    public final ScheduledExecutorService uiTimerExec = Executors.newSingleThreadScheduledExecutor(r ->
     {
         Thread t = new Thread(r, "runeparty-ui-timer");
         t.setDaemon(true);
@@ -749,9 +766,9 @@ public class RunePartyPlugin extends Plugin
     private volatile GamePhase phase = GamePhase.DISCONNECTED;
 
     // ---- session ----
-    volatile String gameId = null; // package-private: MinigamePresentation's collectCoinRushCoin reads this
+    public volatile String gameId = null; // public: CoinRushPresentation/SandwichRushPresentation's own collect methods read this
     private volatile String writeKey = null; // non-null only for the host
-    volatile String playerToken = null; // package-private: MinigamePresentation's collectCoinRushCoin reads this
+    public volatile String playerToken = null; // public: CoinRushPresentation/SandwichRushPresentation's own collect methods read this
     private volatile String joinCode = null;
     private volatile String hostRsn = null;
     // Non-null only once this game has been permanently locked to a Standard Course (see
@@ -1258,7 +1275,7 @@ public class RunePartyPlugin extends Plugin
 
     // Package-private: MinigamePresentation's collectCoinRushCoin passes a lambda to submitAction.
     @FunctionalInterface
-    interface ApiCall
+    public interface ApiCall
     {
         void run() throws Exception;
     }
@@ -1269,7 +1286,7 @@ public class RunePartyPlugin extends Plugin
      * both (see confirmArrival/rollDice below for callers that need the latter). Every action
      * method in this section used to hand-write this exact executor.submit/try/catch/log wrapper
      * around its own apiClient call. */
-    void submitAction(String logLabel, ApiCall call, Consumer<Exception> onFailure)
+    public void submitAction(String logLabel, ApiCall call, Consumer<Exception> onFailure)
     {
         executor.submit(() ->
         {
@@ -1282,7 +1299,7 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
-    void submitAction(String logLabel, ApiCall call)
+    public void submitAction(String logLabel, ApiCall call)
     {
         submitAction(logLabel, call, null);
     }
@@ -1290,7 +1307,7 @@ public class RunePartyPlugin extends Plugin
     /** Same as {@link #submitAction(String, ApiCall, Consumer)}, plus {@code finallyAction}, run
      * once {@code call} has resolved either way (success or failure) -- createGame/joinGame's own
      * "refresh the panel regardless of outcome" epilogue, the only two callers that need one. */
-    void submitAction(String logLabel, ApiCall call, Consumer<Exception> onFailure, Runnable finallyAction)
+    public void submitAction(String logLabel, ApiCall call, Consumer<Exception> onFailure, Runnable finallyAction)
     {
         executor.submit(() ->
         {
@@ -2465,14 +2482,14 @@ public class RunePartyPlugin extends Plugin
         // the pendingRoll-gated checks the rest of onGameTick uses.
         if (isCoinRushActive() && isMinigamePlayable())
         {
-            minigamePresentation.checkCoinRushCollection(selfPlayer);
+            minigamePresentation.coinRush().checkCollection(selfPlayer);
         }
 
         // Same reasoning as the Coin Rush check just above -- Sandwich Rush also has no "whose
         // turn is it," every seated player can be racing for the same ingredient at once.
         if (isSandwichRushActive() && isMinigamePlayable())
         {
-            minigamePresentation.checkSandwichRushCollection(selfPlayer);
+            minigamePresentation.sandwichRush().checkCollection(selfPlayer);
         }
 
         // Generic (not Coin-Rush/Arena-specific) live position heartbeat -- any mini-game whose
@@ -2659,7 +2676,7 @@ public class RunePartyPlugin extends Plugin
             }
             if (isLocalPlayerHoldingHotPotato())
             {
-                minigamePresentation.armAwaitingHotPotatoPassFinish();
+                minigamePresentation.hotPotato().armAwaitingPassFinish();
                 return;
             }
             return;
@@ -2680,7 +2697,7 @@ public class RunePartyPlugin extends Plugin
             }
             else if (isLocalPlayerAwaitingTrueOrFalseAnswer())
             {
-                minigamePresentation.armAwaitingTrueOrFalseYesFinish();
+                minigamePresentation.trueOrFalse().armAwaitingYesFinish();
             }
             return;
         }
@@ -2689,7 +2706,7 @@ public class RunePartyPlugin extends Plugin
         {
             if (isLocalPlayerAwaitingTrueOrFalseAnswer())
             {
-                minigamePresentation.armAwaitingTrueOrFalseNoFinish();
+                minigamePresentation.trueOrFalse().armAwaitingNoFinish();
             }
             return;
         }
@@ -2716,14 +2733,14 @@ public class RunePartyPlugin extends Plugin
             minigamePresentation.clearAwaitingMinigameReadyFinish();
             confirmMinigameReady();
         }
-        else if (minigamePresentation.isAwaitingTrueOrFalseYesFinish())
+        else if (minigamePresentation.trueOrFalse().isAwaitingYesFinish())
         {
-            minigamePresentation.clearAwaitingTrueOrFalseYesFinish();
+            minigamePresentation.trueOrFalse().clearAwaitingYesFinish();
             answerTrueOrFalse(true);
         }
-        else if (minigamePresentation.isAwaitingTrueOrFalseNoFinish())
+        else if (minigamePresentation.trueOrFalse().isAwaitingNoFinish())
         {
-            minigamePresentation.clearAwaitingTrueOrFalseNoFinish();
+            minigamePresentation.trueOrFalse().clearAwaitingNoFinish();
             answerTrueOrFalse(false);
         }
         else if (awaitingHeadbangFinish)
@@ -2731,9 +2748,9 @@ public class RunePartyPlugin extends Plugin
             awaitingHeadbangFinish = false;
             performFishingCatchRoll();
         }
-        else if (minigamePresentation.isAwaitingHotPotatoPassFinish())
+        else if (minigamePresentation.hotPotato().isAwaitingPassFinish())
         {
-            minigamePresentation.clearAwaitingHotPotatoPassFinish();
+            minigamePresentation.hotPotato().clearAwaitingPassFinish();
             passHotPotato();
         }
     }
@@ -2846,9 +2863,9 @@ public class RunePartyPlugin extends Plugin
      * instant their own answer lands). */
     public boolean isLocalPlayerAwaitingTrueOrFalseAnswer()
     {
-        if (!TRUE_OR_FALSE_KEY.equals(minigamePresentation.getKey()) || !isMinigamePlayable() || minigamePresentation.getTrueOrFalseQuestion() == null) return false;
+        if (!TRUE_OR_FALSE_KEY.equals(minigamePresentation.getKey()) || !isMinigamePlayable() || minigamePresentation.trueOrFalse().getQuestion() == null) return false;
         String self = localRsn();
-        return self != null && !minigamePresentation.getTrueOrFalseAnsweredRsns().contains(self.toLowerCase(Locale.ROOT));
+        return self != null && !minigamePresentation.trueOrFalse().getAnsweredRsns().contains(self.toLowerCase(Locale.ROOT));
     }
 
     /** Whether the local player is the current Hot Potato holder -- unlike every other
@@ -2861,7 +2878,7 @@ public class RunePartyPlugin extends Plugin
     {
         if (!HOT_POTATO_KEY.equals(minigamePresentation.getKey()) || !isMinigamePlayable()) return false;
         String self = localRsn();
-        String holder = minigamePresentation.getHotPotatoHolder();
+        String holder = minigamePresentation.hotPotato().getHolder();
         return self != null && holder != null && self.equalsIgnoreCase(holder);
     }
 
@@ -3045,7 +3062,7 @@ public class RunePartyPlugin extends Plugin
      * the same way when it starts, and nothing else needs to change -- every "what's next"
      * announcement already waits on this one gate via scheduleAfterTurnEffects. Never moves the
      * gate backward, so two effects landing close together both get their own full window. */
-    void extendTurnEffectGate(long untilTimestamp)
+    public void extendTurnEffectGate(long untilTimestamp)
     {
         turnEffectGateUntil = Math.max(turnEffectGateUntil, untilTimestamp);
     }
@@ -3070,7 +3087,7 @@ public class RunePartyPlugin extends Plugin
      * Golden Gnome popup (tracked separately, not in this queue) if that's still up, else the tail
      * of their own coin-popup queue, else "now" if nothing's currently showing. A different player
      * always gets their own popup immediately regardless of what's showing for anyone else. */
-    void enqueueCoinPopup(String rsn, int delta, int newTotal, long durationMs, boolean totalless)
+    public void enqueueCoinPopup(String rsn, int delta, int newTotal, long durationMs, boolean totalless)
     {
         String key = rsn.toLowerCase(Locale.ROOT);
         long now = System.currentTimeMillis();
@@ -3101,7 +3118,7 @@ public class RunePartyPlugin extends Plugin
      * its own delay against a gate that doesn't know the first effect is coming yet, so both would
      * end up scheduled for the same moment instead of one waiting on the other. Shared by every
      * "the turn is over, here's what's next" announcement. */
-    ScheduledFuture<?> scheduleAfterTurnEffects(ScheduledFuture<?> previousTask, long durationMs, Runnable action)
+    public ScheduledFuture<?> scheduleAfterTurnEffects(ScheduledFuture<?> previousTask, long durationMs, Runnable action)
     {
         if (previousTask != null) previousTask.cancel(false);
 
@@ -3138,7 +3155,7 @@ public class RunePartyPlugin extends Plugin
      * this returned delay plus that stage's own cumulative offset into the sequence -- not via
      * another scheduleAfterTurnEffects call per stage, which would read and extend the gate a second
      * time on top of this reservation. */
-    long reserveTurnEffectGate(long totalDurationMs)
+    public long reserveTurnEffectGate(long totalDurationMs)
     {
         long now = System.currentTimeMillis();
         long delay = turnEffectGateUntil > now ? (turnEffectGateUntil - now) + POST_TURN_EFFECT_GRACE_MS : 0;
@@ -3164,7 +3181,7 @@ public class RunePartyPlugin extends Plugin
      * several have real behavior beyond "arm one banner" (bespoke until/gate math, chaining to a
      * follow-up step, arming two banners at once) that this deliberately doesn't try to
      * generalize. */
-    <T> void armBanner(TimedBanner<T> banner, long durationMs, Supplier<T> payload, boolean extendGate)
+    public <T> void armBanner(TimedBanner<T> banner, long durationMs, Supplier<T> payload, boolean extendGate)
     {
         banner.task = scheduleAfterTurnEffects(banner.task, durationMs, () ->
         {
@@ -3901,7 +3918,7 @@ public class RunePartyPlugin extends Plugin
     // Helpers
     // -------------------------------------------------------------------------
 
-    void addChatMessage(String message)
+    public void addChatMessage(String message)
     {
         clientThread.invokeLater(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", message, null));
     }
@@ -3977,7 +3994,7 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
-    void refreshPanel()
+    public void refreshPanel()
     {
         if (panel != null) SwingUtilities.invokeLater(panel::refresh);
     }
@@ -4102,57 +4119,57 @@ public class RunePartyPlugin extends Plugin
 
     /** Every currently-live Coin Rush spawn, keyed by the server's own spawn id -- see
      * TileOverlay#updateCoinRushModels, the only consumer. */
-    public Map<Integer, WorldPoint> getCoinRushSpawns() { return Collections.unmodifiableMap(minigamePresentation.getCoinRushSpawns()); }
+    public Map<Integer, WorldPoint> getCoinRushSpawns() { return Collections.unmodifiableMap(minigamePresentation.coinRush().getSpawns()); }
     /** This round's live Coin Rush tally, lowercase rsn -> coins collected so far -- see
      * StatsOverlay's live scoreboard, the only consumer. */
-    public Map<String, Integer> getCoinRushScores() { return Collections.unmodifiableMap(minigamePresentation.getCoinRushScores()); }
-    public boolean isCoinRushActive() { return minigamePresentation.isCoinRushActive(); }
+    public Map<String, Integer> getCoinRushScores() { return Collections.unmodifiableMap(minigamePresentation.coinRush().getScores()); }
+    public boolean isCoinRushActive() { return minigamePresentation.isKeyActive(COIN_RUSH_KEY); }
     /** When the current Coin Rush round's own clock runs out -- 0 if no round is active yet or the
      * round hasn't actually become playable. */
-    public long getCoinRushEndsAt() { return minigamePresentation.getCoinRushEndsAt(); }
+    public long getCoinRushEndsAt() { return minigamePresentation.coinRush().getEndsAt(); }
 
     /** Every currently-live Sandwich Rush ingredient spawn, keyed by the server's own spawn id --
      * see models/SandwichItemModel, the only consumer. */
-    public Map<Integer, SandwichSpawn> getSandwichRushSpawns() { return Collections.unmodifiableMap(minigamePresentation.getSandwichRushSpawns()); }
+    public Map<Integer, SandwichSpawn> getSandwichRushSpawns() { return Collections.unmodifiableMap(minigamePresentation.sandwichRush().getSpawns()); }
     /** The LOCAL player's own currently-held ingredient keys this round -- deliberately self-only
      * (see MinigamePresentation's own field doc) -- see SandwichRushHudOverlay, the only
      * consumer. */
-    public Set<String> getSandwichHeld() { return Collections.unmodifiableSet(minigamePresentation.getSandwichHeld()); }
-    public int getSandwichCount() { return minigamePresentation.getSandwichCount(); }
-    public boolean isSandwichRushActive() { return minigamePresentation.isSandwichRushActive(); }
+    public Set<String> getSandwichHeld() { return Collections.unmodifiableSet(minigamePresentation.sandwichRush().getHeld()); }
+    public int getSandwichCount() { return minigamePresentation.sandwichRush().getCount(); }
+    public boolean isSandwichRushActive() { return minigamePresentation.isKeyActive(SANDWICH_RUSH_KEY); }
     /** When the current Sandwich Rush round's own clock runs out -- 0 if no round is active yet
      * or the round hasn't actually become playable. */
-    public long getSandwichRushEndsAt() { return minigamePresentation.getSandwichRushEndsAt(); }
+    public long getSandwichRushEndsAt() { return minigamePresentation.sandwichRush().getEndsAt(); }
 
-    public boolean isFishingContestActive() { return minigamePresentation.isFishingContestActive(); }
+    public boolean isFishingContestActive() { return minigamePresentation.isKeyActive(FISHING_CONTEST_KEY); }
     /** When the current Fishing Contest round's own local catch-timer should stop -- 0 if no
      * round is active yet or the round hasn't actually become playable. */
-    public long getFishingContestEndsAt() { return minigamePresentation.getFishingContestEndsAt(); }
+    public long getFishingContestEndsAt() { return minigamePresentation.fishingContest().getEndsAt(); }
     /** This round's own local catch counts so far -- see FishingCatchOverlay, the only consumer.
      * Client-local only -- nobody but the local player ever sees these. */
     public int getShrimpCount() { return shrimpCount; }
     public int getAnchovyCount() { return anchovyCount; }
 
-    public boolean isClickClickClickActive() { return minigamePresentation.isClickClickClickActive(); }
+    public boolean isClickClickClickActive() { return minigamePresentation.isKeyActive(CLICK_CLICK_CLICK_KEY); }
     /** When the current Click, Click, Click round's own local click-timer should stop -- 0 if no
      * round is active yet or the round hasn't actually become playable. */
-    public long getClickClickClickEndsAt() { return minigamePresentation.getClickClickClickEndsAt(); }
+    public long getClickClickClickEndsAt() { return minigamePresentation.clickClickClick().getEndsAt(); }
     /** This round's own unique-tile-click count so far -- see ClickClickClickOverlay, the only
      * consumer. Client-local only -- nobody but the local player ever sees this. */
     public int getClickClickClickUniqueTileCount() { return clickClickClickTiles.size(); }
 
-    public boolean isHotPotatoActive() { return minigamePresentation.isHotPotatoActive(); }
+    public boolean isHotPotatoActive() { return minigamePresentation.isKeyActive(HOT_POTATO_KEY); }
     /** The current holder's rsn, or null before the round's own initial random assignment lands --
      * see HotPotatoOverlay and PlayerOverlay#drawToken, the two consumers. */
-    public String getHotPotatoHolder() { return minigamePresentation.getHotPotatoHolder(); }
+    public String getHotPotatoHolder() { return minigamePresentation.hotPotato().getHolder(); }
     /** When the current Hot Potato round's own clock runs out -- 0 if no round is active yet or the
      * round hasn't actually become playable. */
-    public long getHotPotatoEndsAt() { return minigamePresentation.getHotPotatoEndsAt(); }
+    public long getHotPotatoEndsAt() { return minigamePresentation.hotPotato().getEndsAt(); }
     /** Lowercase rsns eliminated for the rest of this Hot Potato round -- see PlayerOverlay#
      * drawToken, the only consumer. */
-    public Set<String> getHotPotatoEliminatedRsns() { return minigamePresentation.getHotPotatoEliminatedRsns(); }
+    public Set<String> getHotPotatoEliminatedRsns() { return minigamePresentation.hotPotato().getEliminatedRsns(); }
 
-    public boolean isTurfWarsActive() { return minigamePresentation.isTurfWarsActive(); }
+    public boolean isTurfWarsActive() { return minigamePresentation.isKeyActive(TURF_WARS_KEY); }
     /** This round's own live tile tally, keyed by whatever color hex each tile is currently
      * claimed in (2 keys for an even-count 2-team round, up to 8 for an odd-count free-for-all),
      * tallied fresh from TileReducer's own already-broadcast TURF_WARS_TILE snapshot -- see
@@ -4174,7 +4191,7 @@ public class RunePartyPlugin extends Plugin
      * right now (no Turf Wars round active, or the assignment hasn't landed yet this round) -- see
      * PlayerOverlay, which recolors every seated player's own outline/token this way, not just the
      * local player's own. */
-    public String getTurfWarsColorHex(String rsn) { return minigamePresentation.getPlayerColor(rsn); }
+    public String getTurfWarsColorHex(String rsn) { return minigamePresentation.turfWars().getPlayerColor(rsn); }
     /** {@link #getTurfWarsColorHex(String)} decoded to an AWT {@link Color}, or null under the
      * same conditions that returns null. */
     public Color getPlayerTeamColor(String rsn)
@@ -4186,9 +4203,9 @@ public class RunePartyPlugin extends Plugin
     }
     /** When the round's own fixed-duration clock runs out -- 0 if no round is active yet or the
      * round hasn't actually become playable. */
-    public long getTurfWarsEndsAt() { return minigamePresentation.getTurfWarsEndsAt(); }
+    public long getTurfWarsEndsAt() { return minigamePresentation.turfWars().getEndsAt(); }
 
-    public boolean isJaddyActive() { return minigamePresentation.isJaddyActive(); }
+    public boolean isJaddyActive() { return minigamePresentation.isKeyActive(JADDY_KEY); }
     /** The color hex of whichever Who's Your Jaddy? zone tile {@code pos} currently sits on, or
      * null if {@code pos} isn't on either zone right now (no Jaddy round active, or the position is
      * off both zones) -- a live board lookup, same "the board's own current state already is the
@@ -4233,22 +4250,22 @@ public class RunePartyPlugin extends Plugin
         return getJaddyZoneColorHex(lastKnownLocalPosition);
     }
 
-    public String getTrueOrFalseQuestion() { return minigamePresentation.getTrueOrFalseQuestion(); }
-    public int getTrueOrFalseRoundNumber() { return minigamePresentation.getTrueOrFalseRoundNumber(); }
+    public String getTrueOrFalseQuestion() { return minigamePresentation.trueOrFalse().getQuestion(); }
+    public int getTrueOrFalseRoundNumber() { return minigamePresentation.trueOrFalse().getRoundNumber(); }
     /** Who's answered the *current* round so far -- see renderTrueOrFalseQuestion's own
      * "Ready screen"-style tally, the only consumer. */
-    public Set<String> getTrueOrFalseAnsweredRsns() { return Collections.unmodifiableSet(minigamePresentation.getTrueOrFalseAnsweredRsns()); }
-    public Boolean getTrueOrFalseMyAnswer() { return minigamePresentation.getTrueOrFalseMyAnswer(); }
+    public Set<String> getTrueOrFalseAnsweredRsns() { return Collections.unmodifiableSet(minigamePresentation.trueOrFalse().getAnsweredRsns()); }
+    public Boolean getTrueOrFalseMyAnswer() { return minigamePresentation.trueOrFalse().getMyAnswer(); }
     /** When the current True or False round's reading period ends and its answer countdown starts
      * ticking -- 0 if no round is currently open. renderTrueOrFalseQuestion hides the countdown
      * number until this passes. */
-    public long getTrueOrFalseAnswerWindowStartsAt() { return minigamePresentation.getTrueOrFalseAnswerWindowStartsAt(); }
+    public long getTrueOrFalseAnswerWindowStartsAt() { return minigamePresentation.trueOrFalse().getAnswerWindowStartsAt(); }
     /** When the current True or False round's own clock runs out -- 0 if no round is currently
      * open. */
-    public long getTrueOrFalseRoundEndsAt() { return minigamePresentation.getTrueOrFalseRoundEndsAt(); }
-    public Boolean getTrueOrFalseLastCorrectAnswer() { return minigamePresentation.getTrueOrFalseLastCorrectAnswer(); }
-    public List<TrueOrFalseResult> getTrueOrFalseLastResults() { return minigamePresentation.getTrueOrFalseLastResults(); }
-    public long getTrueOrFalseRevealUntil() { return minigamePresentation.getTrueOrFalseRevealUntil(); }
+    public long getTrueOrFalseRoundEndsAt() { return minigamePresentation.trueOrFalse().getRoundEndsAt(); }
+    public Boolean getTrueOrFalseLastCorrectAnswer() { return minigamePresentation.trueOrFalse().getLastCorrectAnswer(); }
+    public List<TrueOrFalseResult> getTrueOrFalseLastResults() { return minigamePresentation.trueOrFalse().getLastResults(); }
+    public long getTrueOrFalseRevealUntil() { return minigamePresentation.trueOrFalse().getRevealUntil(); }
 
     public String getItemPlacementKey() { return itemPlacementKey; }
     public String getItemTargetKey() { return itemTargetKey; }
@@ -4288,13 +4305,13 @@ public class RunePartyPlugin extends Plugin
     public int getRoundCompleteRoundNumber() { return minigamePresentation.getRoundCompleteRoundNumber(); }
     public long getMinigameRewardsBannerUntil() { return minigamePresentation.getMinigameRewardsBannerUntil(); }
     public List<MinigameReward> getMinigameRewards() { return minigamePresentation.getMinigameRewards(); }
-    public long getTeamAssignedBannerUntil() { return minigamePresentation.getTeamAssignedBannerUntil(); }
-    public String getTeamAssignedBannerTeam() { return minigamePresentation.getTeamAssignedBannerTeam(); }
-    public long getTurfWarsConfettiUntil() { return minigamePresentation.getTurfWarsConfettiUntil(); }
-    public Color getTurfWarsConfettiColor() { return minigamePresentation.getTurfWarsConfettiColor(); }
-    public long getJaddyResolvedBannerUntil() { return minigamePresentation.getJaddyResolvedBannerUntil(); }
-    public String getJaddyResolvedWinningColor() { return minigamePresentation.getJaddyResolvedWinningColor(); }
-    public String getJaddyResolvedLocalZoneColor() { return minigamePresentation.getJaddyResolvedLocalZoneColor(); }
+    public long getTeamAssignedBannerUntil() { return minigamePresentation.turfWars().getTeamAssignedBannerUntil(); }
+    public String getTeamAssignedBannerTeam() { return minigamePresentation.turfWars().getTeamAssignedBannerTeam(); }
+    public long getTurfWarsConfettiUntil() { return minigamePresentation.turfWars().getConfettiUntil(); }
+    public Color getTurfWarsConfettiColor() { return minigamePresentation.turfWars().getConfettiColor(); }
+    public long getJaddyResolvedBannerUntil() { return minigamePresentation.jaddy().getResolvedBannerUntil(); }
+    public String getJaddyResolvedWinningColor() { return minigamePresentation.jaddy().getResolvedWinningColor(); }
+    public String getJaddyResolvedLocalZoneColor() { return minigamePresentation.jaddy().getResolvedLocalZoneColor(); }
     // Delegating facade -- CeremonyPresentation owns the actual state. Every name/signature below
     // is unchanged, so no external caller (AnnouncementOverlay, ConfettiOverlay) needs to change.
     public List<RosterReducer.RosterEntry> getGameOverStandings() { return ceremonyPresentation.getGameOverStandings(); }
@@ -4351,7 +4368,7 @@ public class RunePartyPlugin extends Plugin
 
     /** Lets ChanceSpacePresentation's own deferred reveal show the Golden Gnome count popup at a
      * time of its own choosing -- see GoldenGnomePresentation#showCountPopup's own doc. */
-    void showGoldenGnomeCountPopup(String rsn, int newTotal, int delta)
+    public void showGoldenGnomeCountPopup(String rsn, int newTotal, int delta)
     {
         goldenGnomePresentation.showCountPopup(rsn, newTotal, delta);
     }

@@ -1,4 +1,11 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.presentation;
+
+import gay.runescape.runeparty.RunePartyPlugin;
+import gay.runescape.runeparty.TimedBanner;
+
+import gay.runescape.runeparty.net.ApiClient;
+import gay.runescape.runeparty.net.Events;
+import gay.runescape.runeparty.net.Json;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -35,7 +42,7 @@ import java.util.concurrent.TimeUnit;
  * doc for why a chain of individually-extending scheduleAfterTurnEffects calls (each stage only
  * discovering its own next stage's duration once the previous one's callback fires) left a real
  * gap where the next round's MINIGAME! could land mid-sequence. */
-final class ChanceSpacePresentation
+public final class ChanceSpacePresentation
 {
     private final RunePartyPlugin plugin;
 
@@ -46,12 +53,12 @@ final class ChanceSpacePresentation
     private final TimedBanner<Void> title = new TimedBanner<>();
     private final TimedBanner<RevealPayload> reveal = new TimedBanner<>();
 
-    ChanceSpacePresentation(RunePartyPlugin plugin)
+    public ChanceSpacePresentation(RunePartyPlugin plugin)
     {
         this.plugin = plugin;
     }
 
-    void apply(ApiClient.EventOut e, boolean catchingUp)
+    public void apply(ApiClient.EventOut e, boolean catchingUp)
     {
         String type = e.type.toUpperCase(Locale.ROOT);
         if (!Events.CHANCE_SPACE_TRIGGERED.equals(type)) return;
@@ -210,7 +217,7 @@ final class ChanceSpacePresentation
         return el != null && !el.isJsonNull() ? el.getAsBoolean() : null;
     }
 
-    void reset()
+    public void reset()
     {
         if (titleTask != null) { titleTask.cancel(false); titleTask = null; }
         if (revealTask != null) { revealTask.cancel(false); revealTask = null; }
@@ -220,17 +227,17 @@ final class ChanceSpacePresentation
     }
 
     // ---- getters, mirrored 1:1 by RunePartyPlugin's own facade under prefixed names ----
-    long getTitleUntil() { return title.until; }
+    public long getTitleUntil() { return title.until; }
 
-    long getIconsStart() { return reveal.start; }
-    long getIconsUntil() { return reveal.until; }
-    String getIconsLeftRsn() { return reveal.payload != null ? reveal.payload.leftRsn : null; }
-    String getIconsRightRsn() { return reveal.payload != null ? reveal.payload.rightRsn : null; }
-    String getIconsOutcomeType() { return reveal.payload != null ? reveal.payload.outcome : null; }
-    boolean isIconsGnomeTransferred() { return reveal.payload != null && reveal.payload.gnomeTransferred; }
-    String getIconsArrowDirection() { return reveal.payload != null ? reveal.payload.arrowDirection : null; }
-    long[] getIconsSlotDelayMs() { return reveal.payload != null ? reveal.payload.slotDelayMs : null; }
-    String[] getAnnouncementLines() { return reveal.payload != null ? reveal.payload.announcementLines : null; }
+    public long getIconsStart() { return reveal.start; }
+    public long getIconsUntil() { return reveal.until; }
+    public String getIconsLeftRsn() { return reveal.payload != null ? reveal.payload.leftRsn : null; }
+    public String getIconsRightRsn() { return reveal.payload != null ? reveal.payload.rightRsn : null; }
+    public String getIconsOutcomeType() { return reveal.payload != null ? reveal.payload.outcome : null; }
+    public boolean isIconsGnomeTransferred() { return reveal.payload != null && reveal.payload.gnomeTransferred; }
+    public String getIconsArrowDirection() { return reveal.payload != null ? reveal.payload.arrowDirection : null; }
+    public long[] getIconsSlotDelayMs() { return reveal.payload != null ? reveal.payload.slotDelayMs : null; }
+    public String[] getAnnouncementLines() { return reveal.payload != null ? reveal.payload.announcementLines : null; }
 
     /** Payload for the reveal banner: which rsn sits on which side of the tableau, the arrow's
      * direction (always one way, see buildRevealPayload's own doc), which item icon (coins vs

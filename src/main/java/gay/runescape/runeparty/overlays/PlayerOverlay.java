@@ -1,12 +1,10 @@
 package gay.runescape.runeparty.overlays;
 
-import gay.runescape.runeparty.BannerAnim;
 import gay.runescape.runeparty.GamePhase;
 import gay.runescape.runeparty.RosterReducer;
 import gay.runescape.runeparty.RunePartyColor;
 import gay.runescape.runeparty.RunePartyConfig;
 import gay.runescape.runeparty.RunePartyPlugin;
-import gay.runescape.runeparty.RunePartyRender;
 import gay.runescape.runeparty.RunePartyRole;
 
 import java.awt.BasicStroke;

@@ -1,4 +1,4 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.net;
 
 /** One entry in a MINIGAME_ENDED payload's "results" list -- see Json#safeMinigameScores. Distinct
  * from MinigameReward (that one's "payouts", coins actually paid out) since a player can score

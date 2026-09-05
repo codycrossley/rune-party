@@ -1,6 +1,6 @@
 package gay.runescape.runeparty.overlays;
 
-import gay.runescape.runeparty.HardcodedCourse;
+import gay.runescape.runeparty.courses.HardcodedCourse;
 import gay.runescape.runeparty.RunePartyPlugin;
 import gay.runescape.runeparty.SceneObjectSet;
 import gay.runescape.runeparty.TileReducer;

@@ -1,15 +1,12 @@
 package gay.runescape.runeparty.overlays;
 
-import gay.runescape.runeparty.BannerAnim;
 import gay.runescape.runeparty.GamePhase;
-import gay.runescape.runeparty.MinigameReward;
-import gay.runescape.runeparty.MinigameScore;
+import gay.runescape.runeparty.net.MinigameReward;
+import gay.runescape.runeparty.net.MinigameScore;
 import gay.runescape.runeparty.RosterReducer;
 import gay.runescape.runeparty.RunePartyColor;
 import gay.runescape.runeparty.RunePartyConfig;
-import gay.runescape.runeparty.RunePartyFonts;
 import gay.runescape.runeparty.RunePartyPlugin;
-import gay.runescape.runeparty.RunePartyRender;
 import gay.runescape.runeparty.TrueOrFalseResult;
 import gay.runescape.runeparty.WheelEntry;
 

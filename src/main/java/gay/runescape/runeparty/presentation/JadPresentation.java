@@ -1,4 +1,11 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.presentation;
+
+import gay.runescape.runeparty.RunePartyPlugin;
+import gay.runescape.runeparty.TimedBanner;
+
+import gay.runescape.runeparty.net.ApiClient;
+import gay.runescape.runeparty.net.Events;
+import gay.runescape.runeparty.net.Json;
 
 import java.util.Locale;
 
@@ -9,7 +16,7 @@ import java.util.Locale;
  * the cosmetic countdown's own start time and whether the smash has already been triggered (once
  * it has, bowing is pointless -- see isSmashTriggered, which AnnouncementOverlay uses to stop
  * showing the BOW instruction). */
-final class JadPresentation
+public final class JadPresentation
 {
     private final RunePartyPlugin plugin;
 
@@ -57,12 +64,12 @@ final class JadPresentation
     // bow-acknowledge animation rather than fired the instant this event lands. ----
     private final TimedBanner<OutcomePayload> outcome = new TimedBanner<>();
 
-    JadPresentation(RunePartyPlugin plugin)
+    public JadPresentation(RunePartyPlugin plugin)
     {
         this.plugin = plugin;
     }
 
-    void apply(ApiClient.EventOut e, boolean catchingUp)
+    public void apply(ApiClient.EventOut e, boolean catchingUp)
     {
         String type = e.type.toUpperCase(Locale.ROOT);
         switch (type)
@@ -138,7 +145,7 @@ final class JadPresentation
         }
     }
 
-    void reset()
+    public void reset()
     {
         encounterRsn = null;
         awakenedAt = 0;
@@ -150,18 +157,18 @@ final class JadPresentation
 
     // ---- awaiting-emote flag, consulted by RunePartyPlugin#onAnimationChanged as part of its
     // single priority-ordered "which gesture am I waiting for" chain ----
-    void armAwaitingBowFinish() { awaitingBowFinish = true; }
-    boolean isAwaitingBowFinish() { return awaitingBowFinish; }
-    void clearAwaitingBowFinish() { awaitingBowFinish = false; }
+    public void armAwaitingBowFinish() { awaitingBowFinish = true; }
+    public boolean isAwaitingBowFinish() { return awaitingBowFinish; }
+    public void clearAwaitingBowFinish() { awaitingBowFinish = false; }
 
-    String getEncounterRsn() { return encounterRsn; }
-    long getAwakenedAt() { return awakenedAt; }
-    long getRevealAt() { return revealAt; }
-    boolean isSmashTriggered() { return smashTriggered; }
+    public String getEncounterRsn() { return encounterRsn; }
+    public long getAwakenedAt() { return awakenedAt; }
+    public long getRevealAt() { return revealAt; }
+    public boolean isSmashTriggered() { return smashTriggered; }
 
-    String getOutcome() { return outcome.payload != null ? outcome.payload.outcome : null; }
-    String getOutcomeRsn() { return outcome.payload != null ? outcome.payload.rsn : null; }
-    long getOutcomeBannerUntil() { return outcome.until; }
+    public String getOutcome() { return outcome.payload != null ? outcome.payload.outcome : null; }
+    public String getOutcomeRsn() { return outcome.payload != null ? outcome.payload.rsn : null; }
+    public long getOutcomeBannerUntil() { return outcome.until; }
 
     /** Payload for the "You chose to/not to bow to Jad!" outcome banner -- see the JAD_DISMISSED
      * handler above. */

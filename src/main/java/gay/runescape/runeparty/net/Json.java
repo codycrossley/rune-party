@@ -1,8 +1,9 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.net;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import gay.runescape.runeparty.TrueOrFalseResult;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.coords.WorldPoint;
 
@@ -79,7 +80,6 @@ public final class Json
         }
         return out;
     }
-
 
     /** Same shape as {@link #safeIntList}, returning a primitive array instead. One malformed
      * element discards the whole array rather than skipping just that entry (unlike

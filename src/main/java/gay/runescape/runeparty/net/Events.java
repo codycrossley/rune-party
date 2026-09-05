@@ -1,4 +1,4 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.net;
 
 /** One constant per event type string the server ever sends. Never compare against a raw string
  * literal directly; always reference it from here, so a typo or rename fails to compile instead

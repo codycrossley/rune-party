@@ -1,4 +1,8 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.presentation;
+
+import gay.runescape.runeparty.RosterReducer;
+import gay.runescape.runeparty.RunePartyPlugin;
+import gay.runescape.runeparty.TimedBanner;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -10,7 +14,7 @@ import java.util.concurrent.ScheduledFuture;
  * fields, exposes triggerGameOverSequence() for RunePartyPlugin's GAME_ENDED handling to call, and
  * clears itself via reset(); RunePartyPlugin still exposes every getter under its original name,
  * just delegating here. */
-final class CeremonyPresentation
+public final class CeremonyPresentation
 {
     private final RunePartyPlugin plugin;
 
@@ -28,7 +32,7 @@ final class CeremonyPresentation
     private final TimedBanner<String> winnerRevealBanner = new TimedBanner<>(); // payload: winner rsn
     private final TimedBanner<Void> confettiBanner = new TimedBanner<>();
 
-    CeremonyPresentation(RunePartyPlugin plugin)
+    public CeremonyPresentation(RunePartyPlugin plugin)
     {
         this.plugin = plugin;
     }
@@ -47,7 +51,7 @@ final class CeremonyPresentation
     /** Kicks off the end-game awards ceremony on GAME_ENDED -- a chain of banners, each scheduled
      * behind the last (see the field block's own doc for the full sequence). No-ops if nobody's
      * actually seated. */
-    void triggerGameOverSequence()
+    public void triggerGameOverSequence()
     {
         List<RosterReducer.RosterEntry> standings = computeFinalStandings();
         if (standings.isEmpty()) return;
@@ -121,7 +125,7 @@ final class CeremonyPresentation
         });
     }
 
-    void reset()
+    public void reset()
     {
         if (gameOverTask != null) { gameOverTask.cancel(false); gameOverTask = null; }
         gameOverStandings = Collections.emptyList();
@@ -134,18 +138,18 @@ final class CeremonyPresentation
     }
 
     // ---- getters, mirrored 1:1 by RunePartyPlugin's own facade under their original names ----
-    List<RosterReducer.RosterEntry> getGameOverStandings() { return gameOverStandings; }
-    long getGameOverBannerUntil() { return gameOverBanner.until; }
-    long getWinnerIntroBannerUntil() { return winnerIntroBanner.until; }
-    long getPlaceRevealUntil() { return placeReveal.until; }
-    String getPlaceRevealRsn() { return placeReveal.payload != null ? placeReveal.payload.rsn : null; }
-    int getPlaceRevealRank() { return placeReveal.payload != null ? placeReveal.payload.rank : 0; }
-    int getPlaceRevealCoins() { return placeReveal.payload != null ? placeReveal.payload.coins : 0; }
-    int getPlaceRevealGoldenGnomes() { return placeReveal.payload != null ? placeReveal.payload.goldenGnomes : 0; }
-    long getWinnerSuspenseUntil() { return winnerSuspenseBanner.until; }
-    long getWinnerRevealUntil() { return winnerRevealBanner.until; }
-    String getWinnerRsn() { return winnerRevealBanner.payload; }
-    long getConfettiUntil() { return confettiBanner.until; }
+    public List<RosterReducer.RosterEntry> getGameOverStandings() { return gameOverStandings; }
+    public long getGameOverBannerUntil() { return gameOverBanner.until; }
+    public long getWinnerIntroBannerUntil() { return winnerIntroBanner.until; }
+    public long getPlaceRevealUntil() { return placeReveal.until; }
+    public String getPlaceRevealRsn() { return placeReveal.payload != null ? placeReveal.payload.rsn : null; }
+    public int getPlaceRevealRank() { return placeReveal.payload != null ? placeReveal.payload.rank : 0; }
+    public int getPlaceRevealCoins() { return placeReveal.payload != null ? placeReveal.payload.coins : 0; }
+    public int getPlaceRevealGoldenGnomes() { return placeReveal.payload != null ? placeReveal.payload.goldenGnomes : 0; }
+    public long getWinnerSuspenseUntil() { return winnerSuspenseBanner.until; }
+    public long getWinnerRevealUntil() { return winnerRevealBanner.until; }
+    public String getWinnerRsn() { return winnerRevealBanner.payload; }
+    public long getConfettiUntil() { return confettiBanner.until; }
 
     /** Payload for one place-reveal step in the end-game ceremony -- see schedulePlaceReveal. */
     private static final class PlaceRevealPayload

@@ -1,4 +1,11 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.presentation;
+
+import gay.runescape.runeparty.RunePartyPlugin;
+import gay.runescape.runeparty.TimedBanner;
+
+import gay.runescape.runeparty.net.ApiClient;
+import gay.runescape.runeparty.net.Events;
+import gay.runescape.runeparty.net.Json;
 
 import gay.runescape.runeparty.items.Items;
 import net.runelite.api.coords.WorldPoint;
@@ -11,7 +18,7 @@ import java.util.Locale;
  * ITEM_USED case to call (itemUsedThisTurn itself stays core, read directly by RunePartyPlugin).
  * Clears itself via reset(); RunePartyPlugin still exposes every getter under its original name,
  * just delegating here. */
-final class ItemPresentation
+public final class ItemPresentation
 {
     private final RunePartyPlugin plugin;
 
@@ -47,12 +54,12 @@ final class ItemPresentation
     private volatile WorldPoint coinTrapTriggerPoint = null;
     private volatile long coinTrapTriggerUntil = 0;
 
-    ItemPresentation(RunePartyPlugin plugin)
+    public ItemPresentation(RunePartyPlugin plugin)
     {
         this.plugin = plugin;
     }
 
-    void apply(ApiClient.EventOut e, boolean catchingUp)
+    public void apply(ApiClient.EventOut e, boolean catchingUp)
     {
         String type = e.type.toUpperCase(Locale.ROOT);
         switch (type)
@@ -130,7 +137,7 @@ final class ItemPresentation
      * calling this for the rest: the "You/&lt;rsn&gt; used &lt;item&gt;!" banner, only fired for
      * items that opt in via Item#hasUseAnnouncement -- PlaceholderItem's coin change already has
      * its own feedback. */
-    void handleItemUsed(ApiClient.EventOut e, boolean catchingUp)
+    public void handleItemUsed(ApiClient.EventOut e, boolean catchingUp)
     {
         if (catchingUp) return;
         String type = e.type.toUpperCase(Locale.ROOT);
@@ -209,7 +216,7 @@ final class ItemPresentation
         plugin.armBanner(coinTrapAnnounce, RunePartyPlugin.COIN_TRAP_ANNOUNCE_DURATION_MS, () -> victimRsn, true);
     }
 
-    void reset()
+    public void reset()
     {
         itemBanner.reset();
         itemSpinner.reset();
@@ -222,24 +229,24 @@ final class ItemPresentation
     }
 
     // ---- getters, mirrored 1:1 by RunePartyPlugin's own facade under their original names ----
-    long getItemBannerUntil() { return itemBanner.until; }
-    long getItemSpinnerStart() { return itemSpinner.start; }
-    long getItemSpinnerUntil() { return itemSpinner.until; }
-    String getItemGrantRsn() { return itemSpinner.payload != null ? itemSpinner.payload.rsn : null; }
-    String getItemGrantKey() { return itemSpinner.payload != null ? itemSpinner.payload.itemKey : null; }
-    long getItemGrantDescriptionUntil() { return itemGrantDescription.until; }
-    String getItemGrantDescriptionRsn() { return itemGrantDescription.payload != null ? itemGrantDescription.payload.rsn : null; }
-    String getItemGrantDescriptionKey() { return itemGrantDescription.payload != null ? itemGrantDescription.payload.itemKey : null; }
-    long getItemCapBlockedUntil() { return itemCapBlocked.until; }
-    String getItemCapBlockedRsn() { return itemCapBlocked.payload != null ? itemCapBlocked.payload.rsn : null; }
-    int getItemCapBlockedCap() { return itemCapBlocked.payload != null ? itemCapBlocked.payload.cap : 0; }
-    long getItemUsedAnnounceUntil() { return itemUsedAnnounce.until; }
-    String getItemUsedAnnounceRsn() { return itemUsedAnnounce.payload != null ? itemUsedAnnounce.payload.rsn : null; }
-    String getItemUsedAnnounceItemKey() { return itemUsedAnnounce.payload != null ? itemUsedAnnounce.payload.itemKey : null; }
-    long getCoinTrapAnnounceUntil() { return coinTrapAnnounce.until; }
-    String getCoinTrapAnnounceRsn() { return coinTrapAnnounce.payload; }
-    WorldPoint getCoinTrapTriggerPoint() { return coinTrapTriggerPoint; }
-    long getCoinTrapTriggerUntil() { return coinTrapTriggerUntil; }
+    public long getItemBannerUntil() { return itemBanner.until; }
+    public long getItemSpinnerStart() { return itemSpinner.start; }
+    public long getItemSpinnerUntil() { return itemSpinner.until; }
+    public String getItemGrantRsn() { return itemSpinner.payload != null ? itemSpinner.payload.rsn : null; }
+    public String getItemGrantKey() { return itemSpinner.payload != null ? itemSpinner.payload.itemKey : null; }
+    public long getItemGrantDescriptionUntil() { return itemGrantDescription.until; }
+    public String getItemGrantDescriptionRsn() { return itemGrantDescription.payload != null ? itemGrantDescription.payload.rsn : null; }
+    public String getItemGrantDescriptionKey() { return itemGrantDescription.payload != null ? itemGrantDescription.payload.itemKey : null; }
+    public long getItemCapBlockedUntil() { return itemCapBlocked.until; }
+    public String getItemCapBlockedRsn() { return itemCapBlocked.payload != null ? itemCapBlocked.payload.rsn : null; }
+    public int getItemCapBlockedCap() { return itemCapBlocked.payload != null ? itemCapBlocked.payload.cap : 0; }
+    public long getItemUsedAnnounceUntil() { return itemUsedAnnounce.until; }
+    public String getItemUsedAnnounceRsn() { return itemUsedAnnounce.payload != null ? itemUsedAnnounce.payload.rsn : null; }
+    public String getItemUsedAnnounceItemKey() { return itemUsedAnnounce.payload != null ? itemUsedAnnounce.payload.itemKey : null; }
+    public long getCoinTrapAnnounceUntil() { return coinTrapAnnounce.until; }
+    public String getCoinTrapAnnounceRsn() { return coinTrapAnnounce.payload; }
+    public WorldPoint getCoinTrapTriggerPoint() { return coinTrapTriggerPoint; }
+    public long getCoinTrapTriggerUntil() { return coinTrapTriggerUntil; }
 
     /** Payload for the item wheel reveal and the grant-description banner right behind it -- see
      * scheduleItemSpinner/scheduleItemGrantDescription. */

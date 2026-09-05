@@ -1,5 +1,6 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.courses;
 
+import gay.runescape.runeparty.TileReducer;
 import net.runelite.api.coords.WorldPoint;
 
 import java.util.ArrayList;

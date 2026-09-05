@@ -1,4 +1,4 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.net;
 
 import com.google.gson.Gson;
 import okhttp3.*;
@@ -63,7 +63,7 @@ public class EventSocket
     }
 
     /** Visible for testing -- lets tests point this at a MockWebServer instead of production. */
-    EventSocket(OkHttpClient okHttpClient, Gson gson, EventListener listener, String wsBaseUrl)
+    public EventSocket(OkHttpClient okHttpClient, Gson gson, EventListener listener, String wsBaseUrl)
     {
         // Pings let OkHttp detect a silently-dead connection (NAT timeout,
         // network partition) faster than plain TCP would on its own.

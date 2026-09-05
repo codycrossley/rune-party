@@ -1,11 +1,10 @@
 package gay.runescape.runeparty.overlays;
 
-import gay.runescape.runeparty.ApiClient;
-import gay.runescape.runeparty.CoursePreset;
+import gay.runescape.runeparty.net.ApiClient;
+import gay.runescape.runeparty.courses.CoursePreset;
 import gay.runescape.runeparty.RosterReducer;
 import gay.runescape.runeparty.RunePartyColor;
 import gay.runescape.runeparty.RunePartyPlugin;
-import gay.runescape.runeparty.RunePartyRender;
 import gay.runescape.runeparty.TileReducer;
 
 import net.runelite.api.Client;

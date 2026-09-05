@@ -1,5 +1,7 @@
 package gay.runescape.runeparty;
 
+import gay.runescape.runeparty.courses.CoursePreset;
+
 import java.awt.*;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.MouseAdapter;

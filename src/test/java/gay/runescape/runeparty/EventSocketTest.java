@@ -1,6 +1,9 @@
 package gay.runescape.runeparty;
 
 import com.google.gson.Gson;
+import gay.runescape.runeparty.net.ApiClient;
+import gay.runescape.runeparty.net.EventListener;
+import gay.runescape.runeparty.net.EventSocket;
 import okhttp3.OkHttpClient;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;

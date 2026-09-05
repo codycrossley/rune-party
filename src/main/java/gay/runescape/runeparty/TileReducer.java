@@ -1,5 +1,9 @@
 package gay.runescape.runeparty;
 
+import gay.runescape.runeparty.net.ApiClient;
+import gay.runescape.runeparty.net.Events;
+import gay.runescape.runeparty.net.Json;
+
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import net.runelite.api.coords.WorldPoint;

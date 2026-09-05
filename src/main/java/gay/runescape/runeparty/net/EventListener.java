@@ -1,4 +1,4 @@
-package gay.runescape.runeparty;
+package gay.runescape.runeparty.net;
 
 public interface EventListener
 {

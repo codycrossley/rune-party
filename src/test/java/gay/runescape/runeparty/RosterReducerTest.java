@@ -2,6 +2,7 @@ package gay.runescape.runeparty;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import gay.runescape.runeparty.net.ApiClient;
 import org.junit.Test;
 
 import java.io.IOException;
