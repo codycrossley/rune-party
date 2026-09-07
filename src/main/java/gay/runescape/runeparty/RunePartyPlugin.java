@@ -1,5 +1,6 @@
 package gay.runescape.runeparty;
 
+import gay.runescape.runeparty.courses.CourseBuilder;
 import gay.runescape.runeparty.courses.CoursePreset;
 import gay.runescape.runeparty.courses.HardcodedCourse;
 
@@ -17,6 +18,8 @@ import gay.runescape.runeparty.net.EventSocket;
 import gay.runescape.runeparty.net.EventListener;
 import gay.runescape.runeparty.net.Events;
 import gay.runescape.runeparty.net.Json;
+
+import gay.runescape.runeparty.session.SessionManager;
 
 import com.google.gson.Gson;
 import com.google.inject.Provides;
@@ -40,7 +43,6 @@ import gay.runescape.runeparty.overlays.TurfWarsScoreOverlay;
 import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.Deque;
 import java.util.EnumSet;
 import java.util.HashSet;
@@ -674,9 +676,9 @@ public class RunePartyPlugin extends Plugin
      * DICE_ROLL_DURATION_MS above whenever this roll's bonus is nonzero. */
     public static final long DICE_ROLL_BONUS_DURATION_MS = DICE_ROLL_SPIN_PHASE_MS + DICE_ROLL_BONUS_REVEAL_MS + DICE_ROLL_HOLD_MS;
 
-    @Inject private Client client;
+    @Inject public Client client; // public: CourseBuilder builds its own RuneLite menu entries directly
     @Inject private ClientThread clientThread;
-    @Inject private ConfigManager configManager;
+    @Inject public ConfigManager configManager;
     @Inject private RunePartyConfig config;
     @Inject private ClientToolbar clientToolbar;
     @Inject private OverlayManager overlayManager;
@@ -703,7 +705,7 @@ public class RunePartyPlugin extends Plugin
     private HardcodedCourseLauncherOverlay hardcodedCourseLauncherOverlay;
     private RosterReducer rosterReducer;
     public ApiClient apiClient; // public: presenters in the minigames subpackage issue their own requests
-    private EventSocket eventSocket;
+    public EventSocket eventSocket;
 
     // Per-feature presenter objects -- each owns its own fields, folds its own event types via
     // apply()/a dedicated method, and clears itself via reset(). Constructed once in startUp()
@@ -715,6 +717,12 @@ public class RunePartyPlugin extends Plugin
     private MinigamePresentation minigamePresentation;
     private JadPresentation jadPresentation;
     private ChanceSpacePresentation chanceSpacePresentation;
+    // Neither of these two is a "Presentation" -- both own real interactive behavior (building
+    // RuneLite menu entries, issuing mark/unmark-tiles requests; making create/join/session API
+    // calls) rather than cosmetic banner/timing state. Same constructed-once-in-startUp/
+    // reset()-via-resetState() convention as the presenters above.
+    private CourseBuilder courseBuilder;
+    private SessionManager sessionManager;
     private RunePartyPanel panel;
     private NavigationButton navButton;
     private RunePartyMapOverlay mapOverlay;
@@ -729,7 +737,7 @@ public class RunePartyPlugin extends Plugin
     // (TileOverlay, RunePartyMapOverlay) already falls back to a default color/label on a miss.
     private volatile Map<String, ApiClient.TileTypeOut> tileTypeCatalog = new LinkedHashMap<>();
 
-    private final ExecutorService executor = Executors.newSingleThreadExecutor(r ->
+    public final ExecutorService executor = Executors.newSingleThreadExecutor(r ->
     {
         Thread t = new Thread(r, "runeparty-actions");
         t.setDaemon(true);
@@ -763,54 +771,22 @@ public class RunePartyPlugin extends Plugin
      * it. */
     private volatile long turnEffectGateUntil = 0;
 
-    private volatile GamePhase phase = GamePhase.DISCONNECTED;
+    public volatile GamePhase phase = GamePhase.DISCONNECTED;
 
     // ---- session ----
     public volatile String gameId = null; // public: CoinRushPresentation/SandwichRushPresentation's own collect methods read this
-    private volatile String writeKey = null; // non-null only for the host
+    public volatile String writeKey = null; // public (like gameId/playerToken): non-null only for the host, read directly by CourseBuilder
     public volatile String playerToken = null; // public: CoinRushPresentation/SandwichRushPresentation's own collect methods read this
-    private volatile String joinCode = null;
-    private volatile String hostRsn = null;
     // Non-null only once this game has been permanently locked to a Standard Course (see
-    // createGameFromHardcodedCourse/ApiClient#lockStandardCourse and the STANDARD_COURSE_LOCKED
-    // handling below) -- HardcodedCourse#key, not its display name. Once set, it never goes back
-    // to null for the life of this game. Gates course-building tool visibility in RunePartyPanel.
+    // SessionManager#createGameFromHardcodedCourse/ApiClient#lockStandardCourse and the
+    // STANDARD_COURSE_LOCKED handling below) -- HardcodedCourse#key, not its display name. Once
+    // set, it never goes back to null for the life of this game. Gates course-building tool
+    // visibility in RunePartyPanel.
     private volatile String standardCourseKey = null;
 
-    // Persisted copy of the above (minus hostRsn, which the server always hands back fresh), so a
-    // plugin restart -- a client update, a crash, ./gradlew run during dev -- doesn't strand
-    // whoever it happens to (worst of all the host: see persistSession/attemptSessionResume's own
-    // doc, a lost writeKey has no reissue path at all, unlike a player's own session token). Keyed
-    // under its own ConfigManager group, deliberately separate from RunePartyConfig's own
-    // @ConfigGroup("runeparty") -- this is session state a restart should silently recover, not a
-    // user-facing setting that belongs in the config panel.
-    private static final String SESSION_CONFIG_GROUP = "runeparty-session";
-    // Attempted at most once per plugin lifetime (see attemptSessionResume, the only writer) --
-    // guards onGameTick's own call site against re-attempting every tick while waiting for
-    // localRsn() to become available after login.
-    private volatile boolean sessionResumeAttempted = false;
-
-    // ---- course building (host, LOBBY only) ----
-    private volatile boolean coursePlacementMode = false;
-    private volatile CoursePreset selectedPreset = null;
-    private volatile int presetRotationSteps = 0; // quarter-turns clockwise: 0/1/2/3 = 0/90/180/270 degrees
-    // Free-form, one-tile-at-a-time alternative to stamping down a whole CoursePreset -- see
-    // enterCustomCourseBuildMode/addCustomCourseBuildMenuEntries. Mutually exclusive with
-    // coursePlacementMode: entering either one cancels the other, same "only one placement mode
-    // armed at a time" invariant itemPlacementKey/itemTargetKey already keep for item use.
-    private volatile boolean customCourseBuildMode = false;
-    // Armed by "Connect From" -- the source pathIndex a subsequent "Connect To"/"Remove
-    // Connection" click targets. Null when not mid-connect. Client-local only, same as
-    // itemPlacementKey/itemTargetKey -- the server never hears about this until an actual
-    // mark-tiles call goes out, so there's nothing to undo server-side just by backing out of it.
-    // See TileOverlay#renderConnectFromIndicator, which reads this (via getCourseConnectFromPoint)
-    // to show which tile is actually armed -- there's otherwise nothing on screen distinguishing
-    // it from any other course tile.
-    private volatile Integer courseConnectFromIndex = null;
-
     // ---- turn engine ----
-    private volatile String currentTurnRsn = null;
-    private volatile Integer lastDiceRoll = null;
+    public volatile String currentTurnRsn = null;
+    public volatile Integer lastDiceRoll = null;
     private volatile boolean pendingRoll = false;
     // Guards the Spin-emote roll trigger against double-submitting while a roll request is in
     // flight but the server's DICE_ROLLED echo (which flips pendingRoll) hasn't landed yet -- see
@@ -970,8 +946,8 @@ public class RunePartyPlugin extends Plugin
     // doc for why): that mechanism's payload has no target field, and this banner's title needs one.
     private final TimedBanner<TeleBlockCastPayload> teleBlockCastAnnounce = new TimedBanner<>();
 
-    // ---- welcome title card (client-side, local-player-only -- see triggerWelcomeBanner) ----
-    private final TimedBanner<Void> welcomeBanner = new TimedBanner<>();
+    // welcomeBanner lives on SessionManager, along with the session-lifecycle fields/methods it's
+    // armed by (createGame/joinGame).
 
     // minigameBanner/roundCompleteBanner/minigameRewardsBanner live on MinigamePresentation, along
     // with the mini-game fields/handleEvent cases/getters they back.
@@ -1073,6 +1049,8 @@ public class RunePartyPlugin extends Plugin
         minigamePresentation = new MinigamePresentation(this);
         jadPresentation = new JadPresentation(this);
         chanceSpacePresentation = new ChanceSpacePresentation(this);
+        courseBuilder = new CourseBuilder(this);
+        sessionManager = new SessionManager(this);
 
         tileOverlay = new TileOverlay(client, config, this, tileReducer);
         overlayManager.add(tileOverlay);
@@ -1136,7 +1114,7 @@ public class RunePartyPlugin extends Plugin
         {
             @Override public void onEvent(ApiClient.EventOut e, boolean catchingUp) { handleEvent(e, catchingUp); }
             @Override public void onError(Exception e) { log.debug("EventSocket error", e); }
-            @Override public void onCaughtUp() { syncRosterSnapshot(true); refreshPanel(); }
+            @Override public void onCaughtUp() { sessionManager.syncRosterSnapshot(true); refreshPanel(); }
         });
     }
 
@@ -1321,102 +1299,16 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
-    public void createGame()
-    {
-        String host = localRsn();
-        if (host == null) return;
-
-        submitAction("Create game", () ->
-        {
-            ApiClient.CreateGameResult result = apiClient.createGame(host);
-            applyCreateGameResult(result, host);
-            addChatMessage("Created Rune Party game. Join code: " + result.joinCode);
-            triggerWelcomeBanner();
-        }, e -> addChatMessage("Failed to create game: " + e.getMessage()), this::refreshPanel);
-    }
-
-    /** Same as createGame(), but for a hard-coded course's own launcher -- creates the game
-     * exactly the same way, then commits that course's whole tile set (including its
-     * GOLDEN_GNOME_TILE stacked on START, see HardcodedCourse's own doc) in one extra mark-tiles
-     * call before announcing success, so the host lands in LOBBY with the course already built. A
-     * third call, lockStandardCourse, then permanently locks this game to that course. */
-    public void createGameFromHardcodedCourse(HardcodedCourse course)
-    {
-        String host = localRsn();
-        if (host == null) return;
-
-        submitAction("Create game", () ->
-        {
-            ApiClient.CreateGameResult result = apiClient.createGame(host);
-            applyCreateGameResult(result, host);
-            apiClient.markTiles(gameId, writeKey, course.tiles);
-            apiClient.lockStandardCourse(gameId, writeKey, course.key);
-            addChatMessage("Created Rune Party game (" + course.name + "). Join code: " + result.joinCode);
-            triggerWelcomeBanner();
-        }, e -> addChatMessage("Failed to create game: " + e.getMessage()), this::refreshPanel);
-    }
-
-    /** The session field-assignment shared by createGame()/createGameFromHardcodedCourse() --
-     * factored out purely so the hard-coded-course path can't drift from the ordinary one. */
-    private void applyCreateGameResult(ApiClient.CreateGameResult result, String host)
-    {
-        gameId = result.gameId;
-        joinCode = result.joinCode;
-        writeKey = result.writeKey;
-        playerToken = result.playerToken;
-        hostRsn = host;
-        phase = GamePhase.LOBBY;
-        persistSession();
-        connectEventStream(gameId, host);
-    }
-
-    public void joinGame(String code)
-    {
-        String self = localRsn();
-        if (self == null) return;
-
-        submitAction("Join game", () ->
-        {
-            ApiClient.JoinResult result = apiClient.joinGame(code, self);
-            gameId = result.gameId;
-            hostRsn = result.hostRsn;
-            playerToken = result.playerToken;
-            writeKey = null;
-            joinCode = code;
-            phase = GamePhase.LOBBY;
-            persistSession();
-            connectEventStream(gameId, self);
-            addChatMessage("Joined Rune Party game hosted by " + result.hostRsn);
-            triggerWelcomeBanner();
-        }, e -> addChatMessage("Failed to join game: " + e.getMessage()), this::refreshPanel);
-    }
-
-    /** {@code maxRounds} is turns-per-player -- the host sets it in the panel right before
-     * starting (see RunePartyPanel's spinner). The server won't insert the first TURN_STARTED
-     * itself; that only happens once every seated PLAYER reports standing on the START tile (see
-     * confirmStart / onGameTick's gathering check below). */
-    public void startGame(int maxRounds)
-    {
-        final String gid = gameId;
-        final String wk = writeKey;
-        if (gid == null || wk == null || maxRounds <= 1) return;
-
-        submitAction("Start game", () -> apiClient.startGame(gid, wk, maxRounds),
-            e -> addChatMessage("Failed to start game: " + e.getMessage()));
-    }
-
+    // Delegating facade -- SessionManager owns the actual state/logic. Every name/signature below
+    // is unchanged, so RunePartyPanel doesn't need to change.
+    public void createGame() { sessionManager.createGame(); }
+    public void createGameFromHardcodedCourse(HardcodedCourse course) { sessionManager.createGameFromHardcodedCourse(course); }
+    public void joinGame(String code) { sessionManager.joinGame(code); }
+    public void startGame(int maxRounds) { sessionManager.startGame(maxRounds); }
     /** Host-only: ends the game for everyone, distinct from leaveGame() which only removes the
      * caller. The resulting GAME_ENDED event (see handleEvent) is what actually flips phase to
      * ENDED for every connected client, this call and leaveGame() both just request it. */
-    public void endGame()
-    {
-        final String gid = gameId;
-        final String wk = writeKey;
-        if (gid == null || wk == null) return;
-
-        submitAction("End game", () -> apiClient.endGame(gid, wk),
-            e -> addChatMessage("Failed to end game: " + e.getMessage()));
-    }
+    public void endGame() { sessionManager.endGame(); }
 
     public void rollDice()
     {
@@ -1753,160 +1645,40 @@ public class RunePartyPlugin extends Plugin
             e -> addChatMessage("Failed to use " + Items.get(itemKey).getDisplayName() + " on " + targetRsn + ": " + e.getMessage()));
     }
 
-    public void leaveGame()
-    {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        clearPersistedSession();
-        if (self == null || gid == null || token == null) { resetState(); return; }
-
-        submitAction("Leave game", () -> apiClient.leaveGame(gid, self, token));
-        resetState();
-    }
-
+    public void leaveGame() { sessionManager.leaveGame(); }
     /** Whether the turn order already has MAX_PLAYERS seats filled -- the client-side gate on
      * "Add to Game" (menu entry and roster popup both check this). The server doesn't currently
      * enforce this cap itself, so it's a UI guard rather than a real limit. */
-    public boolean isGameFull()
-    {
-        return rosterReducer.countRole(RunePartyRole.PLAYER) >= MAX_PLAYERS;
-    }
-
-    /** Host-only: promotes a spectator into the turn order (or, symmetrically, could demote a
-     * player back to spectator). Joining a game only ever grants SPECTATOR -- see ApiClient.assignRole
-     * -- so this is the only path onto the roster's turn order. colorNumber is the host's own
-     * explicit seat-color choice for a PLAYER promotion (see addToGameMenuEntry/RunePartyPanel#
-     * buildAddToGamePopup, both of which pass one) -- null for a SPECTATOR demotion. */
-    public void assignRole(String playerRsn, RunePartyRole role, Integer colorNumber)
-    {
-        if (!isHost() || gameId == null) return;
-
-        final String gid = gameId;
-        final String wk = writeKey;
-        submitAction("Assign role", () -> apiClient.assignRole(gid, wk, playerRsn, role, colorNumber),
-            e -> addChatMessage("Failed to update " + playerRsn + "'s role: " + e.getMessage()));
-    }
-
-    /** Host-only kick, wired to the roster panel's "Remove Player" right-click entry -- same
-     * PLAYER_LEFT outcome as the target leaving on their own, so they drop out of turn order and
-     * free their seat color for a new player. A returning player gets whatever color the host
-     * picks for them at that point, rather than automatically reclaiming their old one. */
-    public void removePlayer(String playerRsn)
-    {
-        if (!isHost() || gameId == null) return;
-
-        final String gid = gameId;
-        final String wk = writeKey;
-        submitAction("Remove player", () -> apiClient.removePlayer(gid, wk, playerRsn),
-            e -> addChatMessage("Failed to remove " + playerRsn + ": " + e.getMessage()));
-    }
+    public boolean isGameFull() { return sessionManager.isGameFull(); }
+    public void assignRole(String playerRsn, RunePartyRole role, Integer colorNumber) { sessionManager.assignRole(playerRsn, role, colorNumber); }
+    /** Host-only kick, wired to the roster panel's "Remove Player" right-click entry. */
+    public void removePlayer(String playerRsn) { sessionManager.removePlayer(playerRsn); }
 
     // -------------------------------------------------------------------------
-    // Course building (host, LOBBY only) -- pick a preset, enter Place mode,
-    // then right-click a ground tile to commit its footprint there. There's
-    // no per-preset removal -- clearCourse() below is the host's one "start
-    // over" tool.
+    // Course building (host, LOBBY only) -- delegating facade, CourseBuilder owns the actual
+    // state/logic. Every name/signature below is unchanged, so RunePartyPanel/TileOverlay don't
+    // need to change.
     // -------------------------------------------------------------------------
 
-    public void selectPreset(CoursePreset preset)
-    {
-        selectedPreset = preset;
-        refreshPanel();
-    }
-
-    public void enterCoursePlacementMode()
-    {
-        if (isStandardCourseLocked()) return;
-        customCourseBuildMode = false; // mutually exclusive -- see that field's own doc
-        courseConnectFromIndex = null;
-        coursePlacementMode = true;
-        refreshPanel();
-    }
-
-    public void cancelPresetMode()
-    {
-        coursePlacementMode = false;
-        refreshPanel();
-    }
-
-    public void rotatePresetNext()
-    {
-        presetRotationSteps = (presetRotationSteps + 1) % 4;
-    }
-
-    public boolean isCustomCourseBuildMode()
-    {
-        return customCourseBuildMode;
-    }
-
-    public void enterCustomCourseBuildMode()
-    {
-        if (!isHost() || isStandardCourseLocked()) return;
-        coursePlacementMode = false; // mutually exclusive -- see customCourseBuildMode's own doc
-        customCourseBuildMode = true;
-        courseConnectFromIndex = null;
-        refreshPanel();
-    }
-
-    public void exitCustomCourseBuildMode()
-    {
-        customCourseBuildMode = false;
-        courseConnectFromIndex = null;
-        refreshPanel();
-    }
-
+    public void selectPreset(CoursePreset preset) { courseBuilder.selectPreset(preset); }
+    public void enterCoursePlacementMode() { courseBuilder.enterCoursePlacementMode(); }
     /** Unmarks every currently-committed course tile -- the host's "start over" button. */
-    public void clearCourse()
-    {
-        final String gid = gameId;
-        final String wk = writeKey;
-        if (gid == null || wk == null) return;
+    public void clearCourse() { courseBuilder.clearCourse(); }
+    public boolean isCustomCourseBuildMode() { return courseBuilder.isCustomCourseBuildMode(); }
+    public void enterCustomCourseBuildMode() { courseBuilder.enterCustomCourseBuildMode(); }
+    public void exitCustomCourseBuildMode() { courseBuilder.exitCustomCourseBuildMode(); }
+    /** The world point of the tile currently armed via "Connect From" -- see
+     * TileOverlay#renderConnectFromIndicator, the only reader. */
+    public WorldPoint getCourseConnectFromPoint() { return courseBuilder.getCourseConnectFromPoint(); }
 
-        Set<WorldPoint> uniquePoints = new HashSet<>();
-        for (TileReducer.TileEntry entry : tileReducer.snapshot()) uniquePoints.add(entry.point);
-        if (uniquePoints.isEmpty()) return;
+    // -------------------------------------------------------------------------
+    // Board interaction helpers -- Golden Gnome purchase, Click Click Click tile clicks, Fishing
+    // Contest catches, and the generic menu-hover plumbing behind all of them plus the hard-coded
+    // course launcher. Physically lived alongside course building before that moved out to its own
+    // CourseBuilder class above -- none of this is course-building itself.
+    // -------------------------------------------------------------------------
 
-        List<ApiClient.PointSpec> pointSpecs = new ArrayList<>(uniquePoints.size());
-        for (WorldPoint wp : uniquePoints)
-        {
-            pointSpecs.add(new ApiClient.PointSpec(wp.getX(), wp.getY(), wp.getPlane(), null));
-        }
-
-        submitAction("Clear course", () -> apiClient.unmarkTiles(gid, wk, pointSpecs));
-    }
-
-    private void addPresetMenuEntries()
-    {
-        Tile tile = client.getTopLevelWorldView().getSelectedSceneTile();
-        if (tile == null) return;
-        WorldPoint center = tile.getWorldLocation();
-        if (center == null) return;
-        CoursePreset preset = selectedPreset;
-        if (preset == null) return;
-
-        client.createMenuEntry(-1)
-            .setOption("Cancel")
-            .setTarget("")
-            .setType(MenuAction.RUNELITE)
-            .onClick(me -> cancelPresetMode());
-
-        client.createMenuEntry(-1)
-            .setOption("Rotate Course")
-            .setTarget("")
-            .setType(MenuAction.RUNELITE)
-            .onClick(me -> rotatePresetNext());
-
-        int degrees = presetRotationSteps * 90;
-        String suffix = degrees != 0 ? " (" + degrees + "°)" : "";
-        client.createMenuEntry(-1)
-            .setOption("<col=00FF00>Place " + preset.name + suffix + "</col>")
-            .setTarget("")
-            .setType(MenuAction.RUNELITE)
-            .onClick(me -> commitPreset(center));
-    }
-
-    /** Same "Walk here" -> custom RUNELITE entries idiom as addPresetMenuEntries, for an armed
+    /** Same "Walk here" -> custom RUNELITE entries idiom as CourseBuilder#addPresetMenuEntries, for an armed
      * requires_placement item -- only offered on the exact tile the cursor's currently over, and
      * only when that tile is genuinely one of getItemPlacementCandidates()'s own two (the server
      * would 409 on anything else anyway, this just keeps the menu from offering a doomed option).
@@ -2157,301 +1929,6 @@ public class RunePartyPlugin extends Plugin
             e -> addChatMessage("Failed to purchase the Golden Gnome: " + e.getMessage()));
     }
 
-    private void commitPreset(WorldPoint center)
-    {
-        CoursePreset preset = selectedPreset;
-        int rotationSteps = presetRotationSteps;
-        cancelPresetMode();
-        if (!isHost() || gameId == null || preset == null) return;
-
-        List<CoursePreset.PlacedTile> placed = preset.layout(center, rotationSteps);
-        List<ApiClient.TileSpec> tileSpecs = new ArrayList<>(placed.size());
-        for (int i = 0; i < placed.size(); i++)
-        {
-            CoursePreset.PlacedTile pt = placed.get(i);
-            // List order is path order (see CoursePreset's own class doc) -- this is the one
-            // place that turns "position i in the list" into an explicit pathIndex, since once
-            // this leaves as a TileSpec the server/TileReducer only ever see unordered tiles. A
-            // decorative tile (see PlacedTile#decorative) gets no pathIndex at all instead -- it's
-            // a modifier stacked on another tile's position, not a course stop of its own.
-            Integer pathIndex = pt.decorative ? null : i;
-            tileSpecs.add(new ApiClient.TileSpec(pt.point.getX(), pt.point.getY(), pt.point.getPlane(), pt.tileType, pt.color, null, pathIndex, pt.nextIndices));
-        }
-
-        final String gid = gameId;
-        final String wk = writeKey;
-        submitAction("Commit course", () -> apiClient.markTiles(gid, wk, tileSpecs));
-    }
-
-    /** Same "Walk here" -> custom RUNELITE entries idiom as addPresetMenuEntries, for free-form
-     * course building -- one tile at a time instead of a whole preset stamped down atomically.
-     * Two mutually exclusive sub-modes, switched on courseConnectFromIndex:
-     * <p>
-     * Not connecting (courseConnectFromIndex == null): a "Set Tile" submenu (see addSetTileSubmenu
-     * -- places a new tile here, or retypes the one already here in place, preserving its
-     * pathIndex/nextIndices), plus "Connect From"/"Remove All Connections" (only once nextIndices
-     * is actually non-empty)/"Remove Tile" once the hovered spot already holds a course tile.
-     * <p>
-     * Connecting (courseConnectFromIndex != null): delegates to addCourseConnectMenuEntries for
-     * "Connect To"/"Remove Connection" against whichever other tile is hovered, plus "Cancel
-     * Connecting". */
-    private void addCustomCourseBuildMenuEntries()
-    {
-        Tile tile = client.getTopLevelWorldView().getSelectedSceneTile();
-        if (tile == null) return;
-        WorldPoint point = tile.getWorldLocation();
-        if (point == null) return;
-
-        Integer connectFrom = courseConnectFromIndex;
-        if (connectFrom != null)
-        {
-            addCourseConnectMenuEntries(point, connectFrom);
-            return;
-        }
-
-        client.createMenuEntry(-1)
-            .setOption("Cancel Building")
-            .setTarget("")
-            .setType(MenuAction.RUNELITE)
-            .onClick(me -> exitCustomCourseBuildMode());
-
-        TileReducer.TileEntry existing = courseTileAt(point);
-        if (existing != null)
-        {
-            client.createMenuEntry(-1)
-                .setOption("Connect From")
-                .setTarget("")
-                .setType(MenuAction.RUNELITE)
-                .onClick(me -> { courseConnectFromIndex = existing.pathIndex; refreshPanel(); });
-
-            if (existing.nextIndices.length > 0)
-            {
-                client.createMenuEntry(-1)
-                    .setOption("<col=FF0000>Remove All Connections</col>")
-                    .setTarget("")
-                    .setType(MenuAction.RUNELITE)
-                    .onClick(me -> removeAllConnectionsAt(point));
-            }
-
-            client.createMenuEntry(-1)
-                .setOption("<col=FF0000>Remove Tile</col>")
-                .setTarget("")
-                .setType(MenuAction.RUNELITE)
-                .onClick(me -> removeCustomTileAt(point, existing.tileType));
-        }
-
-        addSetTileSubmenu(point);
-    }
-
-    /** "Set Tile" -> one entry per host-placeable tile type (see MenuEntry#createSubMenu),
-     * populated from the already-fetched catalog (getTileTypeCatalog) rather than a hardcoded
-     * copy. Two kinds of catalog entry are filtered out: Golden Gnome/Coin Trap (isModifier) are
-     * never host-authored directly, both are modifiers a separate dedicated flow places
-     * dynamically during real play; Flame Field Boundary and any future mini-game-only type
-     * (isMinigameTile) are never host-authored either, only ever spawned in bulk by a mini-game's
-     * own board swap -- placing one here would just get swept away the next time a board swap
-     * runs. */
-    private void addSetTileSubmenu(WorldPoint point)
-    {
-        MenuEntry parent = client.createMenuEntry(-1)
-            .setOption("Set Tile")
-            .setTarget("")
-            .setType(MenuAction.RUNELITE);
-
-        Menu submenu = parent.createSubMenu();
-        List<ApiClient.TileTypeOut> types = new ArrayList<>(tileTypeCatalog.values());
-        types.sort(Comparator.comparing(t -> t.displayName));
-        for (ApiClient.TileTypeOut type : types)
-        {
-            if (type.isModifier || type.isMinigameTile) continue;
-            submenu.createMenuEntry(-1)
-                .setOption(type.displayName)
-                .setTarget("")
-                .setType(MenuAction.RUNELITE)
-                .onClick(me -> setCustomTileAt(point, type.key));
-        }
-    }
-
-    /** Connecting half of addCustomCourseBuildMenuEntries, armed by "Connect From" -- offers
-     * "Connect To" (add {@code point}'s own pathIndex to {@code fromIndex}'s outgoing edges) or
-     * "Remove Connection" (remove it) depending on whether it's already there, plus "Cancel
-     * Connecting". A no-op (beyond "Cancel Connecting") if {@code point} isn't itself a course
-     * tile, is the armed source tile itself, or the armed source has since been removed out from
-     * under this -- same "doesn't offer an option the action method would just no-op/reject
-     * anyway" restraint every sibling menu-entry method here already takes. */
-    private void addCourseConnectMenuEntries(WorldPoint point, int fromIndex)
-    {
-        client.createMenuEntry(-1)
-            .setOption("Cancel Connecting")
-            .setTarget("")
-            .setType(MenuAction.RUNELITE)
-            .onClick(me -> { courseConnectFromIndex = null; refreshPanel(); });
-
-        TileReducer.TileEntry target = courseTileAt(point);
-        if (target == null || target.pathIndex == null || target.pathIndex.equals(fromIndex)) return;
-
-        TileReducer.TileEntry source = tileReducer.tileAtIndex(fromIndex);
-        if (source == null) return; // armed source was removed out from under this -- nothing left to connect from
-
-        boolean alreadyConnected = false;
-        for (int idx : tileReducer.resolveNextIndices(source))
-        {
-            if (idx == target.pathIndex) { alreadyConnected = true; break; }
-        }
-
-        if (alreadyConnected)
-        {
-            client.createMenuEntry(-1)
-                .setOption("<col=FF0000>Remove Connection</col>")
-                .setTarget("")
-                .setType(MenuAction.RUNELITE)
-                .onClick(me -> removeCustomConnection(source, target.pathIndex));
-        }
-        else
-        {
-            client.createMenuEntry(-1)
-                .setOption("<col=00FF00>Connect To</col>")
-                .setTarget("")
-                .setType(MenuAction.RUNELITE)
-                .onClick(me -> connectCustomTiles(source, target.pathIndex));
-        }
-    }
-
-    /** The course tile (has its own pathIndex) at {@code point}, or null -- see TileEntry#pathIndex's
-     * own doc for why a null pathIndex is exactly "not a course stop of its own" (a modifier).
-     * Scans tileReducer's live snapshot directly, same "the reducer is the one source of truth"
-     * reasoning findGoldenGnomeTilePoint already follows -- course sizes are small and this is only
-     * ever called from a menu-build callback, never a hot path. */
-    private TileReducer.TileEntry courseTileAt(WorldPoint point)
-    {
-        for (TileReducer.TileEntry entry : tileReducer.snapshot())
-        {
-            if (entry.pathIndex != null && entry.point.equals(point)) return entry;
-        }
-        return null;
-    }
-
-    /** The world point of the tile currently armed via "Connect From" (courseConnectFromIndex), or
-     * null if nothing's armed -- see TileOverlay#renderConnectFromIndicator, the only reader,
-     * which shows a player which tile that is. Resolves the armed pathIndex back through
-     * tileReducer's own live snapshot, returning null rather than a stale point if that tile's
-     * since been removed out from under the armed state. */
-    public WorldPoint getCourseConnectFromPoint()
-    {
-        Integer fromIndex = courseConnectFromIndex;
-        if (fromIndex == null) return null;
-        TileReducer.TileEntry entry = tileReducer.tileAtIndex(fromIndex);
-        return entry != null ? entry.point : null;
-    }
-
-    /** Places (or retypes in place) a course tile at {@code point} -- called from the "Set Tile"
-     * submenu (see addSetTileSubmenu). If {@code point} already holds a course tile, this keeps
-     * its existing pathIndex/nextIndices and just swaps tileType -- fixing a mistake without
-     * breaking whatever already links to/from it. Otherwise it's a brand new tile, appended at
-     * tileReducer.courseLength() (one past the current highest pathIndex) with no nextIndices at
-     * all -- placement alone never implies a connection to anything, so a freshly placed tile sits
-     * disconnected until the host explicitly wires it up via "Connect From"/"Connect To" (see
-     * connectCustomTiles). Deliberately doesn't reassign a fresh index after a mid-course removal
-     * left a gap -- courseLength() naturally reuses the freed slot on its own. */
-    private void setCustomTileAt(WorldPoint point, String tileTypeKey)
-    {
-        final String gid = gameId;
-        final String wk = writeKey;
-        if (gid == null || wk == null) return;
-
-        TileReducer.TileEntry existing = courseTileAt(point);
-        Integer pathIndex = existing != null ? existing.pathIndex : tileReducer.courseLength();
-        int[] nextIndices = existing != null ? existing.nextIndices : new int[0];
-
-        ApiClient.TileSpec spec = new ApiClient.TileSpec(point.getX(), point.getY(), point.getPlane(),
-            tileTypeKey, null, null, pathIndex, nextIndices);
-        submitAction("Set tile", () -> apiClient.markTiles(gid, wk, Collections.singletonList(spec)));
-    }
-
-    /** Unmarks a single course tile -- called from the "Remove Tile" menu entry. Deliberately
-     * doesn't rewrite anyone else's nextIndices to route around the gap it leaves behind: a
-     * dangling edge (explicit or default) is left for the host to notice -- RunePartyMapOverlay's
-     * own route lines make this visible immediately -- and fix by hand, rather than this guessing
-     * at which rewrite is "correct" when the removed tile was itself a fork point or a merge
-     * target. */
-    private void removeCustomTileAt(WorldPoint point, String tileTypeKey)
-    {
-        final String gid = gameId;
-        final String wk = writeKey;
-        if (gid == null || wk == null) return;
-
-        submitAction("Remove tile", () -> apiClient.unmarkTiles(gid, wk,
-            Collections.singletonList(new ApiClient.PointSpec(point.getX(), point.getY(), point.getPlane(), tileTypeKey))));
-    }
-
-    /** Bulk version of removeCustomConnection -- clears {@code point}'s own nextIndices back to
-     * empty in one call (a genuine dead end, no implicit fallback), rather than needing "Remove
-     * Connection" once per existing target -- called from "Remove All Connections" (only offered
-     * once nextIndices is actually non-empty). */
-    private void removeAllConnectionsAt(WorldPoint point)
-    {
-        final String gid = gameId;
-        final String wk = writeKey;
-        if (gid == null || wk == null) return;
-
-        TileReducer.TileEntry existing = courseTileAt(point);
-        if (existing == null || existing.pathIndex == null) return;
-
-        ApiClient.TileSpec spec = new ApiClient.TileSpec(existing.point.getX(), existing.point.getY(), existing.point.getPlane(),
-            existing.tileType, existing.color, existing.orientation, existing.pathIndex, new int[0]);
-        submitAction("Remove all connections", () -> apiClient.markTiles(gid, wk, Collections.singletonList(spec)));
-    }
-
-    /** Adds {@code targetIndex} to {@code source}'s own outgoing edges -- called from "Connect To"
-     * (see addCourseConnectMenuEntries). Additive, not replacing: keeps whatever edges source
-     * already had and just appends the new one, so connecting a second target turns a straight
-     * edge into a fork rather than silently dropping the first. Clears courseConnectFromIndex
-     * optimistically on submit, same client-local-mode reasoning cancelItemPlacement follows. */
-    private void connectCustomTiles(TileReducer.TileEntry source, int targetIndex)
-    {
-        final String gid = gameId;
-        final String wk = writeKey;
-        courseConnectFromIndex = null;
-        refreshPanel();
-        if (gid == null || wk == null || source.pathIndex == null) return;
-
-        List<Integer> edges = new ArrayList<>();
-        for (int idx : tileReducer.resolveNextIndices(source)) edges.add(idx);
-        if (!edges.contains(targetIndex)) edges.add(targetIndex);
-
-        ApiClient.TileSpec spec = new ApiClient.TileSpec(source.point.getX(), source.point.getY(), source.point.getPlane(),
-            source.tileType, source.color, source.orientation, source.pathIndex, toIntArray(edges));
-        submitAction("Connect tiles", () -> apiClient.markTiles(gid, wk, Collections.singletonList(spec)));
-    }
-
-    /** Removes {@code targetIndex} from {@code source}'s own outgoing edges -- called from
-     * "Remove Connection" (see addCourseConnectMenuEntries). If that empties the list entirely,
-     * this sends an empty nextIndices array rather than omitting the field -- the server treats
-     * the two identically, and either way source is now a genuine dead end, same as
-     * removeAllConnectionsAt's bulk version of this. */
-    private void removeCustomConnection(TileReducer.TileEntry source, int targetIndex)
-    {
-        final String gid = gameId;
-        final String wk = writeKey;
-        courseConnectFromIndex = null;
-        refreshPanel();
-        if (gid == null || wk == null || source.pathIndex == null) return;
-
-        List<Integer> edges = new ArrayList<>();
-        for (int idx : tileReducer.resolveNextIndices(source)) if (idx != targetIndex) edges.add(idx);
-
-        ApiClient.TileSpec spec = new ApiClient.TileSpec(source.point.getX(), source.point.getY(), source.point.getPlane(),
-            source.tileType, source.color, source.orientation, source.pathIndex, toIntArray(edges));
-        submitAction("Remove connection", () -> apiClient.markTiles(gid, wk, Collections.singletonList(spec)));
-    }
-
-    private static int[] toIntArray(List<Integer> list)
-    {
-        int[] arr = new int[list.size()];
-        for (int i = 0; i < arr.length; i++) arr[i] = list.get(i);
-        return arr;
-    }
-
     // -------------------------------------------------------------------------
     // Movement -- detect arrival at a rolled destination by watching the local
     // player's position every tick rather than relying on a click/animation
@@ -2461,9 +1938,9 @@ public class RunePartyPlugin extends Plugin
     @Subscribe
     public void onGameTick(GameTick event)
     {
-        if (phase == GamePhase.DISCONNECTED && !sessionResumeAttempted)
+        if (phase == GamePhase.DISCONNECTED && !sessionManager.hasAttemptedResume())
         {
-            attemptSessionResume();
+            sessionManager.attemptSessionResume();
         }
 
         if (phase != GamePhase.ACTIVE) return;
@@ -2618,14 +2095,14 @@ public class RunePartyPlugin extends Plugin
         }
 
         if (!"Walk here".equals(event.getOption())) return;
-        if (phase == GamePhase.LOBBY && isHost() && coursePlacementMode)
+        if (phase == GamePhase.LOBBY && isHost() && courseBuilder.isCoursePlacementMode())
         {
-            addPresetMenuEntries();
+            courseBuilder.addPresetMenuEntries();
             return;
         }
-        if (phase == GamePhase.LOBBY && isHost() && customCourseBuildMode)
+        if (phase == GamePhase.LOBBY && isHost() && courseBuilder.isCustomCourseBuildMode())
         {
-            addCustomCourseBuildMenuEntries();
+            courseBuilder.addCustomCourseBuildMenuEntries();
             return;
         }
         if (phase == GamePhase.ACTIVE && itemPlacementKey != null)
@@ -3015,45 +2492,6 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
-    /** Pulls a fresh /roster snapshot and merges it into RosterReducer -- the only source for the
-     * turn-order "number" every RunePartyColor lookup depends on, since it never travels in the
-     * event stream itself.
-     * <p>
-     * {@code reconcileGameState} additionally reconciles phase/currentTurnRsn/lastDiceRoll from
-     * this same snapshot -- true only for the two genuine reconnect call sites
-     * (connectEventStream's initial backlog sync, EventSocket#onCaughtUp's automatic-reconnect
-     * sync), where a full event replay has already brought these fields to the same place this
-     * snapshot independently confirms, so this is defense-in-depth rather than the primary source
-     * of truth. False for the live PLAYER_JOINED/ROLE_ASSIGNED/PLAYER_LEFT resync in handleEvent,
-     * which only ever needs fresh turn-order numbers -- letting that one reconcile game state too
-     * would risk this call's own async fetch resolving after a newer TURN_STARTED already landed
-     * live, clobbering it with a stale snapshot. */
-    private void syncRosterSnapshot(boolean reconcileGameState)
-    {
-        final String gid = gameId;
-        if (gid == null) return;
-
-        executor.submit(() ->
-        {
-            try
-            {
-                ApiClient.RosterSnapshot snapshot = apiClient.fetchRoster(gid);
-                rosterReducer.syncFromRoster(snapshot.players);
-                if (reconcileGameState)
-                {
-                    try { phase = GamePhase.valueOf(snapshot.status); }
-                    catch (IllegalArgumentException | NullPointerException ignored) { }
-                    currentTurnRsn = snapshot.currentTurnRsn;
-                    lastDiceRoll = snapshot.lastDiceRoll;
-                }
-            }
-            catch (Exception ex)
-            {
-                log.warn("Fetch roster failed", ex);
-            }
-            refreshPanel();
-        });
-    }
 
     /** Pushes turnEffectGateUntil forward to at least {@code untilTimestamp} -- called by whatever
      * just started a turn-effect visual with its own on-screen duration (currently only the
@@ -3226,161 +2664,9 @@ public class RunePartyPlugin extends Plugin
     // MinigamePresentation/ItemPresentation respectively, along with the fields/handleEvent
     // cases/getters they back.
 
-    /** Arms AnnouncementOverlay's "Welcome to Rune Party Showdown" title card -- called once, right
-     * after createGame/joinGame succeeds, for the local player only (there's no server event for
-     * this; it's purely a client-side "you're in!" splash, so it never fires for anyone already in
-     * the lobby when someone else joins). Not an armBanner call (see that method's own doc) --
-     * arms synchronously with no scheduleAfterTurnEffects wrapper, nothing to collapse. */
-    private void triggerWelcomeBanner()
-    {
-        welcomeBanner.until = System.currentTimeMillis() + WELCOME_BANNER_DURATION_MS;
-    }
-
-    /** Saves the current session (gameId/writeKey/playerToken/joinCode, keyed by the local RSN
-     * that owns it) to ConfigManager, so attemptSessionResume can recover it after a plugin
-     * restart -- called once right after createGame/joinGame's own field assignments succeed, and
-     * again after attemptSessionResume itself succeeds (to hand a fresh playerToken forward to
-     * whatever restart comes next, see that method's non-host branch). A no-op if nothing's
-     * actually joined yet. */
-    private void persistSession()
-    {
-        String self = localRsn();
-        if (self == null || gameId == null) return;
-
-        configManager.setConfiguration(SESSION_CONFIG_GROUP, "rsn", self);
-        configManager.setConfiguration(SESSION_CONFIG_GROUP, "gameId", gameId);
-        configManager.setConfiguration(SESSION_CONFIG_GROUP, "joinCode", joinCode != null ? joinCode : "");
-        if (writeKey != null) configManager.setConfiguration(SESSION_CONFIG_GROUP, "writeKey", writeKey);
-        else configManager.unsetConfiguration(SESSION_CONFIG_GROUP, "writeKey");
-        if (playerToken != null) configManager.setConfiguration(SESSION_CONFIG_GROUP, "playerToken", playerToken);
-        else configManager.unsetConfiguration(SESSION_CONFIG_GROUP, "playerToken");
-    }
-
-    private void clearPersistedSession()
-    {
-        configManager.unsetConfiguration(SESSION_CONFIG_GROUP, "rsn");
-        configManager.unsetConfiguration(SESSION_CONFIG_GROUP, "gameId");
-        configManager.unsetConfiguration(SESSION_CONFIG_GROUP, "joinCode");
-        configManager.unsetConfiguration(SESSION_CONFIG_GROUP, "writeKey");
-        configManager.unsetConfiguration(SESSION_CONFIG_GROUP, "playerToken");
-    }
-
-    /** One-shot attempt (see sessionResumeAttempted) to recover a session persistSession saved
-     * before this plugin instance existed -- called from onGameTick once the local player's RSN is
-     * actually known (a fresh plugin start races the login screen, so this can't just run from
-     * startUp()). Two genuinely different recovery paths depending on what was persisted:
-     *
-     * <p>Host (writeKey present): the persisted writeKey is the only copy that will ever exist --
-     * the server never reissues one -- so this either still works right now, or that game can
-     * never be hosted again from any client. Confirmed via checkHostSession, a read-only call,
-     * before this client resumes acting as host with it.
-     *
-     * <p>Player (no writeKey): nothing irreplaceable was lost -- rejoining with the same RSN via
-     * the ordinary joinGame call transparently reissues a fresh playerToken for the same seat, so
-     * there's no dedicated resume endpoint for this case at all.
-     *
-     * <p>Only clears the persisted session on a definitive server rejection (403/404/409): a plain
-     * IOException (server unreachable, no network yet at plugin startup) leaves it alone so the
-     * next restart gets another try, rather than a transient hiccup silently costing someone their
-     * host status for good. */
-    private void attemptSessionResume()
-    {
-        String self = localRsn();
-        if (self == null) return; // not logged in yet -- retry next tick, don't mark attempted
-
-        sessionResumeAttempted = true;
-
-        String savedRsn = configManager.getConfiguration(SESSION_CONFIG_GROUP, "rsn");
-        String savedGameId = configManager.getConfiguration(SESSION_CONFIG_GROUP, "gameId");
-        if (savedRsn == null || savedGameId == null) return; // nothing to resume
-
-        if (!self.equalsIgnoreCase(savedRsn))
-        {
-            clearPersistedSession(); // a different account logged in on this machine/profile
-            return;
-        }
-
-        String savedJoinCode = configManager.getConfiguration(SESSION_CONFIG_GROUP, "joinCode");
-        String savedWriteKey = configManager.getConfiguration(SESSION_CONFIG_GROUP, "writeKey");
-        String savedPlayerToken = configManager.getConfiguration(SESSION_CONFIG_GROUP, "playerToken");
-
-        submitAction("Resume session", () ->
-        {
-            if (savedWriteKey != null && !savedWriteKey.isEmpty())
-            {
-                ApiClient.HostSessionInfo info = apiClient.checkHostSession(savedGameId, savedWriteKey);
-                if ("ENDED".equals(info.status)) { clearPersistedSession(); return; }
-
-                gameId = savedGameId;
-                writeKey = savedWriteKey;
-                playerToken = savedPlayerToken;
-                joinCode = info.joinCode;
-                hostRsn = info.hostRsn;
-                phase = "ACTIVE".equals(info.status) ? GamePhase.ACTIVE : GamePhase.LOBBY;
-                persistSession();
-                connectEventStream(gameId, self);
-                addChatMessage("Resumed hosting Rune Party game. Join code: " + info.joinCode);
-            }
-            else if (savedJoinCode != null && !savedJoinCode.isEmpty())
-            {
-                ApiClient.JoinResult result = apiClient.joinGame(savedJoinCode, self);
-                gameId = result.gameId;
-                hostRsn = result.hostRsn;
-                playerToken = result.playerToken;
-                writeKey = null;
-                joinCode = savedJoinCode;
-                phase = GamePhase.LOBBY; // corrected immediately by GAME_STARTED if the backlog replay below shows it's actually ACTIVE
-                persistSession();
-                connectEventStream(gameId, self);
-                addChatMessage("Resumed Rune Party session hosted by " + result.hostRsn);
-            }
-            else
-            {
-                clearPersistedSession();
-            }
-        },
-        e ->
-        {
-            if (e instanceof ApiClient.ApiHttpException && ((ApiClient.ApiHttpException) e).code < 500)
-            {
-                log.debug("Rune Party session no longer resumable, clearing", e);
-                clearPersistedSession();
-            }
-            else
-            {
-                log.warn("Could not check for a resumable Rune Party session (will retry next restart)", e);
-            }
-        }, this::refreshPanel);
-    }
-
-    /** Silently replays a game's full event history via a one-time REST fetch before opening the
-     * live WebSocket -- otherwise, since EventSocket's initial connect always asks for every event
-     * from the beginning, a player joining a game already in progress would see every banner,
-     * popup, and dice-roll animation from the whole game so far fire in rapid succession as that
-     * backlog replayed. Real game state still updates from every historical event exactly as it
-     * would live -- see handleEvent's catchingUp parameter, which decides "state always applies,
-     * cosmetic timers/banners/chat only when live" for every event type. Once the backlog is
-     * applied, the live socket starts from the backlog's own latestSeq, so nothing replays twice.
-     * Falls back to the old full-live-replay behavior if the backlog fetch itself fails. */
-    private void connectEventStream(String gameId, String rsn)
-    {
-        try
-        {
-            ApiClient.ReadEventsResponse backlog = apiClient.readEvents(gameId, 0);
-            for (ApiClient.EventOut event : backlog.events)
-            {
-                handleEvent(event, true);
-            }
-            syncRosterSnapshot(true); // one fresh roster read covers every PLAYER_JOINED/ROLE_ASSIGNED/PLAYER_LEFT skipped above, instead of one REST call per historical event
-            refreshPanel();
-            eventSocket.start(gameId, backlog.latestSeq, rsn);
-        }
-        catch (Exception e)
-        {
-            log.warn("Failed to fetch event backlog before connecting -- falling back to a full live replay", e);
-            eventSocket.start(gameId, rsn);
-        }
-    }
+    // triggerWelcomeBanner/persistSession/clearPersistedSession/attemptSessionResume/
+    // connectEventStream/syncRosterSnapshot all live on SessionManager now, along with the
+    // session fields they back.
 
     // -------------------------------------------------------------------------
     // Server-pushed events
@@ -3394,7 +2680,7 @@ public class RunePartyPlugin extends Plugin
      * cosmetic (a banner, a popup timer, a chat line) is gated behind {@code !catchingUp} so a
      * player who joins mid-game, or whose connection drops and reconnects mid-game, only ever
      * sees the game's current state, not a replay of how it got there. */
-    private void handleEvent(ApiClient.EventOut e, boolean catchingUp)
+    public void handleEvent(ApiClient.EventOut e, boolean catchingUp)
     {
         if (e == null || e.type == null) return;
 
@@ -3455,7 +2741,7 @@ public class RunePartyPlugin extends Plugin
             case Events.PLAYER_LEFT:
                 if (!catchingUp)
                 {
-                    syncRosterSnapshot(false);
+                    sessionManager.syncRosterSnapshot(false);
                 }
                 break;
 
@@ -4006,7 +3292,7 @@ public class RunePartyPlugin extends Plugin
         return name != null ? Text.toJagexName(name) : null;
     }
 
-    private void resetState()
+    public void resetState()
     {
         // Leaving/disconnecting while board view is active shouldn't strand the player's camera
         // pointing straight down once they're back to whatever they were doing before -- restore
@@ -4021,11 +3307,11 @@ public class RunePartyPlugin extends Plugin
         teleBlockCastAnnounce.reset();
         itemPresentation.reset();
         turnEffectGateUntil = 0;
-        gameId = null; writeKey = null; playerToken = null; joinCode = null; hostRsn = null;
+        gameId = null; writeKey = null; playerToken = null;
+        sessionManager.reset();
         standardCourseKey = null;
         phase = GamePhase.DISCONNECTED;
-        coursePlacementMode = false; selectedPreset = null; presetRotationSteps = 0;
-        customCourseBuildMode = false; courseConnectFromIndex = null;
+        courseBuilder.reset();
         mapShowing = false;
         currentTurnRsn = null; lastDiceRoll = null; pendingRoll = false; rollRequestSubmitted = false;
         awaitingSpinFinish = false;
@@ -4039,7 +3325,6 @@ public class RunePartyPlugin extends Plugin
         maxRounds = 0; completedRounds = 0;
         playerPositions.clear();
         startConfirmSubmitted = false;
-        welcomeBanner.reset();
         gameStartBanner.reset();
         ceremonyPresentation.reset();
         goldenGnomePresentation.reset();
@@ -4060,16 +3345,16 @@ public class RunePartyPlugin extends Plugin
     public TileReducer getTileReducer() { return tileReducer; }
     public RosterReducer getRosterReducer() { return rosterReducer; }
     public String getGameId() { return gameId; }
-    public String getJoinCode() { return joinCode; }
-    public String getHostRsn() { return hostRsn; }
+    public String getJoinCode() { return sessionManager.getJoinCode(); }
+    public String getHostRsn() { return sessionManager.getHostRsn(); }
     public boolean isHost() { return writeKey != null; }
     /** True once this game has been permanently locked to a Standard Course -- see
      * standardCourseKey's own field doc. Course-building tools (RunePartyPanel's own
      * courseToolsPanel) stay hidden for the rest of this game's life once this flips true. */
     public boolean isStandardCourseLocked() { return standardCourseKey != null; }
-    public boolean isCoursePlacementMode() { return coursePlacementMode; }
-    public CoursePreset getSelectedPreset() { return selectedPreset; }
-    public int getPresetRotationSteps() { return presetRotationSteps; }
+    public boolean isCoursePlacementMode() { return courseBuilder.isCoursePlacementMode(); }
+    public CoursePreset getSelectedPreset() { return courseBuilder.getSelectedPreset(); }
+    public int getPresetRotationSteps() { return courseBuilder.getPresetRotationSteps(); }
     public String getCurrentTurnRsn() { return currentTurnRsn; }
     public Integer getLastDiceRoll() { return lastDiceRoll; }
     public boolean isPendingRoll() { return pendingRoll; }
@@ -4295,7 +3580,7 @@ public class RunePartyPlugin extends Plugin
     public String getTeleBlockCastCasterRsn() { return teleBlockCastAnnounce.payload != null ? teleBlockCastAnnounce.payload.casterRsn : null; }
     public String getTeleBlockCastTargetRsn() { return teleBlockCastAnnounce.payload != null ? teleBlockCastAnnounce.payload.targetRsn : null; }
     public long getTeleBlockCastUntil() { return teleBlockCastAnnounce.until; }
-    public long getWelcomeBannerUntil() { return welcomeBanner.until; }
+    public long getWelcomeBannerUntil() { return sessionManager.getWelcomeBannerUntil(); }
     public long getMinigameBannerUntil() { return minigamePresentation.getMinigameBannerUntil(); }
     public long getMinigameOverBannerUntil() { return minigamePresentation.getMinigameOverBannerUntil(); }
     public long getMinigameScoreBannerUntil() { return minigamePresentation.getMinigameScoreBannerUntil(); }
