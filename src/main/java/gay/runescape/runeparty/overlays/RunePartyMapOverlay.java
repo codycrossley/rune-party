@@ -196,6 +196,9 @@ public class RunePartyMapOverlay extends Overlay
         {
             if (t.point.getPlane() != plane) continue;
             if ("GOLDEN_GNOME_TILE".equals(t.tileType) || "COIN_TRAP_TILE".equals(t.tileType)) continue;
+            // Dance, Dance, RuneScape's own dance floor -- entirely a client-local visual (see
+            // DanceDanceRuneScapeOverlay), not a course landmark worth showing on this schematic.
+            if ("DDR_CENTER_TILE".equals(t.tileType)) continue;
             Point topLeft = cellTopLeft(t.point, minX, maxY, gridOriginX, gridOriginY);
             int s = CELL_SIZE - TILE_GAP;
             Color color = tileColor(t.tileType, t.color);
@@ -488,6 +491,7 @@ public class RunePartyMapOverlay extends Overlay
         for (ApiClient.TileTypeOut t : plugin.getTileTypeCatalog().values())
         {
             if (t.isModifier) continue;
+            if ("DDR_CENTER_TILE".equals(t.key)) continue; // see the tile-fill loop's own doc above
             rows.add(new LegendRow(LegendShape.SQUARE, tileColor(t.key, null), t.displayName != null ? t.displayName : t.key));
         }
         rows.add(new LegendRow(LegendShape.TRIANGLE, GOLDEN_GNOME_MARKER, modifierName("GOLDEN_GNOME_TILE", "Golden Gnome")));

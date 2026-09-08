@@ -14,8 +14,8 @@ import java.util.concurrent.TimeUnit;
 
 public class ApiClient
 {
-    // static final String BASE_URL = "http://localhost:8005/runeparty";
-    static final String BASE_URL = "https://runeparty.shrunk.studio/runeparty";
+    static final String BASE_URL = "http://localhost:8005/runeparty";
+    // static final String BASE_URL = "https://runeparty.shrunk.studio/runeparty";
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
@@ -257,6 +257,41 @@ public class ApiClient
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Submit Click, Click, Click result failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** Reports the local player's final Dance, Dance, RuneScape tally -- called exactly once per
+     * round, when the local 30-second timer elapses -- same one-shot shape as
+     * submitFishingCatch/submitClickClickClickResult. */
+    public void submitDanceDanceRuneScapeResult(String gameId, String playerRsn, String playerToken, int score) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("score", score);
+
+        try (Response resp = post("/v1/games/" + gameId + "/submit-ddr-result", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Submit Dance, Dance, RuneScape result failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** Reports how long this client's own Dance, Dance, RuneScape round will run for -- fired once
+     * at round-begin (see DanceDanceRuneScapePresentation#onRoundBegin), so the server can size its
+     * own end-of-round wait to match whichever sequence this game actually picked, without the
+     * server ever needing the sequence data itself. Every seated client computes and reports the
+     * identical value (same deterministic sequence pick), so which one's report "wins" server-side
+     * doesn't matter. */
+    public void reportDanceDanceRuneScapeRoundDuration(String gameId, String playerRsn, String playerToken, long durationMs) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("durationMs", durationMs);
+
+        try (Response resp = post("/v1/games/" + gameId + "/report-ddr-round-duration", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Report Dance, Dance, RuneScape round duration failed (" + resp.code() + "): " + raw);
         }
     }
 

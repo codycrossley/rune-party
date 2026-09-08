@@ -21,6 +21,8 @@ import gay.runescape.runeparty.net.Json;
 
 import gay.runescape.runeparty.session.SessionManager;
 
+import gay.runescape.runeparty.minigames.DanceDanceRuneScapePresentation;
+
 import com.google.gson.Gson;
 import com.google.inject.Provides;
 import gay.runescape.runeparty.items.Items;
@@ -29,6 +31,8 @@ import gay.runescape.runeparty.overlays.AnnouncementOverlay;
 import gay.runescape.runeparty.overlays.ClickClickClickOverlay;
 import gay.runescape.runeparty.overlays.CoinRushScoreboardOverlay;
 import gay.runescape.runeparty.overlays.ConfettiOverlay;
+import gay.runescape.runeparty.overlays.DanceDanceRuneScapeHudOverlay;
+import gay.runescape.runeparty.overlays.DanceDanceRuneScapeOverlay;
 import gay.runescape.runeparty.overlays.FishingCatchOverlay;
 import gay.runescape.runeparty.overlays.HardcodedCourseLauncherOverlay;
 import gay.runescape.runeparty.overlays.HotPotatoOverlay;
@@ -343,6 +347,13 @@ public class RunePartyPlugin extends Plugin
      * for the same arrival-gated gather message Arena/Turf Wars/Sandwich Rush already use, with its
      * own "pick a side" wording. */
     public static final String JADDY_KEY = "whos-your-jaddy";
+
+    /** Client-side key for the Dance, Dance, RuneScape mini-game -- must match the server's own
+     * registration, same role ARENA_KEY/FISHING_CONTEST_KEY/CLICK_CLICK_CLICK_KEY play for their
+     * own mini-games. Used by AnnouncementOverlay to swap the generic "3...2...1...BEGIN!"
+     * countdown for the same arrival-gated gather message Arena/Turf Wars/Sandwich Rush/Jaddy/Hot
+     * Potato already use. */
+    public static final String DANCE_DANCE_RUNESCAPE_KEY = "dance-dance-runescape";
 
     /** TzTok-Jad's death animation -- new to this codebase, unlike JAD_SMASH_ANIMATION_ID/
      * JAD_IDLE_ANIMATION_ID/JAD_BOW_ACKNOWLEDGE_ANIMATION_ID (all reused here from the single-Jad
@@ -702,6 +713,8 @@ public class RunePartyPlugin extends Plugin
     private HotPotatoExplosionModel hotPotatoExplosionModel;
     private TurfWarsScoreOverlay turfWarsScoreOverlay;
     private SandwichRushHudOverlay sandwichRushHudOverlay;
+    private DanceDanceRuneScapeOverlay danceDanceRuneScapeOverlay;
+    private DanceDanceRuneScapeHudOverlay danceDanceRuneScapeHudOverlay;
     private HardcodedCourseLauncherOverlay hardcodedCourseLauncherOverlay;
     private RosterReducer rosterReducer;
     public ApiClient apiClient; // public: presenters in the minigames subpackage issue their own requests
@@ -1095,6 +1108,12 @@ public class RunePartyPlugin extends Plugin
         sandwichRushHudOverlay = new SandwichRushHudOverlay(this);
         overlayManager.add(sandwichRushHudOverlay);
 
+        danceDanceRuneScapeOverlay = new DanceDanceRuneScapeOverlay(this);
+        overlayManager.add(danceDanceRuneScapeOverlay);
+
+        danceDanceRuneScapeHudOverlay = new DanceDanceRuneScapeHudOverlay(this);
+        overlayManager.add(danceDanceRuneScapeHudOverlay);
+
         hardcodedCourseLauncherOverlay = new HardcodedCourseLauncherOverlay(client, this);
         overlayManager.add(hardcodedCourseLauncherOverlay);
 
@@ -1139,6 +1158,8 @@ public class RunePartyPlugin extends Plugin
         if (hotPotatoExplosionModel != null) hotPotatoExplosionModel.clear();
         if (turfWarsScoreOverlay != null) overlayManager.remove(turfWarsScoreOverlay);
         if (sandwichRushHudOverlay != null) overlayManager.remove(sandwichRushHudOverlay);
+        if (danceDanceRuneScapeOverlay != null) overlayManager.remove(danceDanceRuneScapeOverlay);
+        if (danceDanceRuneScapeHudOverlay != null) overlayManager.remove(danceDanceRuneScapeHudOverlay);
         if (hardcodedCourseLauncherOverlay != null) { hardcodedCourseLauncherOverlay.clear(); overlayManager.remove(hardcodedCourseLauncherOverlay); }
         if (mapOverlay != null) overlayManager.remove(mapOverlay);
         if (navButton != null) clientToolbar.removeNavigation(navButton);
@@ -1887,6 +1908,21 @@ public class RunePartyPlugin extends Plugin
         return null;
     }
 
+    /** Dance, Dance, RuneScape's own anchor tile, if one is currently marked -- see
+     * DanceDanceRuneScapePresentation, the only reader, which derives the four highlightable
+     * tiles adjacent to this one purely by point arithmetic. Board-swapped by the server once the
+     * round starts (see that class's own doc), not host-placed -- but the lookup itself is
+     * identical either way, same "the reducer is the one source of truth" reasoning
+     * findGoldenGnomeTilePoint/findPondTilePoint already follow. */
+    public WorldPoint findDanceDanceRuneScapeTilePoint()
+    {
+        for (TileReducer.TileEntry entry : tileReducer.snapshot())
+        {
+            if ("DDR_CENTER_TILE".equals(entry.tileType)) return entry.point;
+        }
+        return null;
+    }
+
     /** Rolls one Fishing Contest catch -- called from onAnimationChanged the moment the local
      * player's own Headbang emote finishes (see awaitingHeadbangFinish). Re-checks
      * isFishingContestActive()/fishingCatchSubmitted here on top of onAnimationChanged's own gate
@@ -2015,6 +2051,15 @@ public class RunePartyPlugin extends Plugin
                 clickClickClickSubmitted = true;
                 submitClickClickClickResult();
             }
+        }
+
+        // Also independent of the turn engine below -- Dance, Dance, RuneScape's own highlight
+        // cycling, local scoring, and one-shot end-of-round submission all live inside this one
+        // call now (see DanceDanceRuneScapePresentation#onTick), not scattered inline the way the
+        // two client-local mini-games above still are.
+        if (isDanceDanceRuneScapeActive())
+        {
+            minigamePresentation.danceDanceRuneScape().onTick(selfPlayer);
         }
 
         // Also independent of the turn engine below -- unlike a rolled destination (pendingRoll,
@@ -3453,6 +3498,21 @@ public class RunePartyPlugin extends Plugin
     /** Lowercase rsns eliminated for the rest of this Hot Potato round -- see PlayerOverlay#
      * drawToken, the only consumer. */
     public Set<String> getHotPotatoEliminatedRsns() { return minigamePresentation.hotPotato().getEliminatedRsns(); }
+
+    public boolean isDanceDanceRuneScapeActive() { return minigamePresentation.isKeyActive(DANCE_DANCE_RUNESCAPE_KEY); }
+    /** When the current Dance, Dance, RuneScape round's own clock runs out -- 0 if no round is
+     * active yet or the round hasn't actually begun (see DanceDanceRuneScapePresentation's own
+     * onTick doc for why "begun," not just "playable," matters here). */
+    public long getDanceDanceRuneScapeEndsAt() { return minigamePresentation.danceDanceRuneScape().getEndsAt(); }
+    /** Every tile adjacent to the dance floor's anchor currently lit -- empty before the first
+     * beat, more than one entry for a chord -- see DanceDanceRuneScapeOverlay, the only consumer. */
+    public Set<DanceDanceRuneScapePresentation.Direction> getDanceDanceRuneScapeHighlightedDirections() { return minigamePresentation.danceDanceRuneScape().getHighlightedDirections(); }
+    /** When each direction was last captured (System.currentTimeMillis()), for
+     * DanceDanceRuneScapeOverlay's own brief flash -- see that class's FLASH_DURATION_MS. */
+    public Map<DanceDanceRuneScapePresentation.Direction, Long> getDanceDanceRuneScapeFlashStartTimes() { return minigamePresentation.danceDanceRuneScape().getFlashStartTimes(); }
+    /** The local player's own running tally this round -- see DanceDanceRuneScapeHudOverlay, the
+     * only consumer. Client-local only -- nobody but the local player ever sees this. */
+    public int getDanceDanceRuneScapeScore() { return minigamePresentation.danceDanceRuneScape().getScore(); }
 
     public boolean isTurfWarsActive() { return minigamePresentation.isKeyActive(TURF_WARS_KEY); }
     /** This round's own live tile tally, keyed by whatever color hex each tile is currently

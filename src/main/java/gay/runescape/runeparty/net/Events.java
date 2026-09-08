@@ -27,6 +27,14 @@ public final class Events
     public static final String COIN_RUSH_SPAWN = "COIN_RUSH_SPAWN";
     public static final String COIN_TRAP_TRIGGERED = "COIN_TRAP_TRIGGERED";
     public static final String COINS_CHANGED = "COINS_CHANGED";
+    /** Echo of the client's own submit-ddr-result call -- same "already knows its own final
+     * tally" reasoning as FISHING_CATCH_SUBMITTED's own doc just below. */
+    public static final String DDR_RESULT_SUBMITTED = "DDR_RESULT_SUBMITTED";
+    /** Echo of the client's own report-ddr-round-duration call -- fired once per round, right when
+     * DanceDanceRuneScapePresentation#onRoundBegin() picks its sequence, so the server can size its
+     * own wait for the round's end around however long that specific sequence actually takes to
+     * play through, without ever needing to know the sequence data itself. */
+    public static final String DDR_ROUND_DURATION_REPORTED = "DDR_ROUND_DURATION_REPORTED";
     public static final String DICE_ROLLED = "DICE_ROLLED";
     /** Echo of the client's own submit-fishing-catch call -- the client already knows its own
      * final tally the instant it sends it, so nothing here needs to react to the echo. */

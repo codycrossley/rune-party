@@ -271,7 +271,7 @@ public class AnnouncementOverlay extends Overlay
         renderJaddyResolvedBanner(g);
         if (RunePartyPlugin.ARENA_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.TURF_WARS_KEY.equals(plugin.getMinigameKey())
             || RunePartyPlugin.SANDWICH_RUSH_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.JADDY_KEY.equals(plugin.getMinigameKey())
-            || RunePartyPlugin.HOT_POTATO_KEY.equals(plugin.getMinigameKey()))
+            || RunePartyPlugin.HOT_POTATO_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.DANCE_DANCE_RUNESCAPE_KEY.equals(plugin.getMinigameKey()))
         {
             renderArrivalGatherMessage(g);
         }
@@ -1298,9 +1298,19 @@ public class AnnouncementOverlay extends Overlay
         int centerX = client.getCanvasWidth() / 2;
         int y = client.getCanvasHeight() / 2;
 
-        String text = RunePartyPlugin.JADDY_KEY.equals(plugin.getMinigameKey())
-            ? "Choose a side -- stand in the pink or teal zone!"
-            : "All players must stand within the arena!";
+        String text;
+        if (RunePartyPlugin.JADDY_KEY.equals(plugin.getMinigameKey()))
+        {
+            text = "Choose a side -- stand in the pink or teal zone!";
+        }
+        else if (RunePartyPlugin.DANCE_DANCE_RUNESCAPE_KEY.equals(plugin.getMinigameKey()))
+        {
+            text = "Everyone must stand on the dance floor!";
+        }
+        else
+        {
+            text = "All players must stand within the arena!";
+        }
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE));
         drawCenteredText(g, text, centerX, y, Color.WHITE, alpha);

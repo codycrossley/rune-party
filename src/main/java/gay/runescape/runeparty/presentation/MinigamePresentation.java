@@ -12,6 +12,7 @@ import gay.runescape.runeparty.net.MinigameScore;
 import com.google.gson.JsonObject;
 import gay.runescape.runeparty.minigames.ClickClickClickPresentation;
 import gay.runescape.runeparty.minigames.CoinRushPresentation;
+import gay.runescape.runeparty.minigames.DanceDanceRuneScapePresentation;
 import gay.runescape.runeparty.minigames.FishingContestPresentation;
 import gay.runescape.runeparty.minigames.HotPotatoPresentation;
 import gay.runescape.runeparty.minigames.MinigamePresentationFeature;
@@ -114,6 +115,7 @@ public final class MinigamePresentation
     private final WhosYourJaddyPresentation jaddy;
     private final TrueOrFalsePresentation trueOrFalse;
     private final HotPotatoPresentation hotPotato;
+    private final DanceDanceRuneScapePresentation danceDanceRuneScape;
     // Every feature above, keyed by its own RunePartyPlugin.*_KEY, for generic dispatch (apply's
     // default branch, onStarted/onRoundBegin/onEnded/showsFinalScore/reset) -- Arena has no entry
     // at all, since it has no client-tracked state of its own beyond this class's own generic
@@ -131,6 +133,7 @@ public final class MinigamePresentation
         this.jaddy = new WhosYourJaddyPresentation(plugin);
         this.trueOrFalse = new TrueOrFalsePresentation(plugin);
         this.hotPotato = new HotPotatoPresentation(plugin);
+        this.danceDanceRuneScape = new DanceDanceRuneScapePresentation(plugin);
 
         features.put(RunePartyPlugin.COIN_RUSH_KEY, coinRush);
         features.put(RunePartyPlugin.SANDWICH_RUSH_KEY, sandwichRush);
@@ -140,6 +143,7 @@ public final class MinigamePresentation
         features.put(RunePartyPlugin.JADDY_KEY, jaddy);
         features.put(RunePartyPlugin.TRUE_OR_FALSE_KEY, trueOrFalse);
         features.put(RunePartyPlugin.HOT_POTATO_KEY, hotPotato);
+        features.put(RunePartyPlugin.DANCE_DANCE_RUNESCAPE_KEY, danceDanceRuneScape);
     }
 
     public void apply(ApiClient.EventOut e, boolean catchingUp)
@@ -174,7 +178,6 @@ public final class MinigamePresentation
                 {
                     scheduleMinigameBanner();
                     scheduleMinigameSpinner();
-                    plugin.addChatMessage("Mini-game! " + minigameInstructions);
                 }
                 break;
 
@@ -319,14 +322,25 @@ public final class MinigamePresentation
      * instead of both appearing at once. The gate is reserved for the spin + settle-hold
      * synchronously, so the ready-check screen -- which has no timed trigger of its own -- only
      * starts reading as "the current screen" once this finishes. Not an armBanner call --
-     * minigameSpinnerStart/Until are still raw fields, never migrated to a TimedBanner. */
+     * minigameSpinnerStart/Until are still raw fields, never migrated to a TimedBanner.
+     * <p>
+     * Also nested-schedules the "Mini-game! ..." chat line to land at the exact moment the wheel
+     * visually reveals its result (MINIGAME_SPINNER_SPIN_PHASE_MS into the spin, right as it
+     * settles, still held on-screen for MINIGAME_SPINNER_HOLD_MS afterward) rather than posting it
+     * the instant this event arrives -- chat would otherwise name the chosen mini-game seconds
+     * before the wheel stops spinning, spoiling the reveal. Nested inside this callback rather than
+     * scheduled independently off the original event, same "guaranteed strictly after, regardless
+     * of scheduler jitter" reasoning MINIGAME_COUNTDOWN_STARTED's own nested schedule above uses. */
     private void scheduleMinigameSpinner()
     {
+        final String instructionsAtSpin = minigameInstructions;
         minigameSpinnerTask = plugin.scheduleAfterTurnEffects(minigameSpinnerTask, RunePartyPlugin.MINIGAME_SPINNER_DURATION_MS, () ->
         {
             minigameSpinnerStart = System.currentTimeMillis();
             minigameSpinnerUntil = minigameSpinnerStart + RunePartyPlugin.MINIGAME_SPINNER_DURATION_MS;
             plugin.extendTurnEffectGate(minigameSpinnerUntil);
+            plugin.uiTimerExec.schedule(() -> plugin.addChatMessage("Mini-game! " + instructionsAtSpin),
+                RunePartyPlugin.MINIGAME_SPINNER_SPIN_PHASE_MS, TimeUnit.MILLISECONDS);
         });
     }
 
@@ -444,4 +458,5 @@ public final class MinigamePresentation
     public WhosYourJaddyPresentation jaddy() { return jaddy; }
     public TrueOrFalsePresentation trueOrFalse() { return trueOrFalse; }
     public HotPotatoPresentation hotPotato() { return hotPotato; }
+    public DanceDanceRuneScapePresentation danceDanceRuneScape() { return danceDanceRuneScape; }
 }
