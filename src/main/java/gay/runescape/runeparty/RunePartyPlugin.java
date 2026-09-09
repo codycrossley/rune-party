@@ -874,6 +874,22 @@ public class RunePartyPlugin extends Plugin
     // cleared unconditionally in submitAction's own finallyAction the instant each call resolves,
     // not selectively on success/failure. See onGameTick's own reportMinigamePosition check.
     private final AtomicBoolean minigamePositionReportInFlight = new AtomicBoolean(false);
+    // Which mini-games actually read reportMinigamePosition's own server-side cache
+    // (MinigameContext.get_positions), and for how long -- see onGameTick's own position-heartbeat
+    // check, the only reader of these two sets. Coin Rush/Click-Click-Click/True or
+    // False/Fishing Contest never read positions at all; every other mini-game's own server module
+    // was checked directly for every get_positions() call site to build this split, not guessed:
+    //   - MINIGAMES_NEEDING_CONTINUOUS_POSITION: reads positions for the round's entire live
+    //     duration, not just to detect arrival -- Arena/Turf Wars evaluate hazard tiles/tile
+    //     capture every tick for as long as the round runs, and Who's Your Jaddy captures whoever's
+    //     standing in the winning zone at the exact (unpredictable -- damage-roll-dependent)
+    //     instant the duel resolves, which could be many ticks after round-begin.
+    //   - MINIGAMES_NEEDING_PRE_ROUND_POSITION: reads positions only inside their own
+    //     _wait_for_everyone_to_arrive gather gate, never again once MINIGAME_ROUND_BEGIN fires --
+    //     Sandwich Rush/Rainbow Rush/Dance Dance RuneScape/Hot Potato all fit this shape.
+    private static final Set<String> MINIGAMES_NEEDING_CONTINUOUS_POSITION = Set.of(ARENA_KEY, TURF_WARS_KEY, JADDY_KEY);
+    private static final Set<String> MINIGAMES_NEEDING_PRE_ROUND_POSITION = Set.of(
+        SANDWICH_RUSH_KEY, RAINBOW_RUSH_KEY, DANCE_DANCE_RUNESCAPE_KEY, HOT_POTATO_KEY);
     // ---- Fishing Contest (entirely client-local until the one final submission -- catches are
     // never reported per-catch). Every completed Headbang emote near the Fish bowl rolls one
     // catch (see onAnimationChanged's
@@ -2033,17 +2049,32 @@ public class RunePartyPlugin extends Plugin
         }
 
         // Generic (not Coin-Rush/Arena-specific) live position heartbeat -- any mini-game whose
-        // own server-side round wants to know where seated players actually are (today: the
-        // Arena's hazard tiles, and its own round-begin gate) reads this back. Gated on
-        // isMinigameActive() alone, deliberately not isMinigamePlayable() -- the Arena's round
-        // begins the instant everyone's reported position lands inside its own grid, which can
-        // happen well before the generic countdown's own fixed isMinigamePlayable() moment;
-        // gating reporting on that fixed moment would silently put a floor under how fast the
-        // Arena could ever begin. Harmless for every other mini-game, which doesn't read
-        // positions at all. Unlike every other check in this method, this one keeps firing every
-        // single tick for the whole time a mini-game is active -- minigamePositionReportInFlight
-        // only guards against piling up requests if a round-trip is unusually slow.
-        if (self != null && selfPlayer != null && isMinigameActive()
+        // own server-side round wants to know where seated players actually are reads this back.
+        // Scoped to exactly the mini-games/phases that can ever actually consume it (see
+        // MINIGAMES_NEEDING_CONTINUOUS_POSITION/MINIGAMES_NEEDING_PRE_ROUND_POSITION's own doc) --
+        // every other mini-game, and every other phase (selection spinner, ready-check, countdown,
+        // and post-round-begin for the pre-round-only set), never had a server-side reader at all,
+        // so pinging there was pure request volume for nothing. Checked on isMinigameActive() (not
+        // isMinigamePlayable()) for the continuous set specifically -- Arena/Turf Wars/Jaddy's own
+        // round-begin fires the instant everyone's reported position lands inside their own grid,
+        // which can happen well before the generic countdown's own fixed isMinigamePlayable()
+        // moment; gating reporting on that fixed moment would silently put a floor under how fast
+        // those rounds could ever begin. minigamePositionReportInFlight only guards against piling
+        // up requests if a round-trip is unusually slow.
+        // minigamePresentation.getKey() is null whenever no mini-game is active at all (the
+        // overwhelming majority of ticks, during ordinary turn-based play). Set.of(...)'s own
+        // contains(null) throws NullPointerException rather than just returning false (unlike
+        // HashSet) -- this was crashing onGameTick's entire subscriber every single tick any time
+        // no mini-game was running, taking down everything below this point in the method
+        // (confirm-start/confirm-arrival included) along with it. The explicit null check below is
+        // required, not cosmetic -- it must short-circuit before either set's own contains() ever
+        // runs.
+        String activeMinigameKey = minigamePresentation.getKey();
+        boolean needsPositionPing = activeMinigameKey != null && (
+            MINIGAMES_NEEDING_CONTINUOUS_POSITION.contains(activeMinigameKey)
+            || (MINIGAMES_NEEDING_PRE_ROUND_POSITION.contains(activeMinigameKey) && !isMinigameRoundBegun())
+        );
+        if (self != null && selfPlayer != null && isMinigameActive() && needsPositionPing
             && rosterReducer.getRole(self) == RunePartyRole.PLAYER
             && minigamePositionReportInFlight.compareAndSet(false, true))
         {
