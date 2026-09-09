@@ -78,6 +78,24 @@ public class TileOverlay extends Overlay
     private static final int TURF_WARS_FILL_ALPHA_UNCLAIMED = 60;
     private static final int TURF_WARS_FILL_ALPHA_CLAIMED = 200;
 
+    // Rainbow Rush's own six-stripe fill -- every tile shows the same six horizontal bands (a
+    // plain Pride flag, not one color per tile) rather than cycling by pathIndex, reusing
+    // RunePartyColor's existing ROYGBP-shaped first six seat colors rather than a bespoke palette
+    // so a tile's own stripes and a player's own seat color never accidentally clash elsewhere. See
+    // renderRainbowRushTile.
+    private static final Color[] RAINBOW_RUSH_STRIPE_COLORS =
+    {
+        RunePartyColor.RED.awt, RunePartyColor.ORANGE.awt, RunePartyColor.YELLOW.awt,
+        RunePartyColor.GREEN.awt, RunePartyColor.BLUE.awt, RunePartyColor.PURPLE.awt
+    };
+    // Outline color for every Rainbow Rush tile, visited or not -- a fixed neutral rather than
+    // derived from the tile's own (now multi-color) fill, same reasoning TURF_WARS_ARENA_OUTLINE_
+    // COLOR's own doc gives for its merged arena outline.
+    private static final Color RAINBOW_RUSH_OUTLINE_COLOR = new Color(255, 255, 255, 220);
+    // Full hue-wheel cycle length for renderRainbowRushStartArrow's own shimmer -- fast enough to
+    // read as "rainbow" rather than a slow, barely-perceptible drift.
+    private static final long RAINBOW_ARROW_CYCLE_MS = 2000;
+
     // For Turf Wars' own single merged arena outline (see renderArenaOutline) -- individual tiles
     // are fill-only now (no per-tile outline), so this is the *only* outline the whole grid gets.
     // A fixed neutral color, not derived from any one tile's own resolved color (unlike
@@ -176,6 +194,7 @@ public class TileOverlay extends Overlay
         renderTargetArrow(g);
         renderReturnToPositionArrow(g);
         renderStartArrow(g);
+        renderRainbowRushStartArrow(g);
         renderItemPlacementArrows(g);
         renderGoldenGnomePurchaseArrow(g);
         renderConnectFromIndicator(g);
@@ -198,6 +217,13 @@ public class TileOverlay extends Overlay
             if ("HOT_POTATO_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- same "never change color, individual fill is just noise" reasoning as Sandwich Rush's own SANDWICH_RUSH_TILE
             if ("JADDY_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline per color instead, see renderColorGroupedOutlines below -- a Jad's own zone is a fixed-color area a huge model stands on top of, not a walked path, so a per-tile fill/outline would just be noise under it
             if ("TURF_WARS_TILE".equals(entry.tileType)) { renderTurfWarsTile(g, entry); continue; } // fill only, no per-tile outline, see renderTurfWarsTile
+            // Also gated on isMinigameSelectionRevealed() -- isRainbowRushActive() alone flips true
+            // the instant MINIGAME_STARTED lands, well before the client's own selection wheel has
+            // actually spun to a stop, so recoloring the whole course on that signal alone would
+            // spoil which mini-game got picked ahead of the wheel's own reveal (same "don't spoil
+            // it early" reasoning the reveal-timed chat line already gets, see that method's own
+            // doc).
+            if (plugin.isRainbowRushActive() && plugin.isMinigameSelectionRevealed() && entry.pathIndex != null) { renderRainbowRushTile(g, entry); continue; } // recolors the live course itself in place, see renderRainbowRushTile
             Color base = resolveColor(entry.color, entry.tileType);
             renderOutlinedTile(g, entry.point, base, SOLID_STROKE);
         }
@@ -516,6 +542,28 @@ public class TileOverlay extends Overlay
         drawBouncingArrowWithLabel(g, start.point, "Start Here!", defaultColorFor("START"));
     }
 
+    /** Draws the same "gather here" arrow over the START tile for Rainbow Rush's own gather phase
+     * -- between its own ready-check countdown actually revealing (same countdownRevealed gate
+     * AnnouncementOverlay#renderArrivalGatherMessage uses, so this never appears mid-ready-check,
+     * before the wheel's already-revealed pick has even been readied up on) and MINIGAME_ROUND_BEGIN.
+     * Shown to every client, not just the local player -- everyone has to physically walk there,
+     * same as renderStartArrow's own pre-game gather arrow. Cycles through the full hue wheel
+     * instead of one fixed color, so it reads as "rainbow" rather than reusing START's plain green. */
+    private void renderRainbowRushStartArrow(Graphics2D g)
+    {
+        if (!plugin.isRainbowRushActive() || plugin.isMinigameRoundBegun()) return;
+        boolean countdownRevealed = plugin.isMinigameCountdownStarted()
+            && (plugin.isMinigameCountdownSkippedForClient() || plugin.getMinigameCountdownBannerUntil() != 0);
+        if (!countdownRevealed) return;
+
+        TileReducer.TileEntry start = tileReducer.tileAtIndex(0);
+        if (start == null) return;
+
+        float hue = (System.currentTimeMillis() % RAINBOW_ARROW_CYCLE_MS) / (float) RAINBOW_ARROW_CYCLE_MS;
+        Color rainbow = Color.getHSBColor(hue, 0.85f, 1f);
+        drawBouncingArrowWithLabel(g, start.point, "Start Here!", rainbow);
+    }
+
     /** "Place" arrows over the two candidate tiles (one step ahead, one step behind the local
      * player's own current course position) while a requires_placement item is armed -- see
      * RunePartyPlugin#beginItemPlacement/getItemPlacementCandidates. Local-only: nobody but the
@@ -732,6 +780,50 @@ public class TileOverlay extends Overlay
 
             g.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), fillAlpha));
             g.fill(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
+        }
+    }
+
+    /** Draws one Rainbow Rush tile -- unlike Turf Wars' fill-only tiles (renderTurfWarsTile), this
+     * recolors a real course tile in place rather than a dedicated swapped-in arena, so it keeps
+     * its own individual outline the same way every ordinary course tile does (see this class's own
+     * doc on why a walked path renders that way). Outline only (no fill) until the local player has
+     * personally stepped on it (plugin.isRainbowRushTileVisited) -- see RainbowRushPresentation,
+     * which tracks that per-player, not here. Once visited, fills with all six
+     * RAINBOW_RUSH_STRIPE_COLORS as equal horizontal bands (a plain Pride flag on every tile, not
+     * one color per tile), clipped to this tile's own rounded-inset shape so the bands still read
+     * as belonging to this one tile even though {@code poly} is a perspective-projected quad, not
+     * an axis-aligned rectangle. */
+    private void renderRainbowRushTile(Graphics2D g, TileReducer.TileEntry entry)
+    {
+        boolean visited = plugin.isRainbowRushTileVisited(entry.pathIndex);
+
+        Collection<WorldPoint> localPoints = WorldPoint.toLocalInstance(client.getTopLevelWorldView(), entry.point);
+        for (WorldPoint local : localPoints)
+        {
+            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), local);
+            if (lp == null) continue;
+
+            Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+            if (poly == null) continue;
+
+            Path2D shape = roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX);
+            if (visited)
+            {
+                Shape oldClip = g.getClip();
+                g.clip(shape);
+                Rectangle bounds = shape.getBounds();
+                int stripeCount = RAINBOW_RUSH_STRIPE_COLORS.length;
+                int bandHeight = Math.max(1, (bounds.height + stripeCount - 1) / stripeCount);
+                for (int i = 0; i < stripeCount; i++)
+                {
+                    g.setColor(RAINBOW_RUSH_STRIPE_COLORS[i]);
+                    g.fillRect(bounds.x, bounds.y + i * bandHeight, bounds.width, bandHeight);
+                }
+                g.setClip(oldClip);
+            }
+            g.setColor(RAINBOW_RUSH_OUTLINE_COLOR);
+            g.setStroke(SOLID_STROKE);
+            g.draw(shape);
         }
     }
 

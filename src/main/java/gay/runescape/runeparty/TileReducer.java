@@ -160,6 +160,23 @@ public class TileReducer
         return max + 1;
     }
 
+    /** The actual number of real course tiles marked (every distinct pathIndex, decoratives
+     * excluded) -- unlike courseLength(), this is correct even when a host-edited course has gaps
+     * in its own pathIndex sequence (a tile removed/reconnected mid-course leaves a hole, since
+     * commit never renumbers the tiles around it). Used by Rainbow Rush's own win condition
+     * (RainbowRushPresentation), which needs "how many distinct tiles actually exist to visit," not
+     * "one past the highest index" -- courseLength() would demand more tiles than a gappy course
+     * can ever actually supply, making a real finish impossible. */
+    public int realTileCount()
+    {
+        int count = 0;
+        for (TileEntry e : tiles.values())
+        {
+            if (e.pathIndex != null) count++;
+        }
+        return count;
+    }
+
     /** A tile's outgoing graph edges -- always exactly its own explicit nextIndices, never
      * inferred (see TileEntry#nextIndices's own doc). Kept as its own method, rather than every
      * caller reading entry.nextIndices directly, so route-line rendering here always agrees with

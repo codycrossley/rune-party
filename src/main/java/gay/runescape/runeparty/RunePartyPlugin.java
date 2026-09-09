@@ -355,6 +355,33 @@ public class RunePartyPlugin extends Plugin
      * Potato already use. */
     public static final String DANCE_DANCE_RUNESCAPE_KEY = "dance-dance-runescape";
 
+    /** Client-side key for the Rainbow Rush mini-game -- must match the server's own registration,
+     * same role every other {@code *_KEY} plays for its own mini-game. Unlike every board-swapping
+     * mini-game above, Rainbow Rush never swaps the board at all -- it temporarily recolors the
+     * live main course itself (see TileOverlay#renderRainbowRushTile), and its round has no fixed
+     * duration: it ends the instant some player's own RainbowRushPresentation reports having
+     * visited every course tile, with RAINBOW_RUSH_MAX_DURATION_MS below as a server-enforced
+     * backup ceiling only. */
+    public static final String RAINBOW_RUSH_KEY = "rainbow-rush";
+
+    /** Backup ceiling on a Rainbow Rush round -- not a normal win condition (see RAINBOW_RUSH_KEY's
+     * own doc), just a failsafe in case nobody ever manages to visit every course tile (e.g. an
+     * unreachable fork in a host-built course). Five minutes, deliberately much longer than every
+     * other mini-game's own fixed COIN_RUSH_DURATION_MS-shaped timer, since finishing this one
+     * means physically walking the *entire* course rather than a compact arena. */
+    public static final long RAINBOW_RUSH_MAX_DURATION_MS = 300_000;
+
+    /** How long each light of Rainbow Rush's own "traffic light" get-ready sequence stays lit --
+     * red, then orange, then green (see AnnouncementOverlay#renderRainbowRushTrafficLight) --
+     * purely a client-local animation, timed off MINIGAME_ROUND_BEGIN's own arrival timestamp
+     * (RainbowRushPresentation#getRoundStartAt) rather than any dedicated server event, since every
+     * client already receives that one event at essentially the same moment. Doubles as the real
+     * gate on RainbowRushPresentation#onTick actually starting to track visited tiles -- nothing
+     * should count as "visited" while the light's still red/orange, or a fast player could score a
+     * tile before the on-screen "Begin!" even appears. */
+    public static final long RAINBOW_RUSH_LIGHT_PHASE_MS = 1000;
+    public static final long RAINBOW_RUSH_TRAFFIC_LIGHT_MS = 3 * RAINBOW_RUSH_LIGHT_PHASE_MS;
+
     /** TzTok-Jad's death animation -- new to this codebase, unlike JAD_SMASH_ANIMATION_ID/
      * JAD_IDLE_ANIMATION_ID/JAD_BOW_ACKNOWLEDGE_ANIMATION_ID (all reused here from the single-Jad
      * Jad Tile encounter, see JadPresentation/JadEncounter) -- played once, by the losing side's
@@ -2062,6 +2089,15 @@ public class RunePartyPlugin extends Plugin
             minigamePresentation.danceDanceRuneScape().onTick(selfPlayer);
         }
 
+        // Also independent of the turn engine below -- Rainbow Rush's own local visited-tile
+        // tracking and one-shot finish report both live inside this one call (see
+        // RainbowRushPresentation#onTick), same shape as Dance, Dance, RuneScape's own onTick just
+        // above.
+        if (isRainbowRushActive())
+        {
+            minigamePresentation.rainbowRush().onTick(selfPlayer);
+        }
+
         // Also independent of the turn engine below -- unlike a rolled destination (pendingRoll,
         // only ever true on the local player's own turn), a Home Teleport arrival can still be
         // owed well after the turn it was armed on, whosever turn it currently is (see
@@ -3426,6 +3462,22 @@ public class RunePartyPlugin extends Plugin
     public long getMinigameSpinnerStart() { return minigamePresentation.getMinigameSpinnerStart(); }
     public long getMinigameSpinnerUntil() { return minigamePresentation.getMinigameSpinnerUntil(); }
     public boolean isMinigameSpinnerSkippedForClient() { return minigamePresentation.isMinigameSpinnerSkippedForClient(); }
+
+    /** Whether this client has actually seen the mini-game selection wheel settle on its result
+     * yet (or skipped straight to "already known," via catch-up) -- the exact same instant
+     * scheduleMinigameSpinner's own nested chat line already waits for, so the chosen mini-game's
+     * name is never spoiled ahead of the wheel's own reveal. Any board-state change that's specific
+     * to which mini-game got picked (e.g. Rainbow Rush recoloring the course, see TileOverlay)
+     * should gate on this rather than isMinigameActive()/isRainbowRushActive() alone -- those flip
+     * true the instant MINIGAME_STARTED lands, well before the wheel has actually spun to a stop. */
+    public boolean isMinigameSelectionRevealed()
+    {
+        if (minigamePresentation.isMinigameSpinnerSkippedForClient()) return true;
+        long start = minigamePresentation.getMinigameSpinnerStart();
+        if (start == 0) return false;
+        return System.currentTimeMillis() - start >= MINIGAME_SPINNER_SPIN_PHASE_MS;
+    }
+
     // Delegating facade -- ItemPresentation owns the actual state. Every name/signature below is
     // unchanged, so no external caller (AnnouncementOverlay, TileOverlay) needs to change.
     public long getItemBannerUntil() { return itemPresentation.getItemBannerUntil(); }
@@ -3513,6 +3565,21 @@ public class RunePartyPlugin extends Plugin
     /** The local player's own running tally this round -- see DanceDanceRuneScapeHudOverlay, the
      * only consumer. Client-local only -- nobody but the local player ever sees this. */
     public int getDanceDanceRuneScapeScore() { return minigamePresentation.danceDanceRuneScape().getScore(); }
+
+    public boolean isRainbowRushActive() { return minigamePresentation.isKeyActive(RAINBOW_RUSH_KEY); }
+    /** Whether the local player has personally stood on the course tile at {@code pathIndex} yet
+     * this round -- see TileOverlay#renderRainbowRushTile, the only consumer: outline-only until
+     * this flips true, filled solid after. */
+    public boolean isRainbowRushTileVisited(int pathIndex) { return minigamePresentation.rainbowRush().isVisited(pathIndex); }
+    /** The local player's own running count of distinct course tiles visited this round. */
+    public int getRainbowRushVisitedCount() { return minigamePresentation.rainbowRush().getVisitedCount(); }
+    /** When Rainbow Rush's own backup ceiling kicks in if nobody's finished by then -- 0 if no
+     * round is active yet. Not a normal win condition, see RAINBOW_RUSH_KEY's own doc. */
+    public long getRainbowRushEndsAt() { return minigamePresentation.rainbowRush().getEndsAt(); }
+    /** When MINIGAME_ROUND_BEGIN actually landed for this round -- 0 if the round hasn't begun yet.
+     * See AnnouncementOverlay#renderRainbowRushTrafficLight, the only consumer: the traffic light
+     * sequence is timed purely off this one client-local timestamp. */
+    public long getRainbowRushRoundStartAt() { return minigamePresentation.rainbowRush().getRoundStartAt(); }
 
     public boolean isTurfWarsActive() { return minigamePresentation.isKeyActive(TURF_WARS_KEY); }
     /** This round's own live tile tally, keyed by whatever color hex each tile is currently

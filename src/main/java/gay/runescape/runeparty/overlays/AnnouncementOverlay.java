@@ -115,6 +115,16 @@ public class AnnouncementOverlay extends Overlay
     private static final float MINIGAME_READY_CHECK_LINE_SIZE = 22f;
     private static final int MINIGAME_READY_CHECK_LINE_HEIGHT = 28;
 
+    // Rainbow Rush's own traffic-light get-ready beat -- see renderRainbowRushTrafficLight.
+    private static final int TRAFFIC_LIGHT_DOT_RADIUS = 22;
+    private static final int TRAFFIC_LIGHT_GAP = 14;
+    private static final int TRAFFIC_LIGHT_PADDING = 20;
+    private static final int TRAFFIC_LIGHT_ARC = 24;
+    private static final int TRAFFIC_LIGHT_GLOW_EXTRA_PX = 10;
+    private static final int TRAFFIC_LIGHT_GLOW_ALPHA = 90;
+    private static final Color TRAFFIC_LIGHT_HOUSING_COLOR = new Color(20, 20, 20, 200);
+    private static final Color TRAFFIC_LIGHT_HOUSING_BORDER_COLOR = new Color(255, 255, 255, 160);
+
     private static final float MINIGAME_COUNTDOWN_SIZE = 90f;
     private static final long MINIGAME_COUNTDOWN_POP_MS = 260;
     private static final Color MINIGAME_COUNTDOWN_NUMBER_COLOR = RAINBOW_YELLOW;
@@ -271,7 +281,8 @@ public class AnnouncementOverlay extends Overlay
         renderJaddyResolvedBanner(g);
         if (RunePartyPlugin.ARENA_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.TURF_WARS_KEY.equals(plugin.getMinigameKey())
             || RunePartyPlugin.SANDWICH_RUSH_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.JADDY_KEY.equals(plugin.getMinigameKey())
-            || RunePartyPlugin.HOT_POTATO_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.DANCE_DANCE_RUNESCAPE_KEY.equals(plugin.getMinigameKey()))
+            || RunePartyPlugin.HOT_POTATO_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.DANCE_DANCE_RUNESCAPE_KEY.equals(plugin.getMinigameKey())
+            || RunePartyPlugin.RAINBOW_RUSH_KEY.equals(plugin.getMinigameKey()))
         {
             renderArrivalGatherMessage(g);
         }
@@ -279,6 +290,7 @@ public class AnnouncementOverlay extends Overlay
         {
             renderMinigameCountdown(g);
         }
+        renderRainbowRushTrafficLight(g);
         renderTrueOrFalseReveal(g);
         renderTrueOrFalseQuestion(g);
         renderMinigameOverBanner(g);
@@ -1307,6 +1319,10 @@ public class AnnouncementOverlay extends Overlay
         {
             text = "Everyone must stand on the dance floor!";
         }
+        else if (RunePartyPlugin.RAINBOW_RUSH_KEY.equals(plugin.getMinigameKey()))
+        {
+            text = "Everyone must stand on the Start tile!";
+        }
         else
         {
             text = "All players must stand within the arena!";
@@ -1314,6 +1330,82 @@ public class AnnouncementOverlay extends Overlay
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE));
         drawCenteredText(g, text, centerX, y, Color.WHITE, alpha);
+    }
+
+    /** Rainbow Rush's own "get ready" beat, shown center-screen right where renderArrivalGatherMessage
+     * just was -- the two never overlap (that one hides the instant MINIGAME_ROUND_BEGIN lands, this
+     * one only ever shows after). Three dots in a housing, lighting up red -> orange -> green in
+     * turn, RunePartyPlugin#RAINBOW_RUSH_LIGHT_PHASE_MS apiece, "Begin!" popping in alongside green.
+     * Timed purely off RainbowRushPresentation#getRoundStartAt (every client receives
+     * MINIGAME_ROUND_BEGIN at essentially the same moment, so no dedicated server event is needed
+     * just to synchronize a 3-second cosmetic). Disappears once the sequence finishes --
+     * RainbowRushPresentation#onTick's own guard is timed off this exact same window, so actual
+     * play is already live underneath by the time this vanishes. */
+    private void renderRainbowRushTrafficLight(Graphics2D g)
+    {
+        if (!plugin.isRainbowRushActive() || !plugin.isMinigameRoundBegun()) return;
+        long startAt = plugin.getRainbowRushRoundStartAt();
+        if (startAt == 0) return;
+        long elapsed = System.currentTimeMillis() - startAt;
+        if (elapsed >= RunePartyPlugin.RAINBOW_RUSH_TRAFFIC_LIGHT_MS) return;
+
+        int phase = (int) Math.min(2, elapsed / RunePartyPlugin.RAINBOW_RUSH_LIGHT_PHASE_MS); // 0=red, 1=orange, 2=green
+
+        int centerX = client.getCanvasWidth() / 2;
+        int centerY = client.getCanvasHeight() / 2;
+
+        int boxWidth = TRAFFIC_LIGHT_DOT_RADIUS * 2 + TRAFFIC_LIGHT_PADDING * 2;
+        int boxHeight = TRAFFIC_LIGHT_DOT_RADIUS * 6 + TRAFFIC_LIGHT_GAP * 2 + TRAFFIC_LIGHT_PADDING * 2;
+        int boxLeft = centerX - boxWidth / 2;
+        int boxTop = centerY - boxHeight / 2 - 30;
+
+        g.setColor(TRAFFIC_LIGHT_HOUSING_COLOR);
+        g.fillRoundRect(boxLeft, boxTop, boxWidth, boxHeight, TRAFFIC_LIGHT_ARC, TRAFFIC_LIGHT_ARC);
+        g.setColor(TRAFFIC_LIGHT_HOUSING_BORDER_COLOR);
+        g.setStroke(new BasicStroke(2f));
+        g.drawRoundRect(boxLeft, boxTop, boxWidth, boxHeight, TRAFFIC_LIGHT_ARC, TRAFFIC_LIGHT_ARC);
+
+        Color[] litColors = { RunePartyColor.RED.awt, RunePartyColor.ORANGE.awt, RunePartyColor.GREEN.awt };
+        for (int i = 0; i < litColors.length; i++)
+        {
+            int dotCenterY = boxTop + TRAFFIC_LIGHT_PADDING + TRAFFIC_LIGHT_DOT_RADIUS
+                + i * (TRAFFIC_LIGHT_DOT_RADIUS * 2 + TRAFFIC_LIGHT_GAP);
+            drawTrafficLightDot(g, centerX, dotCenterY, litColors[i], i == phase);
+        }
+
+        if (phase == 2)
+        {
+            long withinPhase = elapsed - 2L * RunePartyPlugin.RAINBOW_RUSH_LIGHT_PHASE_MS;
+            float scale = withinPhase < MINIGAME_COUNTDOWN_POP_MS
+                ? 1.4f - 0.4f * (withinPhase / (float) MINIGAME_COUNTDOWN_POP_MS)
+                : 1f;
+            g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_COUNTDOWN_SIZE * 0.55f * scale));
+            drawCenteredRainbowText(g, "Begin!", RAINBOW_LETTER_COLORS, centerX, boxTop + boxHeight + 50, 1f);
+        }
+    }
+
+    /** One traffic-light dot -- a bright glow halo plus full-brightness fill while lit, a plain
+     * dark/desaturated fill while not, same "lit vs unclaimed" contrast TileOverlay's own claimed-
+     * tile fills already lean on. */
+    private void drawTrafficLightDot(Graphics2D g, int centerX, int centerY, Color color, boolean lit)
+    {
+        if (lit)
+        {
+            g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), TRAFFIC_LIGHT_GLOW_ALPHA));
+            int glowRadius = TRAFFIC_LIGHT_DOT_RADIUS + TRAFFIC_LIGHT_GLOW_EXTRA_PX;
+            g.fillOval(centerX - glowRadius, centerY - glowRadius, glowRadius * 2, glowRadius * 2);
+            g.setColor(color);
+        }
+        else
+        {
+            g.setColor(new Color(color.getRed() / 4, color.getGreen() / 4, color.getBlue() / 4));
+        }
+        g.fillOval(centerX - TRAFFIC_LIGHT_DOT_RADIUS, centerY - TRAFFIC_LIGHT_DOT_RADIUS,
+            TRAFFIC_LIGHT_DOT_RADIUS * 2, TRAFFIC_LIGHT_DOT_RADIUS * 2);
+        g.setColor(TRAFFIC_LIGHT_HOUSING_BORDER_COLOR);
+        g.setStroke(new BasicStroke(2f));
+        g.drawOval(centerX - TRAFFIC_LIGHT_DOT_RADIUS, centerY - TRAFFIC_LIGHT_DOT_RADIUS,
+            TRAFFIC_LIGHT_DOT_RADIUS * 2, TRAFFIC_LIGHT_DOT_RADIUS * 2);
     }
 
     /** Draws the Who's Your Jaddy? duel-resolved reveal, up for JADDY_RESOLVED_BANNER_DURATION_MS
