@@ -17,6 +17,7 @@ public final class Items
         REGISTRY.register(new CoinTrapItem("coin-trap", "Coin Trap"));
         REGISTRY.register(new TeleBlockItem("tele-block", "Tele Block"));
         REGISTRY.register(new HomeTeleportItem("tele-home", "Home Teleport"));
+        REGISTRY.register(new GnomeGliderItem("gnome-glider", "Gnome Glider"));
     }
 
     public static Item get(String key)
