@@ -1,16 +1,21 @@
 package gay.runescape.runeparty.items;
 
-import java.awt.Color;
+import java.awt.AlphaComposite;
+import java.awt.Composite;
 import java.awt.Graphics2D;
-import java.awt.Polygon;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
+import javax.imageio.ImageIO;
+import lombok.extern.slf4j.Slf4j;
 
-/** Placed on a tile rather than resolved instantly (see requiresPlacement). No bundled icon asset,
- * so the wheel/inventory icon is procedural -- a dark jaw-trap glyph with a gold coin caught in it.
- * The in-world model once placed is rendered separately by TileOverlay. */
+/** Placed on a tile rather than resolved instantly (see requiresPlacement). The in-world model
+ * once placed is rendered separately by TileOverlay -- drawIcon below is only the wheel/inventory
+ * glyph. */
+@Slf4j
 public class CoinTrapItem implements Item
 {
-    private static final Color JAW_COLOR = new Color(90, 60, 40);
-    private static final Color COIN_COLOR = new Color(255, 215, 0);
+    private static final BufferedImage ICON = loadIcon();
 
     private final String key;
     private final String displayName;
@@ -63,31 +68,28 @@ public class CoinTrapItem implements Item
         return "It steals coins from anyone but " + (isLocalPlayer ? "you" : "them") + " who lands on it.";
     }
 
-    /** Two inward-facing triangular jaws (like a bear trap) around a small gold coin -- reads as
-     * "a trap baited with coins" at wheel-icon size without needing a real model/image asset. */
     @Override
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
-        int half = size / 2;
-        int a = Math.max(0, Math.min(255, Math.round(alpha * 255)));
+        if (ICON == null) return;
 
-        g.setColor(new Color(JAW_COLOR.getRed(), JAW_COLOR.getGreen(), JAW_COLOR.getBlue(), a));
-        Polygon leftJaw = new Polygon();
-        leftJaw.addPoint(x - half, y - half);
-        leftJaw.addPoint(x - half / 4, y);
-        leftJaw.addPoint(x - half, y + half);
-        g.fillPolygon(leftJaw);
+        Composite original = g.getComposite();
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, Math.min(1f, alpha))));
+        g.drawImage(ICON, x - size / 2, y - size / 2, size, size, null);
+        g.setComposite(original);
+    }
 
-        Polygon rightJaw = new Polygon();
-        rightJaw.addPoint(x + half, y - half);
-        rightJaw.addPoint(x + half / 4, y);
-        rightJaw.addPoint(x + half, y + half);
-        g.fillPolygon(rightJaw);
-
-        int coinR = Math.max(3, size / 6);
-        g.setColor(new Color(COIN_COLOR.getRed(), COIN_COLOR.getGreen(), COIN_COLOR.getBlue(), a));
-        g.fillOval(x - coinR, y - coinR, coinR * 2, coinR * 2);
-        g.setColor(new Color(0, 0, 0, a));
-        g.drawOval(x - coinR, y - coinR, coinR * 2, coinR * 2);
+    private static BufferedImage loadIcon()
+    {
+        try (InputStream is = CoinTrapItem.class.getResourceAsStream("/gay/runescape/runeparty/item_icons/coin-trap-icon.png"))
+        {
+            if (is == null) throw new IOException("coin-trap-icon.png resource not found");
+            return ImageIO.read(is);
+        }
+        catch (IOException e)
+        {
+            log.warn("Failed to load the Coin Trap icon", e);
+            return null;
+        }
     }
 }
