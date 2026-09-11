@@ -295,6 +295,25 @@ public class ApiClient
         }
     }
 
+    /** Reports the local player's own one-shot, unconditional result for the current Repeat After
+     * Me round -- called exactly once per round, when the local challenge-window timer elapses,
+     * regardless of whether every target tile was actually hit (completed can be false). Same
+     * one-shot shape submitDanceDanceRuneScapeResult uses, except a stale retry for a round that's
+     * already moved on gets rejected server-side (see app.py's submit_repeat_after_me_result). */
+    public void submitRepeatAfterMeResult(String gameId, String playerRsn, String playerToken, int roundNumber, boolean completed) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("roundNumber", roundNumber);
+        body.addProperty("completed", completed);
+
+        try (Response resp = post("/v1/games/" + gameId + "/submit-repeat-after-me-result", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Submit Repeat After Me result failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     /** Buys the Golden Gnome standing at (x, y, plane). A free side-action during the local
      * player's pending roll, triggered by a right-click menu entry rather than an emote -- doesn't
      * touch pendingRoll or advance the turn, so confirmArrival is still a separate call afterward.

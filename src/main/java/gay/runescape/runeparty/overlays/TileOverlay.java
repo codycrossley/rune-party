@@ -16,6 +16,7 @@ import gay.runescape.runeparty.models.GoldenGnomeModel;
 import gay.runescape.runeparty.models.PondModel;
 import gay.runescape.runeparty.models.SandwichItemModel;
 import gay.runescape.runeparty.models.TableModel;
+import gay.runescape.runeparty.minigames.RepeatAfterMePresentation;
 import net.runelite.api.Client;
 import net.runelite.api.Perspective;
 import net.runelite.api.Player;
@@ -30,6 +31,7 @@ import java.awt.*;
 import java.awt.geom.Path2D;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -110,6 +112,25 @@ public class TileOverlay extends Overlay
     // gold, so the two read as visually distinct at a glance the same way Turf Wars/Sandwich Rush
     // already do from each other.
     private static final Color HOT_POTATO_ARENA_OUTLINE_COLOR = new Color(200, 120, 60, 190);
+    // Repeat After Me's own arena outline -- a purple, matching RepeatAfterMeTile's own served
+    // color_hex (#8E44AD), so the arena floor's outline and the tile-type legend agree.
+    private static final Color REPEAT_AFTER_ME_ARENA_OUTLINE_COLOR = new Color(142, 68, 173, 190);
+    // A bright gold fill for whichever cells the current round's own sneak peek is revealing (see
+    // RunePartyPlugin#isRepeatAfterMePeekActive/getRepeatAfterMeTargetIndices) -- deliberately
+    // eye-catching, since the whole point of the peek is to be easy to memorize at a glance.
+    private static final Color REPEAT_AFTER_ME_PEEK_FILL_COLOR = new Color(255, 215, 0, 170);
+    // A plain white outline (not a fill -- see renderRepeatAfterMeTile) for any cell the local
+    // player has stood-and-spun on this round, while the round's still open -- live "you picked
+    // this one" feedback with no right/wrong tell either way, so an unlit target tile still looks
+    // identical to a random non-target one during the challenge window (see RepeatAfterMeTile's
+    // own doc on why that matters) -- only the reveal below actually resolves correct/incorrect.
+    private static final Color REPEAT_AFTER_ME_PICKED_OUTLINE_COLOR = new Color(255, 255, 255, 220);
+    // The reveal's own two fills, shown once a round's own deadline passes (see RunePartyPlugin#
+    // isRepeatAfterMeRevealActive) for every cell the local player attempted -- green for one that
+    // was actually a target, red for one that wasn't. Never shown for a cell that was never
+    // attempted at all, correct or not (see renderRepeatAfterMeTile).
+    private static final Color REPEAT_AFTER_ME_CORRECT_FILL_COLOR = new Color(60, 200, 90, 170);
+    private static final Color REPEAT_AFTER_ME_INCORRECT_FILL_COLOR = new Color(220, 60, 60, 170);
 
     private static final Stroke SOLID_STROKE   = new BasicStroke(3.5f);
     private static final Stroke PREVIEW_STROKE = new BasicStroke(3.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 10f, new float[]{7f, 5f}, 0f);
@@ -205,6 +226,10 @@ public class TileOverlay extends Overlay
     private void renderCommittedCourse(Graphics2D g)
     {
         List<TileReducer.TileEntry> entries = tileReducer.snapshot();
+        // Computed once per frame, not per-tile -- see renderRepeatAfterMeTile, the only reader,
+        // which would otherwise re-scan the whole tile snapshot 16 times a frame (once per cell).
+        List<WorldPoint> repeatAfterMeTiles = plugin.isRepeatAfterMeActive()
+            ? plugin.findRepeatAfterMeTilePoints() : Collections.emptyList();
 
         for (TileReducer.TileEntry entry : entries)
         {
@@ -215,6 +240,7 @@ public class TileOverlay extends Overlay
             if ("FISHING_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderFishingZoneOutline
             if ("SANDWICH_RUSH_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- these tiles never change color, so an individual fill per tile is just noise
             if ("HOT_POTATO_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- same "never change color, individual fill is just noise" reasoning as Sandwich Rush's own SANDWICH_RUSH_TILE
+            if ("REPEAT_AFTER_ME_TILE".equals(entry.tileType)) { renderRepeatAfterMeTile(g, entry, repeatAfterMeTiles); continue; } // fill only (peek/lit cells), no per-tile outline -- see renderRepeatAfterMeTile
             if ("JADDY_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline per color instead, see renderColorGroupedOutlines below -- a Jad's own zone is a fixed-color area a huge model stands on top of, not a walked path, so a per-tile fill/outline would just be noise under it
             if ("TURF_WARS_TILE".equals(entry.tileType)) { renderTurfWarsTile(g, entry); continue; } // fill only, no per-tile outline, see renderTurfWarsTile
             // Also gated on isMinigameSelectionRevealed() -- isRainbowRushActive() alone flips true
@@ -232,6 +258,7 @@ public class TileOverlay extends Overlay
         renderArenaOutline(g, entries, "TURF_WARS_TILE", TURF_WARS_ARENA_OUTLINE_COLOR);
         renderArenaOutline(g, entries, "SANDWICH_RUSH_TILE", SANDWICH_RUSH_ARENA_OUTLINE_COLOR);
         renderArenaOutline(g, entries, "HOT_POTATO_TILE", HOT_POTATO_ARENA_OUTLINE_COLOR);
+        renderArenaOutline(g, entries, "REPEAT_AFTER_ME_TILE", REPEAT_AFTER_ME_ARENA_OUTLINE_COLOR);
         renderColorGroupedOutlines(g, entries, "JADDY_TILE");
 
         goldenGnomeModel.update(entries);
@@ -779,6 +806,69 @@ public class TileOverlay extends Overlay
             if (poly == null) continue;
 
             g.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), fillAlpha));
+            g.fill(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
+        }
+    }
+
+    /** Draws one Repeat After Me arena cell -- three phases, matched against RunePartyPlugin's own
+     * getRepeatAfterMeTargetIndices/getRepeatAfterMeAttemptedIndices:
+     * <ol>
+     * <li>Sneak peek (isRepeatAfterMePeekActive): this round's own target cells fill
+     * REPEAT_AFTER_ME_PEEK_FILL_COLOR -- deliberately the only phase that ever reveals which cells
+     * are actually correct, since that's the whole point of a peek.</li>
+     * <li>Still-open challenge (neither peek nor reveal): any attempted cell gets a plain white
+     * outline (REPEAT_AFTER_ME_PICKED_OUTLINE_COLOR), fill only, no right/wrong tell either way --
+     * see RepeatAfterMeTile's own doc on why revealing correctness mid-round would defeat the whole
+     * memory game.</li>
+     * <li>Reveal (isRepeatAfterMeRevealActive, once this round's own deadline passes): every
+     * attempted cell fills green (REPEAT_AFTER_ME_CORRECT_FILL_COLOR) if it was actually a target,
+     * red (REPEAT_AFTER_ME_INCORRECT_FILL_COLOR) otherwise.</li>
+     * </ol>
+     * A cell that was never attempted at all gets nothing outside the peek, just the merged
+     * REPEAT_AFTER_ME_ARENA_OUTLINE_COLOR outline every cell already shares (see
+     * renderArenaOutline). No per-tile outline on the fill phases either, same "one merged zone
+     * outline instead" shape renderTurfWarsTile uses. */
+    private void renderRepeatAfterMeTile(Graphics2D g, TileReducer.TileEntry entry, List<WorldPoint> repeatAfterMeTiles)
+    {
+        Integer index = RepeatAfterMePresentation.indexForPoint(repeatAfterMeTiles, entry.point);
+        if (index == null) return;
+
+        if (plugin.isRepeatAfterMePeekActive())
+        {
+            if (plugin.getRepeatAfterMeTargetIndices().contains(index))
+            {
+                fillRepeatAfterMeCell(g, entry.point, REPEAT_AFTER_ME_PEEK_FILL_COLOR);
+            }
+            return;
+        }
+
+        if (!plugin.getRepeatAfterMeAttemptedIndices().contains(index)) return;
+
+        if (plugin.isRepeatAfterMeRevealActive())
+        {
+            boolean correct = plugin.getRepeatAfterMeTargetIndices().contains(index);
+            fillRepeatAfterMeCell(g, entry.point, correct ? REPEAT_AFTER_ME_CORRECT_FILL_COLOR : REPEAT_AFTER_ME_INCORRECT_FILL_COLOR);
+        }
+        else
+        {
+            // Round's still open -- plain white outline, no fill, no right/wrong tell (see
+            // REPEAT_AFTER_ME_PICKED_OUTLINE_COLOR's own doc).
+            renderOutlinedTile(g, entry.point, REPEAT_AFTER_ME_PICKED_OUTLINE_COLOR, SOLID_STROKE);
+        }
+    }
+
+    private void fillRepeatAfterMeCell(Graphics2D g, WorldPoint point, Color fill)
+    {
+        Collection<WorldPoint> localPoints = WorldPoint.toLocalInstance(client.getTopLevelWorldView(), point);
+        for (WorldPoint local : localPoints)
+        {
+            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), local);
+            if (lp == null) continue;
+
+            Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+            if (poly == null) continue;
+
+            g.setColor(fill);
             g.fill(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
         }
     }

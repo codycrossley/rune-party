@@ -72,6 +72,8 @@ public final class Events
     public static final String PLAYER_LEFT = "PLAYER_LEFT";
     public static final String PLAYER_MOVED = "PLAYER_MOVED";
     public static final String PLAYER_READY = "PLAYER_READY";
+    public static final String REPEAT_AFTER_ME_RESULT_SUBMITTED = "REPEAT_AFTER_ME_RESULT_SUBMITTED";
+    public static final String REPEAT_AFTER_ME_ROUND_STARTED = "REPEAT_AFTER_ME_ROUND_STARTED";
     public static final String ROLE_ASSIGNED = "ROLE_ASSIGNED";
     public static final String ROLL_BONUS_GRANTED = "ROLL_BONUS_GRANTED";
     public static final String SANDWICH_RUSH_ITEM_COLLECTED = "SANDWICH_RUSH_ITEM_COLLECTED";

@@ -371,6 +371,13 @@ public class RunePartyPlugin extends Plugin
      * means physically walking the *entire* course rather than a compact arena. */
     public static final long RAINBOW_RUSH_MAX_DURATION_MS = 300_000;
 
+    /** Client-side key for the Repeat After Me mini-game -- must match the server's own
+     * registration, same role every other {@code *_KEY} plays for its own mini-game. Used by
+     * AnnouncementOverlay to swap the generic "3...2...1...BEGIN!" countdown for the same
+     * arrival-gated gather message Arena/Turf Wars/Sandwich Rush/Jaddy/Hot Potato/Dance, Dance,
+     * RuneScape already use, and by {@link #MINIGAMES_NEEDING_PRE_ROUND_POSITION}. */
+    public static final String REPEAT_AFTER_ME_KEY = "repeat-after-me";
+
     /** How long each light of Rainbow Rush's own "traffic light" get-ready sequence stays lit --
      * red, then orange, then green (see AnnouncementOverlay#renderRainbowRushTrafficLight) --
      * purely a client-local animation, timed off MINIGAME_ROUND_BEGIN's own arrival timestamp
@@ -889,7 +896,7 @@ public class RunePartyPlugin extends Plugin
     //     Sandwich Rush/Rainbow Rush/Dance Dance RuneScape/Hot Potato all fit this shape.
     private static final Set<String> MINIGAMES_NEEDING_CONTINUOUS_POSITION = Set.of(ARENA_KEY, TURF_WARS_KEY, JADDY_KEY);
     private static final Set<String> MINIGAMES_NEEDING_PRE_ROUND_POSITION = Set.of(
-        SANDWICH_RUSH_KEY, RAINBOW_RUSH_KEY, DANCE_DANCE_RUNESCAPE_KEY, HOT_POTATO_KEY);
+        SANDWICH_RUSH_KEY, RAINBOW_RUSH_KEY, DANCE_DANCE_RUNESCAPE_KEY, HOT_POTATO_KEY, REPEAT_AFTER_ME_KEY);
     // ---- Fishing Contest (entirely client-local until the one final submission -- catches are
     // never reported per-catch). Every completed Headbang emote near the Fish bowl rolls one
     // catch (see onAnimationChanged's
@@ -1966,6 +1973,21 @@ public class RunePartyPlugin extends Plugin
         return null;
     }
 
+    /** Every currently-marked Repeat After Me arena tile, if the board's actually swapped to it --
+     * see RepeatAfterMePresentation, the only reader, which derives each tile's own 0-15 grid index
+     * purely from these real coordinates (no index ever travels over the wire). Same "the reducer
+     * is the one source of truth," scanned-on-demand-rather-than-cached shape
+     * findDanceDanceRuneScapeTilePoint/findPondTilePoint already follow. */
+    public List<WorldPoint> findRepeatAfterMeTilePoints()
+    {
+        List<WorldPoint> points = new ArrayList<>();
+        for (TileReducer.TileEntry entry : tileReducer.snapshot())
+        {
+            if ("REPEAT_AFTER_ME_TILE".equals(entry.tileType)) points.add(entry.point);
+        }
+        return points;
+    }
+
     /** Rolls one Fishing Contest catch -- called from onAnimationChanged the moment the local
      * player's own Headbang emote finishes (see awaitingHeadbangFinish). Re-checks
      * isFishingContestActive()/fishingCatchSubmitted here on top of onAnimationChanged's own gate
@@ -2129,6 +2151,15 @@ public class RunePartyPlugin extends Plugin
             minigamePresentation.rainbowRush().onTick(selfPlayer);
         }
 
+        // Also independent of the turn engine below -- Repeat After Me's own local peek/challenge
+        // clock and one-shot end-of-round submission both live inside this one call (see
+        // RepeatAfterMePresentation#onTick); the actual per-spin scoring happens separately, from
+        // onAnimationChanged's own EMOTE_DANCE_SPIN case, not from this per-tick call.
+        if (isRepeatAfterMeActive())
+        {
+            minigamePresentation.repeatAfterMe().onTick(selfPlayer);
+        }
+
         // Also independent of the turn engine below -- unlike a rolled destination (pendingRoll,
         // only ever true on the local player's own turn), a Home Teleport arrival can still be
         // owed well after the turn it was armed on, whosever turn it currently is (see
@@ -2268,6 +2299,11 @@ public class RunePartyPlugin extends Plugin
                 minigamePresentation.hotPotato().armAwaitingPassFinish();
                 return;
             }
+            if (isLocalPlayerInRepeatAfterMeChallenge())
+            {
+                minigamePresentation.repeatAfterMe().armAwaitingSpinFinish();
+                return;
+            }
             return;
         }
 
@@ -2341,6 +2377,11 @@ public class RunePartyPlugin extends Plugin
         {
             minigamePresentation.hotPotato().clearAwaitingPassFinish();
             passHotPotato();
+        }
+        else if (minigamePresentation.repeatAfterMe().isAwaitingSpinFinish())
+        {
+            minigamePresentation.repeatAfterMe().clearAwaitingSpinFinish();
+            minigamePresentation.repeatAfterMe().onSpinFinished(localPlayer.getWorldLocation());
         }
     }
 
@@ -2469,6 +2510,16 @@ public class RunePartyPlugin extends Plugin
         String self = localRsn();
         String holder = minigamePresentation.hotPotato().getHolder();
         return self != null && holder != null && self.equalsIgnoreCase(holder);
+    }
+
+    /** Whether a SPIN emote right now would actually score a Repeat After Me tile -- past this
+     * round's own sneak peek, before its own deadline, and not already submitted (see
+     * RepeatAfterMePresentation#isChallengeActive, which does the real work). See
+     * onAnimationChanged's own EMOTE_DANCE_SPIN case, the only caller. */
+    public boolean isLocalPlayerInRepeatAfterMeChallenge()
+    {
+        if (!REPEAT_AFTER_ME_KEY.equals(minigamePresentation.getKey()) || !isMinigamePlayable()) return false;
+        return minigamePresentation.repeatAfterMe().isChallengeActive();
     }
 
     /** Whether {@code localPlayer} is standing on {@code rsn}'s tracked board position -- see
@@ -3259,6 +3310,7 @@ public class RunePartyPlugin extends Plugin
             case Events.TRUE_OR_FALSE_ROUND_ENDED:
             case Events.MINIGAME_TEAMS_ASSIGNED:
             case Events.HOT_POTATO_ASSIGNED:
+            case Events.REPEAT_AFTER_ME_ROUND_STARTED:
             {
                 if (Events.MINIGAME_STARTED.equals(type))
                 {
@@ -3598,6 +3650,16 @@ public class RunePartyPlugin extends Plugin
     public int getDanceDanceRuneScapeScore() { return minigamePresentation.danceDanceRuneScape().getScore(); }
 
     public boolean isRainbowRushActive() { return minigamePresentation.isKeyActive(RAINBOW_RUSH_KEY); }
+    public boolean isRepeatAfterMeActive() { return minigamePresentation.isKeyActive(REPEAT_AFTER_ME_KEY); }
+    /** This round's own target cells (0-15), for the overlay's own peek/challenge rendering. */
+    public Set<Integer> getRepeatAfterMeTargetIndices() { return minigamePresentation.repeatAfterMe().getTargetIndices(); }
+    /** Every cell the local player has stood-and-spun on so far this round, correct or not. */
+    public Set<Integer> getRepeatAfterMeAttemptedIndices() { return minigamePresentation.repeatAfterMe().getAttemptedIndices(); }
+    /** Whether this round's own sneak peek is still showing -- see RepeatAfterMePresentation#isPeekActive. */
+    public boolean isRepeatAfterMePeekActive() { return minigamePresentation.repeatAfterMe().isPeekActive(); }
+    /** Whether this round's own green/red reveal should be showing -- see RepeatAfterMePresentation#isRevealActive. */
+    public boolean isRepeatAfterMeRevealActive() { return minigamePresentation.repeatAfterMe().isRevealActive(); }
+    public int getRepeatAfterMeRoundNumber() { return minigamePresentation.repeatAfterMe().getRoundNumber(); }
     /** Whether the local player has personally stood on the course tile at {@code pathIndex} yet
      * this round -- see TileOverlay#renderRainbowRushTile, the only consumer: outline-only until
      * this flips true, filled solid after. */

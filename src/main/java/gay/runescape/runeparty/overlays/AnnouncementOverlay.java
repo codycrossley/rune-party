@@ -282,7 +282,7 @@ public class AnnouncementOverlay extends Overlay
         if (RunePartyPlugin.ARENA_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.TURF_WARS_KEY.equals(plugin.getMinigameKey())
             || RunePartyPlugin.SANDWICH_RUSH_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.JADDY_KEY.equals(plugin.getMinigameKey())
             || RunePartyPlugin.HOT_POTATO_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.DANCE_DANCE_RUNESCAPE_KEY.equals(plugin.getMinigameKey())
-            || RunePartyPlugin.RAINBOW_RUSH_KEY.equals(plugin.getMinigameKey()))
+            || RunePartyPlugin.RAINBOW_RUSH_KEY.equals(plugin.getMinigameKey()) || RunePartyPlugin.REPEAT_AFTER_ME_KEY.equals(plugin.getMinigameKey()))
         {
             renderArrivalGatherMessage(g);
         }
