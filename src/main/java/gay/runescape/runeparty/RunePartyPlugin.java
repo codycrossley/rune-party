@@ -808,6 +808,18 @@ public class RunePartyPlugin extends Plugin
      * constant in this codebase already carries (see e.g. JAD_SMASH_ANIMATION_HOLD_MS's own doc). */
     public static final int TELE_BLOCK_IMPACT_SPOTANIM_HEIGHT = 100;
 
+    /** Spotanim played directly on the target's own actor the instant a Tele Other lands on them
+     * (see TELE_OTHER_USED handling) -- the real Tele Other spell family's own impact graphic
+     * (SpotanimID.TELEPORT_OTHER_IMPACT, right next to TELE_BLOCK_IMPACT above in that same "cast
+     * at another player" family), not a generic placeholder. Same triggerSpotAnimOnPlayer call
+     * shape as TELE_BLOCK_IMPACT_SPOTANIM_ID. */
+    public static final int TELE_OTHER_IMPACT_SPOTANIM_ID = SpotanimID.TELEPORT_OTHER_IMPACT;
+
+    /** Height offset for TELE_OTHER_IMPACT_SPOTANIM_ID -- same "roughly chest height" first
+     * estimate TELE_BLOCK_IMPACT_SPOTANIM_HEIGHT's own doc gives, not measured against the real
+     * spell in-client. */
+    public static final int TELE_OTHER_IMPACT_SPOTANIM_HEIGHT = 100;
+
     /** Spotanim played directly on a player's own actor the instant they're eliminated in Flame
      * Field (see ARENA_PLAYER_ELIMINATED handling) -- the real Voidwaker special attack's own
      * impact graphic, same choice (and same height=0/delay=0 call shape, see that project's own
@@ -1191,10 +1203,10 @@ public class RunePartyPlugin extends Plugin
     // doc for why): that mechanism's payload has no target field, and this banner's title needs one.
     private final TimedBanner<TeleBlockCastPayload> teleBlockCastAnnounce = new TimedBanner<>();
     // "You/<caster> used Tele Other on <target>!" -- fired on TELE_OTHER_USED. Single line, no
-    // subtitle, unlike teleBlockCastAnnounce's own two-line shape -- the item's own confirmed
-    // design is "just the announcement, nothing else" (the target's actual new position is
-    // conveyed generically by whatever PLAYER_MOVED already renders, same latitude Gnome Glider's
-    // own positive equivalent takes).
+    // subtitle, unlike teleBlockCastAnnounce's own two-line shape. The target's actual new
+    // position is conveyed generically by whatever PLAYER_MOVED already renders (same latitude
+    // Gnome Glider's own positive equivalent takes) -- this banner plus the impact spotanim on the
+    // target's own actor (see TELE_OTHER_USED handling) are the only bespoke reveal.
     private final TimedBanner<TeleOtherUsedPayload> teleOtherUsedAnnounce = new TimedBanner<>();
 
     // welcomeBanner lives on SessionManager, along with the session-lifecycle fields/methods it's
@@ -3645,13 +3657,12 @@ public class RunePartyPlugin extends Plugin
 
             case Events.TELE_OTHER_USED:
             {
-                // Purely a reveal/announcement -- the real mechanical effect (the target's own new
-                // position) is carried entirely by the PLAYER_MOVED event fired alongside this one
-                // (see items/tele_other.py's own apply_targeted_effect), already handled generically
-                // wherever PLAYER_MOVED is. Deliberately no spotanim/indicator of any kind here, per
-                // this feature's own confirmed design ("nothing else should happen") -- just the
-                // banner and a chat line, same parity every other announcement-only event in this
-                // switch gets.
+                // The real mechanical effect (the target's own new position) is carried entirely
+                // by the PLAYER_MOVED event fired alongside this one (see items/tele_other.py's own
+                // apply_targeted_effect), already handled generically wherever PLAYER_MOVED is --
+                // this case is just the reveal: the banner/chat line, plus the impact spotanim on
+                // the target's own actor (TELE_OTHER_IMPACT_SPOTANIM_ID), same "cast at another
+                // player" treatment TELE_BLOCK_APPLIED's own handling gives its own impact spotanim.
                 if (!catchingUp)
                 {
                     String caster = Json.requiredStr(e.payload, type, "caster");
@@ -3660,6 +3671,7 @@ public class RunePartyPlugin extends Plugin
                     {
                         scheduleTeleOtherUsedAnnouncement(caster, target);
                         addChatMessage(caster + " used Tele Other on " + target + "!");
+                        triggerSpotAnimOnPlayer(TELE_OTHER_IMPACT_SPOTANIM_ID, target, TELE_OTHER_IMPACT_SPOTANIM_HEIGHT);
                     }
                 }
                 break;
