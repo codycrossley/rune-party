@@ -1694,8 +1694,8 @@ public class AnnouncementOverlay extends Overlay
         int y = client.getCanvasHeight() / 2;
 
         String text = plugin.isLocalPlayerAssignedBrutus()
-            ? "Head to your own zone (red)!"
-            : "Head to the target zone (blue)!";
+            ? "Head to your own zone (pink)!"
+            : "Head to the target zone (teal)!";
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE));
         drawCenteredText(g, text, centerX, y, Color.WHITE, alpha);

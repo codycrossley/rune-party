@@ -719,9 +719,17 @@ public class RunePartyPanel extends PluginPanel
             return;
         }
 
-        if (localEntry.items.isEmpty())
+        // Conceals one copy of whatever item a live, not-yet-revealed grant just added -- the
+        // roster itself already reflects ITEM_GRANTED unconditionally (real state), but the wheel
+        // reveal is purely cosmetic, so without this a freshly granted item's own "Use X" button
+        // would appear here the instant it lands, well before AnnouncementOverlay's own wheel has
+        // actually spun to a stop -- spoiling which item it is. See
+        // RunePartyPlugin#isItemSelectionRevealed's own doc.
+        Map<String, Integer> displayItems = concealPendingItemGrant(localEntry.items);
+
+        if (displayItems.isEmpty())
         {
-            String key = "empty";
+            String key = "empty:" + plugin.isItemSelectionRevealed();
             if (key.equals(lastItemsKey)) return;
             lastItemsKey = key;
 
@@ -743,14 +751,18 @@ public class RunePartyPanel extends PluginPanel
         // isLocalPlayerReadyToRoll() -- that one also requires standing on the turn's own tracked
         // position, a real requirement for physically rolling but not one the server enforces for
         // items at all (see isLocalPlayerReadyToUseItem's own doc) -- using it here greyed out
-        // every item button the instant a player wandered even slightly off that spot.
+        // every item button the instant a player wandered even slightly off that spot. Also folds
+        // in isItemSelectionRevealed() directly (not just its effect on displayItems) so the panel
+        // still rebuilds the instant a reveal finishes even when that reveal happened to conceal a
+        // held count down to the same buildItemsKey string it'll produce once revealed (impossible
+        // today since concealment always changes the string, but cheap insurance either way).
         boolean canUseNow = plugin.isLocalPlayerReadyToUseItem() && !plugin.isItemUsedThisTurn();
-        String key = "items:" + canUseNow + ":" + buildItemsKey(localEntry.items);
+        String key = "items:" + canUseNow + ":" + plugin.isItemSelectionRevealed() + ":" + buildItemsKey(displayItems);
         if (key.equals(lastItemsKey)) return;
         lastItemsKey = key;
 
         itemUsePanel.removeAll();
-        for (Map.Entry<String, Integer> held : new TreeMap<>(localEntry.items).entrySet())
+        for (Map.Entry<String, Integer> held : new TreeMap<>(displayItems).entrySet())
         {
             String itemKey = held.getKey();
             Item item = Items.get(itemKey);
@@ -769,6 +781,22 @@ public class RunePartyPanel extends PluginPanel
         }
         itemUsePanel.revalidate();
         itemUsePanel.repaint();
+    }
+
+    /** {@code items}, minus one copy of whatever item RunePartyPlugin#isItemSelectionRevealed says
+     * is still a pending, unrevealed grant for the local player -- unchanged (the exact same map
+     * instance) once that reveal has actually happened, or if there's nothing pending at all. */
+    private Map<String, Integer> concealPendingItemGrant(Map<String, Integer> items)
+    {
+        if (plugin.isItemSelectionRevealed()) return items;
+        String pendingKey = plugin.getItemGrantKey();
+        Integer count = pendingKey != null ? items.get(pendingKey) : null;
+        if (count == null) return items;
+
+        Map<String, Integer> concealed = new TreeMap<>(items);
+        if (count <= 1) concealed.remove(pendingKey);
+        else concealed.put(pendingKey, count - 1);
+        return concealed;
     }
 
     private static String buildItemsKey(Map<String, Integer> items)

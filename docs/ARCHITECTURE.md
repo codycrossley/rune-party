@@ -271,8 +271,8 @@ Conventions this codebase already leans on hard, worth following rather than rei
 | Task | Start here |
 |---|---|
 | Add a new event type | `net/Events.java`, then wherever it's folded (a reducer or a `*Presentation`) — update the server's own `EventType` in the same change |
-| Add a new minigame | `minigames/` (a `Minigame` + optionally a `MinigamePresentationFeature`), register in `Minigames.java`, wire into `MinigamePresentation`'s constructor |
-| Add a new item | `items/` (an `Item`), register in `Items.java` |
+| Add a new minigame | `minigames/` (a `Minigame` + optionally a `MinigamePresentationFeature`), register in `Minigames.java`, wire into `MinigamePresentation`'s constructor, add a row to `docs/MINIGAMES.md` |
+| Add a new item | `items/` (an `Item`), register in `Items.java`, add a row to `docs/ITEMS.md` |
 | Add a new overlay | extend `net.runelite.client.ui.overlay.Overlay`, register/remove it in `RunePartyPlugin#startUp`/`shutDown` |
 | Add a new tile type | server-side `tiles/` registry — the client picks it up automatically via the served catalog |
 | Understand the companion server | a separate repository; this client only ever assumes the REST/WebSocket contract described in `net/ApiClient.java` and `net/Events.java` |

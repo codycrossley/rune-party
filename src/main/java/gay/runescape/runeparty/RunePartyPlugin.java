@@ -436,10 +436,13 @@ public class RunePartyPlugin extends Plugin
      * BrutusAttackPresentation#onTick).
      * <p>
      * Same hex values as the server's own brutus_attack.py BRUTUS_ZONE_COLOR/TARGET_ZONE_COLOR --
-     * kept in sync by hand, same convention Turf Wars' own team colors already use. */
+     * kept in sync by hand, same convention Turf Wars' own team colors already use. Deliberately
+     * equal to TEAM_A_COLOR/TEAM_B_COLOR themselves now (not just the same convention), matching
+     * PlayerOverlay's own Brutus Attack player-token team coloring, so the ground and the players
+     * agree on the same 1vX split instead of running two unrelated color schemes. */
     public static final String BRUTUS_ATTACK_KEY = "brutus-attack";
-    public static final String BRUTUS_ZONE_COLOR_HEX = "#CC2222";
-    public static final String BRUTUS_TARGET_ZONE_COLOR_HEX = "#2266CC";
+    public static final String BRUTUS_ZONE_COLOR_HEX = "#E61E96";
+    public static final String BRUTUS_TARGET_ZONE_COLOR_HEX = "#00AAAA";
 
     /** Brutus's own transformed model renders noticeably larger than the single real tile his
      * underlying Player object actually occupies (PlayerComposition#setTransformedNpcId only swaps
@@ -4123,6 +4126,27 @@ public class RunePartyPlugin extends Plugin
     public long getItemSpinnerUntil() { return itemPresentation.getItemSpinnerUntil(); }
     public String getItemGrantRsn() { return itemPresentation.getItemGrantRsn(); }
     public String getItemGrantKey() { return itemPresentation.getItemGrantKey(); }
+
+    /** Whether this client has actually seen the item wheel settle on the most recently granted
+     * item yet -- same "don't spoil the reveal early" shape isMinigameSelectionRevealed() already
+     * gives the mini-game wheel (see that method's own doc); itemSpinner is armed via the same
+     * armBanner->scheduleAfterTurnEffects chain, so its own start is likewise only stamped once
+     * the "ITEM SPACE!" banner ahead of it has actually cleared, not the instant ITEM_GRANTED
+     * lands. True whenever there's nothing to wait on: no grant has happened yet, the most recent
+     * one wasn't for the local player (nothing of theirs changed, so nothing to spoil), or this
+     * client only caught up on a past grant (ItemPresentation#apply never arms the spinner at all
+     * during catch-up, so getItemSpinnerStart() stays 0 in that case). RunePartyPanel's own item
+     * list reads this to briefly conceal a freshly granted item rather than showing its "Use X"
+     * button before the wheel's even revealed it. */
+    public boolean isItemSelectionRevealed()
+    {
+        String pendingRsn = getItemGrantRsn();
+        String local = getLocalRsn();
+        if (pendingRsn == null || local == null || !pendingRsn.equalsIgnoreCase(local)) return true;
+        long start = getItemSpinnerStart();
+        if (start == 0) return true;
+        return System.currentTimeMillis() - start >= ITEM_SPINNER_SPIN_PHASE_MS;
+    }
     public long getItemGrantDescriptionUntil() { return itemPresentation.getItemGrantDescriptionUntil(); }
     public String getItemGrantDescriptionRsn() { return itemPresentation.getItemGrantDescriptionRsn(); }
     public String getItemGrantDescriptionKey() { return itemPresentation.getItemGrantDescriptionKey(); }

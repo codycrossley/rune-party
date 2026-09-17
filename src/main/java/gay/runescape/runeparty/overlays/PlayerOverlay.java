@@ -38,10 +38,12 @@ import net.runelite.client.util.Text;
  * start. Who's Your Jaddy? gets the same treatment, just live rather than assigned once -- a
  * player's own outline/token switches the instant their real WorldLocation lands on a JADDY_TILE
  * zone, and switches right back the instant they step off it, since picking a side there is just
- * standing on it (see RunePartyPlugin#getJaddyZoneColor). While Brutus Attack is active, every
- * still-surviving target's own token swaps to a larger bullseye shape instead (still their own
- * seat color, see drawBrutusAttackTargetToken) -- reverts to the plain token the instant they're
- * eliminated. */
+ * standing on it (see RunePartyPlugin#getJaddyZoneColor). Brutus Attack gets the same team-color
+ * treatment too, just a fixed 1vX split rather than an assigned/live 2-team one: Brutus himself in
+ * TEAM_A_COLOR (pink), every other seated player in TEAM_B_COLOR (teal), for the whole round.
+ * Every still-surviving (non-Brutus, non-eliminated) target's own token also swaps to a larger
+ * bullseye shape in that same teal (see drawBrutusAttackTargetToken) -- reverts to the plain
+ * (still teal) token the instant they're eliminated. */
 public class PlayerOverlay extends Overlay
 {
     private static final int OUTLINE_WIDTH = 2;
@@ -149,6 +151,20 @@ public class PlayerOverlay extends Overlay
                 Color zoneColor = plugin.getJaddyZoneColor(p.getWorldLocation());
                 if (zoneColor != null) c = zoneColor;
             }
+            else if (plugin.isBrutusAttackActive() && plugin.isMinigamePlayable())
+            {
+                // A 1vX hunt, not a 2-team split, but the same fixed TEAM_A_COLOR/TEAM_B_COLOR
+                // pairing Turf Wars/Who's Your Jaddy already use reads "who's hunting whom" at a
+                // glance the same way: Brutus himself in TEAM_A_COLOR (pink), every other seated
+                // player -- his whole hunted "team" -- in TEAM_B_COLOR (teal), for the whole round
+                // regardless of elimination (an eliminated target's own bullseye reverts to the
+                // plain token, see isBrutusAttackTarget below, but their outline stays teal -- they
+                // were still on that team). Also requires isMinigamePlayable(), same reasoning
+                // isBrutusAttackTarget's own doc gives: isBrutusAttackActive() alone would recolor
+                // every outline the instant MINIGAME_STARTED lands, before the wheel's even
+                // revealed which mini-game was picked.
+                c = rsn.equalsIgnoreCase(plugin.getBrutusAttackBrutusRsn()) ? RunePartyPlugin.TEAM_A_COLOR : RunePartyPlugin.TEAM_B_COLOR;
+            }
             modelOutlineRenderer.drawOutline(p, OUTLINE_WIDTH,
                 new Color(c.getRed(), c.getGreen(), c.getBlue(), OUTLINE_ALPHA), OUTLINE_FEATHER);
 
@@ -164,8 +180,12 @@ public class PlayerOverlay extends Overlay
             // Every still-surviving target (not Brutus himself, not someone already eliminated)
             // gets the bullseye marker instead of the plain token for as long as the mini-game's
             // own hunt is actually live -- an eliminated target just reverts to the plain token,
-            // no separate marker needed on top of that.
-            boolean isBrutusAttackTarget = phase == GamePhase.ACTIVE && plugin.isBrutusAttackActive()
+            // no separate marker needed on top of that. Also requires isMinigamePlayable(), same as
+            // holdingHotPotato just above -- isBrutusAttackActive() alone flips true the instant
+            // MINIGAME_STARTED lands, well before the selection wheel has even revealed which
+            // mini-game was picked, so gating on that alone spoiled the reveal by marking every
+            // target with a bullseye before anyone could see "Brutus Attack" was even chosen.
+            boolean isBrutusAttackTarget = phase == GamePhase.ACTIVE && plugin.isBrutusAttackActive() && plugin.isMinigamePlayable()
                 && !rsn.equalsIgnoreCase(plugin.getBrutusAttackBrutusRsn())
                 && !plugin.getBrutusAttackEliminatedRsns().contains(rsn.toLowerCase(Locale.ROOT));
             if (isBrutusAttackTarget)
@@ -257,11 +277,11 @@ public class PlayerOverlay extends Overlay
     }
 
     /** Brutus Attack's own replacement for the plain token -- a bullseye (two concentric ring
-     * outlines plus a filled center dot), all in {@code color} (the same seat/team color the plain
-     * token would have used), noticeably larger than TOKEN_RADIUS so it's unmistakable at a glance
-     * who's still in play. Shown for as long as this player is a still-surviving target (see
-     * render()'s own isBrutusAttackTarget check) -- reverts to the plain token the instant they're
-     * eliminated, no separate marker needed on top of that. */
+     * outlines plus a filled center dot), all in {@code color} (TEAM_B_COLOR/teal by the time this
+     * is called, see render()'s own Brutus Attack team-color branch), noticeably larger than
+     * TOKEN_RADIUS so it's unmistakable at a glance who's still in play. Shown for as long as this
+     * player is a still-surviving target (see render()'s own isBrutusAttackTarget check) -- reverts
+     * to the plain token the instant they're eliminated, no separate marker needed on top of that. */
     private void drawBrutusAttackTargetToken(Graphics2D g, Player p, Color color)
     {
         int yOffset = p.getLogicalHeight() + BRUTUS_TARGET_TOKEN_OUTER_RADIUS + TOKEN_HEAD_CLEARANCE;

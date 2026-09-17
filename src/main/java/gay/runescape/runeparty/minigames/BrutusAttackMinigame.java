@@ -13,8 +13,12 @@ import javax.swing.JPanel;
  * wheel icon. */
 public class BrutusAttackMinigame implements Minigame
 {
-    private static final Color BRUTUS_ZONE_COLOR = new Color(0xCC, 0x22, 0x22);
-    private static final Color TARGET_ZONE_COLOR = new Color(0x22, 0x66, 0xCC);
+    // Matches RunePartyPlugin.TEAM_A_COLOR/TEAM_B_COLOR (and the server's own brutus_attack.py
+    // BRUTUS_ZONE_COLOR/TARGET_ZONE_COLOR) -- the same pink/teal pairing PlayerOverlay's own Brutus
+    // Attack player-token coloring and the arena's own ground tiles both use now, so this wheel
+    // icon agrees with what the round actually looks like.
+    private static final Color BRUTUS_ZONE_COLOR = new Color(0xE6, 0x1E, 0x96);
+    private static final Color TARGET_ZONE_COLOR = new Color(0x00, 0xAA, 0xAA);
 
     @Override
     public String getKey()
@@ -28,8 +32,8 @@ public class BrutusAttackMinigame implements Minigame
         return "Brutus Bullet";
     }
 
-    /** Two small colored squares facing each other -- Brutus's own zone (red) and the targets'
-     * zone (blue), the exact same two hex colors the server's own brutus_attack.py colors the
+    /** Two small colored squares facing each other -- Brutus's own zone (pink) and the targets'
+     * zone (teal), the exact same two hex colors the server's own brutus_attack.py colors the
      * arena's two ends with -- purely programmatic, same "no bundled raster asset needed for a
      * wheel icon" convention ClickClickClickMinigame/HotPotatoMinigame's own docs give. */
     @Override
