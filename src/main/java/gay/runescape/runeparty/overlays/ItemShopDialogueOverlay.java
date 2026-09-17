@@ -7,54 +7,48 @@ import gay.runescape.runeparty.items.Item;
 import gay.runescape.runeparty.items.Items;
 
 import net.runelite.api.Client;
+import net.runelite.api.Model;
+import net.runelite.api.ModelData;
 import net.runelite.client.game.SpriteManager;
 import net.runelite.client.input.MouseManager;
-import net.runelite.client.ui.FontManager;
 
 import java.awt.Color;
-import java.awt.Font;
-import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.List;
 
-/** A conversation with the Item Shop's own shopkeeper, drawn over the chatbox in the game's own
- * dialog style -- chathead, speaker name, greeting text, and clickable options -- for the
- * mini-encounter opened by landing on his tile (see the server's own item_shop_encounter_opened
- * doc). Only ever shows for the local player actually mid-encounter (see
- * ItemShopPresentation#getEncounterRsn) -- every other seated client sees nothing of this box at
- * all, only the eventual "You/&lt;rsn&gt; purchased/can't afford &lt;item&gt;!" announcement (see
- * AnnouncementOverlay#renderItemShopOutcome). All the chatbox chrome (background, chathead, name,
- * click handling, reset-on-new-encounter bookkeeping) lives in ChatboxDialogueOverlay -- see that
- * class's own doc; this subclass supplies only the two screens below.
+/** A conversation with the Item Clerk, drawn over the chatbox in the game's own dialog style --
+ * chathead, speaker name, greeting text, and clickable options -- for the mini-encounter opened by
+ * landing on his tile (see the server's own item_shop_encounter_opened doc). Only ever shows for
+ * the local player actually mid-encounter (see ItemShopPresentation#getEncounterRsn) -- every
+ * other seated client sees nothing of this box at all, only the eventual "You/&lt;rsn&gt;
+ * purchased/can't afford &lt;item&gt;!" announcement (see AnnouncementOverlay#
+ * renderItemShopOutcome). All the chatbox chrome (background, chathead, name, click handling,
+ * reset-on-new-encounter bookkeeping) lives in ChatboxDialogueOverlay -- see that class's own doc;
+ * this subclass supplies only the two screens below.
  * <p>
- * GREETING (the "Would you like to buy an item?" Yes!/No thanks. choice) and ITEM_LIST
- * (RunePartyPlugin#ITEM_SHOP_CATALOG as a paginated list, each row showing name, price, and effect
- * description -- rows the local player can't currently afford, or has no inventory room for, are
- * skipped outright, same "the dialogue doesn't even offer what the server would reject anyway"
- * latitude WiseOldManDialogueOverlay's own Golden-Gnome-steal option takes). Submits via
- * RunePartyPlugin#submitItemShopChoice the instant "buy" or "No thanks." is clicked for a final
- * choice, then closes itself immediately rather than waiting for the server's own confirming
+ * GREETING ("Would you like to buy an item?" / Yes / No) and ITEM_LIST ("Choose One", then a
+ * one-item-at-a-time carousel over RunePartyPlugin#ITEM_SHOP_CATALOG -- every item, always,
+ * regardless of whether the local player can currently afford it or has room to hold it, per this
+ * feature's own confirmed V1 design -- rather than a scrollable/paginated list of several at once:
+ * clicking the shown item's own name/description block buys it; "Next" advances to the next
+ * catalog entry, wrapping back to the first past the last. These are deliberately the only two
+ * screens (no "Back" out of ITEM_LIST -- declining only happens from GREETING, before committing
+ * to browse) -- a real affordability/inventory-room check still happens server-side regardless
+ * (see item_shop_choose), surfaced back to the player as the ITEM_SHOP_PURCHASE_FAILED banner
+ * rather than being hidden from the menu the way an earlier version of this dialogue filtered it
+ * client-side. Submits via RunePartyPlugin#submitItemShopChoice the instant an item (or "No") is
+ * clicked, then closes itself immediately rather than waiting for the server's own confirming
  * ITEM_SHOP_DISMISSED -- same "set optimistically on submit" latitude WiseOldManDialogueOverlay's
- * own doc describes. A failed purchase (insufficient funds/inventory full, see the server's own
- * item_shop_choose doc) does NOT submit-and-close -- the dialogue stays open on the ITEM_LIST
- * screen so the player can pick something else. */
+ * own doc describes. A failed purchase does NOT submit-and-close -- the dialogue stays open on
+ * ITEM_LIST, still showing the same item, so the player can hit "Next" and try something else. */
 public final class ItemShopDialogueOverlay extends ChatboxDialogueOverlay
 {
-    // Each item gets two lines (name/price, then its own effect description right below, dimmer)
-    // rather than the single line a plain option row uses -- "a menu of items and their
-    // descriptions" per this feature's own confirmed design needs more per-row room than a plain
-    // label does. Both lines together are one clickable row.
-    private static final int ITEM_ROW_HEIGHT = 32;
-    private static final int ITEM_DESCRIPTION_OFFSET = 14; // the description line's own offset below its row's top
-    private static final int ITEMS_PER_PAGE = 3;
-    private static final Color ITEM_DESCRIPTION_COLOR = new Color(0x80, 0x80, 0x80);
-
     private enum Screen { GREETING, ITEM_LIST }
 
     private volatile Screen screen = Screen.GREETING;
-    private volatile int itemPage = 0;
+    private volatile int itemIndex = 0; // index into RunePartyPlugin.ITEM_SHOP_CATALOG, wraps via Math.floorMod
 
     public ItemShopDialogueOverlay(Client client, RunePartyPlugin plugin, MouseManager mouseManager, SpriteManager spriteManager, RosterReducer roster)
     {
@@ -71,14 +65,26 @@ public final class ItemShopDialogueOverlay extends ChatboxDialogueOverlay
     protected int getNpcId() { return RunePartyPlugin.ITEM_SHOP_NPC_ID; }
 
     @Override
-    protected String getSpeakerName() { return "Shopkeeper"; }
+    protected String getSpeakerName() { return "Item Clerk"; }
+
+    /** The Item Clerk's own in-world model is recolored by hand (see ItemShopNpcOverlay's own
+     * RECOLOR_FIND/RECOLOR_REPLACE doc) -- his chathead portrait needs the exact same recolor
+     * applied via that class's shared applyRecolor helper, or the dialogue box would show him in
+     * his stock colors while the model standing on the tile shows the recolored ones. */
+    @Override
+    protected Model loadChatheadModel()
+    {
+        ModelData raw = RunePartyRender.loadNpcChatheadModelData(client, getNpcId());
+        if (raw == null) return null;
+        return ItemShopNpcOverlay.applyRecolor(raw).light();
+    }
 
     @Override
     protected void resetForNextEncounter()
     {
         super.resetForNextEncounter();
         screen = Screen.GREETING;
-        itemPage = 0;
+        itemIndex = 0;
     }
 
     @Override
@@ -90,130 +96,75 @@ public final class ItemShopDialogueOverlay extends ChatboxDialogueOverlay
         }
         else
         {
-            drawItemList(g, self);
+            drawItemCarousel(g);
         }
     }
 
     private void drawGreeting(Graphics2D g)
     {
         int textWidth = bounds.width - TEXT_LEFT - TEXT_RIGHT_MARGIN;
-        drawWrappedText(g, "Would you like to buy an item?", bounds.x + TEXT_LEFT, bounds.y + BODY_TOP_OFFSET, textWidth);
+        int optionsTopOffset = Math.max(OPTIONS_TOP_OFFSET,
+            drawWrappedText(g, "Would you like to buy an item?", bounds.x + TEXT_LEFT, textWidth));
 
         List<String> labels = new ArrayList<>();
         List<Runnable> callbacks = new ArrayList<>();
 
-        labels.add("Yes!");
-        callbacks.add(() -> { screen = Screen.ITEM_LIST; itemPage = 0; });
+        labels.add("Yes");
+        callbacks.add(() -> { screen = Screen.ITEM_LIST; itemIndex = 0; });
 
-        labels.add("No thanks.");
+        labels.add("No");
         callbacks.add(() -> submitFinalChoice("decline", null));
 
-        drawOptionRows(g, labels, callbacks, bounds.y + OPTIONS_TOP_OFFSET);
+        drawOptionRows(g, labels, callbacks, bounds.y + optionsTopOffset);
     }
 
-    private void drawItemList(Graphics2D g, String self)
+    /** One catalog entry at a time -- "Choose One" header, a blank line, the current item's own
+     * name/price line and effect-description line right below it (together one clickable block --
+     * click either line to buy), another blank line, then "Next" to cycle forward (wrapping back
+     * to the first entry past the last). No pagination math needed here at all (unlike
+     * WiseOldManDialogueOverlay's own target list, which can genuinely overflow a page) -- exactly
+     * one item's worth of content is ever on screen, comfortably inside the box regardless of the
+     * real widget's own height. */
+    private void drawItemCarousel(Graphics2D g)
     {
-        int coins = roster.getCoins(self);
-        int held = 0;
-        for (int count : roster.getItems(self).values()) held += count;
-        boolean hasRoom = held < RunePartyPlugin.ITEM_CAP;
-
-        List<RunePartyPlugin.ItemShopEntry> affordable = new ArrayList<>();
-        if (hasRoom)
-        {
-            for (RunePartyPlugin.ItemShopEntry entry : RunePartyPlugin.ITEM_SHOP_CATALOG)
-            {
-                if (entry.price <= coins) affordable.add(entry);
-            }
-        }
-
         int textWidth = bounds.width - TEXT_LEFT - TEXT_RIGHT_MARGIN;
-        String prompt = !hasRoom ? "You're holding too many items already -- use one first!"
-            : affordable.isEmpty() ? "You can't afford anything here right now."
-            : "Here's what I've got:";
-        drawWrappedText(g, prompt, bounds.x + TEXT_LEFT, bounds.y + BODY_TOP_OFFSET, textWidth);
+        int headerBottomOffset = Math.max(OPTIONS_TOP_OFFSET, drawWrappedText(g, "Choose One", bounds.x + TEXT_LEFT, textWidth));
 
-        int pageCount = Math.max(1, (affordable.size() + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE);
-        int page = Math.min(itemPage, pageCount - 1);
-        int start = page * ITEMS_PER_PAGE;
-        int end = Math.min(affordable.size(), start + ITEMS_PER_PAGE);
+        List<RunePartyPlugin.ItemShopEntry> catalog = RunePartyPlugin.ITEM_SHOP_CATALOG;
+        RunePartyPlugin.ItemShopEntry entry = catalog.get(Math.floorMod(itemIndex, catalog.size()));
+        Item item = Items.get(entry.itemKey);
+        String nameLine = (item != null ? item.getDisplayName() : entry.itemKey) + ": " + entry.price + " coins";
+        String descriptionLine = item != null ? item.getEffectDescription(true) : "";
 
-        List<String> names = new ArrayList<>();
-        List<String> descriptions = new ArrayList<>();
-        List<Runnable> callbacks = new ArrayList<>();
+        int lineHeight = lineHeight(g);
+        int ascent = ascent(g);
+        net.runelite.api.Point mouse = client.getMouseCanvasPosition();
 
-        for (int i = start; i < end; i++)
-        {
-            RunePartyPlugin.ItemShopEntry entry = affordable.get(i);
-            Item item = Items.get(entry.itemKey);
-            String displayName = item != null ? item.getDisplayName() : entry.itemKey;
-            String description = item != null ? item.getEffectDescription(true) : null;
+        // One blank line's own worth of breathing room below the header, matching the mock's own
+        // blank line between "Choose One" and the item block.
+        int itemTop = bounds.y + headerBottomOffset + lineHeight;
+        Rectangle itemRow = new Rectangle(bounds.x + TEXT_LEFT, itemTop - ascent, textWidth, lineHeight * 2);
+        boolean itemHovered = mouse != null && itemRow.contains(mouse.getX(), mouse.getY());
+        Color itemColor = itemHovered ? OPTION_HOVER_COLOR : OPTION_COLOR;
+        drawCentered(g, nameLine, bounds.x + TEXT_LEFT, textWidth, itemTop, itemColor);
+        drawCentered(g, descriptionLine, bounds.x + TEXT_LEFT, textWidth, itemTop + lineHeight, itemColor);
 
-            names.add(displayName + " (" + entry.price + " coins)");
-            descriptions.add(description != null ? description : "");
-            callbacks.add(() -> submitFinalChoice("buy_item", entry.itemKey));
-        }
+        // Another blank line before "Next", same spacing the header-to-item gap above uses.
+        int nextTop = itemTop + lineHeight * 2 + lineHeight;
+        Rectangle nextRow = new Rectangle(bounds.x + TEXT_LEFT, nextTop - ascent, textWidth, OPTION_ROW_HEIGHT);
+        boolean nextHovered = mouse != null && nextRow.contains(mouse.getX(), mouse.getY());
+        drawCentered(g, "Next", bounds.x + TEXT_LEFT, textWidth, nextTop, nextHovered ? OPTION_HOVER_COLOR : OPTION_COLOR);
 
-        int afterItemsY = bounds.y + OPTIONS_TOP_OFFSET + names.size() * ITEM_ROW_HEIGHT;
-        if (!affordable.isEmpty() && pageCount > 1)
-        {
-            names.add((page + 1) + "/" + pageCount + " -- more...");
-            descriptions.add("");
-            int nextPage = (page + 1) % pageCount;
-            callbacks.add(() -> itemPage = nextPage);
-        }
-
-        names.add("Back");
-        descriptions.add("");
-        callbacks.add(() -> screen = Screen.GREETING);
-
-        drawItemRows(g, names, descriptions, callbacks, bounds.y + OPTIONS_TOP_OFFSET, afterItemsY);
+        optionBounds = new Rectangle[] {itemRow, nextRow};
+        optionCallbacks = new Runnable[] {
+            () -> submitFinalChoice("buy_item", entry.itemKey),
+            () -> itemIndex = Math.floorMod(itemIndex + 1, catalog.size()),
+        };
     }
 
     private void submitFinalChoice(String action, String itemKey)
     {
         submitted = true;
         plugin.submitItemShopChoice(action, itemKey);
-    }
-
-    /** Draws each (name, description, callback) triple as a two-line row -- name/price on top
-     * (the clickable label, same coloring/hover drawOptionRows itself uses), its effect
-     * description dimmer right below -- until {@code plainRowsFromY}, from which point on (the
-     * "more.../Back" trailer rows) only a single line is drawn per entry, same shape
-     * drawOptionRows itself uses. Publishes hit-boxes/callbacks the same atomic-array-swap way
-     * drawOptionRows does -- see that method's own doc (ChatboxDialogueOverlay) for why. */
-    private void drawItemRows(Graphics2D g, List<String> names, List<String> descriptions, List<Runnable> callbacks, int top, int plainRowsFromY)
-    {
-        Rectangle[] rects = new Rectangle[names.size()];
-        net.runelite.api.Point mouse = client.getMouseCanvasPosition();
-
-        Font font = FontManager.getRunescapeFont();
-        g.setFont(font);
-        FontMetrics fm = g.getFontMetrics();
-
-        int y = top;
-        for (int i = 0; i < names.size(); i++)
-        {
-            boolean isItemRow = y < plainRowsFromY;
-            int rowHeight = isItemRow ? ITEM_ROW_HEIGHT : OPTION_ROW_HEIGHT;
-            Rectangle row = new Rectangle(bounds.x + TEXT_LEFT, y - fm.getAscent(),
-                bounds.width - TEXT_LEFT - TEXT_RIGHT_MARGIN, rowHeight);
-            rects[i] = row;
-
-            boolean hovered = mouse != null && row.contains(mouse.getX(), mouse.getY());
-            g.setColor(hovered ? OPTION_HOVER_COLOR : OPTION_COLOR);
-            g.drawString(names.get(i), row.x, y);
-
-            if (isItemRow && !descriptions.get(i).isEmpty())
-            {
-                g.setColor(ITEM_DESCRIPTION_COLOR);
-                g.drawString(descriptions.get(i), row.x, y + ITEM_DESCRIPTION_OFFSET);
-            }
-
-            y += rowHeight;
-        }
-
-        optionBounds = rects;
-        optionCallbacks = callbacks.toArray(new Runnable[0]);
     }
 }

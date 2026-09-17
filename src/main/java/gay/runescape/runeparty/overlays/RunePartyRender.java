@@ -58,6 +58,32 @@ final class RunePartyRender
         return merged.light();
     }
 
+    /** Same merge as {@link #loadNpcChatheadModel}, but returns the raw, pre-lit {@link ModelData}
+     * instead of a finished {@link Model} -- for a caller whose in-world model is recolored by
+     * hand (see ItemShopNpcOverlay's own RECOLOR_FIND/RECOLOR_REPLACE doc) and needs its chathead
+     * portrait recolored to match before calling {@code ModelData#light()} itself -- otherwise the
+     * dialogue box's portrait shows the NPC's stock colors while the model standing on the tile
+     * shows the recolored ones. Same "null while not cached yet, keep calling every frame"
+     * contract as loadNpcChatheadModel. */
+    static ModelData loadNpcChatheadModelData(Client client, int npcId)
+    {
+        NPCComposition comp = client.getNpcDefinition(npcId);
+        if (comp == null) return null;
+
+        int[] modelIds = comp.getChatheadModels();
+        if (modelIds == null || modelIds.length == 0) return null;
+
+        ModelData[] parts = new ModelData[modelIds.length];
+        for (int i = 0; i < modelIds.length; i++)
+        {
+            ModelData part = client.loadModelData(modelIds[i]);
+            if (part == null) return null; // not cached yet -- caller retries next frame
+            parts[i] = part;
+        }
+
+        return parts.length == 1 ? parts[0] : client.mergeModels(parts);
+    }
+
     /** Same merge as {@link #loadNpcModel}, but returns the raw, pre-lit {@link ModelData} instead
      * of a finished {@link Model} -- for a caller that needs to recolor every face first (see
      * models/CoinTrapModel#buildGoldModel's own doc on why recoloring needs the raw data, not a

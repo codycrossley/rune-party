@@ -633,12 +633,6 @@ public class RunePartyPlugin extends Plugin
     // it for whatever this NPC's real idle animation turns out to be.
     public static final int ITEM_SHOP_NPC_ID = 2151;
     public static final int ITEM_SHOP_NPC_IDLE_ANIMATION_ID = 808;
-    // Loosely paired with the server's own ItemTile.ITEM_CAP (tiles/item_tile.py), not protocol-
-    // coupled -- see ItemShopDialogueOverlay, the only reader: purely so the dialogue doesn't even
-    // offer an item the server would reject as "not enough room to hold another item", same
-    // "the server still re-checks for real" reasoning WISE_OLD_MAN_GNOME_STEAL_COST's own doc
-    // gives for its own affordability guard.
-    public static final int ITEM_CAP = 3;
 
     /** One item this Item Shop sells -- itemKey matches the server's own items/__init__.py
      * REGISTRY (see Items.java, the client-side twin) so the dialogue can pull each item's real

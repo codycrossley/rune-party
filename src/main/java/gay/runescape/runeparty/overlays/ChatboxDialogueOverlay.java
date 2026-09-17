@@ -11,7 +11,6 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.client.game.SpriteManager;
 import net.runelite.client.input.MouseAdapter;
 import net.runelite.client.input.MouseManager;
-import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
@@ -19,13 +18,12 @@ import net.runelite.client.ui.overlay.OverlayPosition;
 import javax.swing.SwingUtilities;
 import java.awt.Color;
 import java.awt.Dimension;
-import java.awt.Font;
-import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -50,20 +48,23 @@ import java.util.Objects;
  * hover, no shadow under any of it ("dialog text on parchment has none in the real client, and a
  * shadow visibly fattens the glyphs" -- FollowerDialog's own doc). This replaces an earlier,
  * unauthenticated palette (orange name/white body/lavender options) that read poorly against that
- * same sprite -- white body text over a light parchment backdrop is nearly illegible. Follower
- * Buddy itself goes one step further still, rendering the game's own real bitmap dialogue font
- * (a raw font-table dump, font id 497) rather than an AWT approximation -- genuinely pixel-exact,
- * but a much larger undertaking (a font-dump reader, not just a color/layout change) than this
- * project has needed so far; FontManager's own bundled RuneScape-styled fonts are what Follower
- * Buddy itself falls back to whenever its own font dump isn't loaded yet, so this is the same
- * fallback path, just used as the only path here.
+ * same sprite -- white body text over a light parchment backdrop is nearly illegible. Text itself
+ * is drawn via RunePartyFonts#DIALOGUE_BITMAP -- the game's own real bitmap dialogue font (a
+ * pre-extracted glyph dump, not a TrueType font at all), the exact same primary path Follower
+ * Buddy's own FollowerDialog uses, blitting the real client's own glyph pixels rather than
+ * approximating them through a system rasterizer -- falling back to RunePartyFonts#DIALOGUE_PLAIN
+ * (RuneStar's own "Plain 12" TTF recreation) only if that dump fails to load; see drawCentered's
+ * own doc for that fallback shape, and DIALOGUE_BITMAP's own doc for why an earlier version of
+ * this file shipped with only the fallback, mistaking it for Follower Buddy's actual default.
+ * Every string is horizontally centered within its own column (never left-aligned), same as
+ * FollowerDialog's own drawCell -- see drawCentered/drawWrappedText/drawOptionRows' own docs.
  * <p>
- * A subclass supplies: which NPC's chathead/name to show (getNpcId/getSpeakerName), which
- * Presentation-backed encounterRsn/revealAt gate the box open (getEncounterRsn/getRevealAt), and
- * everything drawn below the name (drawBody) -- typically ending in a call to drawOptionRows
- * (plain single-line rows) and/or a subclass's own custom row-drawing for anything fancier (see
- * ItemShopDialogueOverlay's own drawItemRows for a two-line-per-entry example), both of which
- * publish into the same optionBounds/optionCallbacks this class's own click handling reads. */
+ * A subclass supplies: which NPC's chathead/name to show (getNpcId/getSpeakerName -- overriding
+ * loadChatheadModel too, if that NPC's own in-world model is recolored by hand, see
+ * ItemShopDialogueOverlay's own override), which Presentation-backed encounterRsn/revealAt gate
+ * the box open (getEncounterRsn/getRevealAt), and everything drawn below the name (drawBody) --
+ * typically ending in a call to drawOptionRows (plain single-line rows), which publishes into the
+ * optionBounds/optionCallbacks this class's own click handling reads. */
 public abstract class ChatboxDialogueOverlay extends Overlay
 {
     protected static final int CHATHEAD_SIZE = 130;
@@ -78,10 +79,17 @@ public abstract class ChatboxDialogueOverlay extends Overlay
     private static final int BUTTON_STRIP = 23;
     protected static final int TEXT_LEFT = 140; // clears the chathead portrait on the left
     protected static final int TEXT_RIGHT_MARGIN = 20;
-    private static final int NAME_TOP_OFFSET = 22;
-    protected static final int BODY_TOP_OFFSET = 44;
+    // Tuned against RunePartyFonts#DIALOGUE_PLAIN's own real metrics (16pt: ascent 12, line height
+    // 16) rather than the larger FontManager font these were originally measured against -- see
+    // that field's own doc for the font swap. NAME_TOP_OFFSET to BODY_TOP_OFFSET is exactly one
+    // line height (a tight, single-line gap between the speaker name and the first line of body
+    // text); BODY_TOP_OFFSET to OPTIONS_TOP_OFFSET is the same 34px two-line band this class
+    // always reserved, just shifted up to follow the smaller BODY_TOP_OFFSET -- see
+    // drawWrappedText's own doc for that band's own role.
+    private static final int NAME_TOP_OFFSET = 16;
+    protected static final int BODY_TOP_OFFSET = 32;
     protected static final int OPTION_ROW_HEIGHT = 18;
-    protected static final int OPTIONS_TOP_OFFSET = 78;
+    protected static final int OPTIONS_TOP_OFFSET = 66;
 
     // See this class's own doc for why these match Follower Buddy's own FollowerDialog palette.
     private static final Color PARCHMENT = new Color(0xc8, 0xb8, 0x8f);
@@ -241,12 +249,37 @@ public abstract class ChatboxDialogueOverlay extends Overlay
 
         bounds = computeBounds();
 
-        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        // Antialiasing OFF, not on -- see Follower Buddy's own FollowerDialog#render doc: "The
+        // game draws its text with a bitmap font and no antialiasing. Leaving AA on softens and
+        // visibly thickens every glyph." RunePartyFonts#DIALOGUE_PLAIN is exactly that kind of
+        // font (fonthashint: false; a "pixel-perfect" recreation with no hint instructions of its
+        // own, only correct at the crisp, unsmoothed rendering it was authored for) -- forcing AA
+        // on it doesn't just look bolder, it visibly warps the letterforms into something that
+        // barely reads as the same typeface.
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
 
-        drawBackground(g);
-        drawChathead(g);
-        drawName(g);
-        drawBody(g, self);
+        // Belt-and-suspenders: every subclass's own screen is careful to lay its own content out
+        // within the box (see e.g. ItemShopDialogueOverlay/WiseOldManDialogueOverlay's own
+        // carousel doc), but clipping here means a future subclass that draws one line too many
+        // still can't paint outside the box -- it silently gets cut off at the border instead of
+        // spilling over whatever's underneath (the game world, other overlays). Restored
+        // unconditionally in a finally so a subclass's own drawBody throwing never leaves the
+        // client's graphics context clipped for every other overlay drawn after this one this
+        // frame.
+        java.awt.Shape previousClip = g.getClip();
+        g.setClip(bounds);
+        try
+        {
+            drawBackground(g);
+            drawChathead(g);
+            drawName(g);
+            drawBody(g, self);
+        }
+        finally
+        {
+            g.setClip(previousClip);
+        }
 
         return null;
     }
@@ -286,10 +319,21 @@ public abstract class ChatboxDialogueOverlay extends Overlay
     private BufferedImage chathead()
     {
         if (chatheadImage != null) return chatheadImage;
-        Model model = RunePartyRender.loadNpcChatheadModel(client, getNpcId());
+        Model model = loadChatheadModel();
         if (model == null) return null; // not cached yet -- keep retrying every frame until it resolves
         chatheadImage = ChatheadRenderer.render(model, CHATHEAD_SIZE, CHATHEAD_SIZE);
         return chatheadImage;
+    }
+
+    /** This NPC's own chathead portrait model, ready to light/render -- default just loads
+     * getNpcId()'s own natural-colored chathead resource. Override when the in-world NPC standing
+     * on the tile is recolored by hand (see ItemShopDialogueOverlay's own override, and
+     * ItemShopNpcOverlay's RECOLOR_FIND/RECOLOR_REPLACE doc for why) -- without this, the portrait
+     * and the NPC actually standing there would show two different palettes for what's meant to be
+     * the same character. */
+    protected Model loadChatheadModel()
+    {
+        return RunePartyRender.loadNpcChatheadModel(client, getNpcId());
     }
 
     private void drawChathead(Graphics2D g)
@@ -301,9 +345,12 @@ public abstract class ChatboxDialogueOverlay extends Overlay
 
     private void drawName(Graphics2D g)
     {
-        g.setFont(FontManager.getRunescapeBoldFont());
-        g.setColor(NAME_COLOR);
-        g.drawString(getSpeakerName(), bounds.x + TEXT_LEFT, bounds.y + NAME_TOP_OFFSET);
+        // Same font as everything else in the box, differentiated only by NAME_COLOR -- Follower
+        // Buddy's own FollowerDialog draws its speaker name through the exact same drawCell/font
+        // path the body text uses, no separate bold weight. Horizontally centered in the column,
+        // same as every other string this class draws -- see drawWrappedText's own doc for why.
+        int columnWidth = bounds.width - TEXT_LEFT - TEXT_RIGHT_MARGIN;
+        drawCentered(g, getSpeakerName(), bounds.x + TEXT_LEFT, columnWidth, bounds.y + NAME_TOP_OFFSET, NAME_COLOR);
     }
 
     /** Draws one clickable row per (label, callback) pair, top to bottom starting at {@code top},
@@ -314,21 +361,20 @@ public abstract class ChatboxDialogueOverlay extends Overlay
     {
         Rectangle[] rects = new Rectangle[labels.size()];
         net.runelite.api.Point mouse = client.getMouseCanvasPosition();
-
-        Font font = FontManager.getRunescapeFont();
-        g.setFont(font);
-        FontMetrics fm = g.getFontMetrics();
+        int rowWidth = bounds.width - TEXT_LEFT - TEXT_RIGHT_MARGIN;
+        int ascent = ascent(g);
 
         int y = top;
         for (int i = 0; i < labels.size(); i++)
         {
-            Rectangle row = new Rectangle(bounds.x + TEXT_LEFT, y - fm.getAscent(),
-                bounds.width - TEXT_LEFT - TEXT_RIGHT_MARGIN, OPTION_ROW_HEIGHT);
+            // The row's own hit-box still spans the FULL column width (unrelated to where its
+            // label happens to be drawn) -- clicking anywhere on an option's row selects it, not
+            // just the label text itself.
+            Rectangle row = new Rectangle(bounds.x + TEXT_LEFT, y - ascent, rowWidth, OPTION_ROW_HEIGHT);
             rects[i] = row;
 
             boolean hovered = mouse != null && row.contains(mouse.getX(), mouse.getY());
-            g.setColor(hovered ? OPTION_HOVER_COLOR : OPTION_COLOR);
-            g.drawString(labels.get(i), row.x, y);
+            drawCentered(g, labels.get(i), bounds.x + TEXT_LEFT, rowWidth, y, hovered ? OPTION_HOVER_COLOR : OPTION_COLOR);
 
             y += OPTION_ROW_HEIGHT;
         }
@@ -337,25 +383,119 @@ public abstract class ChatboxDialogueOverlay extends Overlay
         optionCallbacks = callbacks.toArray(new Runnable[0]);
     }
 
-    /** Plain greedy word-wrap against {@code maxWidth}, drawn top-down from {@code top} -- good
-     * enough for the short, fixed lines these dialogues ever show (no need for the real client's
-     * own bitmap-font metrics the way a pixel-perfect port would -- see this class's own doc for
-     * why that's out of scope here). */
-    protected void drawWrappedText(Graphics2D g, String text, int x, int top, int maxWidth)
+    /** This box's own current line height, in pixels -- RunePartyFonts#DIALOGUE_BITMAP's own
+     * tallest glyph when loaded, else the AWT fallback's own reported line height. Every
+     * dialogue's own manual layout math (WiseOldManDialogueOverlay/ItemShopDialogueOverlay's own
+     * carousels included) uses this and the two below instead of a raw FontMetrics call, so both
+     * rendering paths agree on spacing regardless of which one actually loaded. */
+    protected int lineHeight(Graphics2D g)
     {
-        g.setFont(FontManager.getRunescapeFont());
-        g.setColor(BODY_COLOR);
-        FontMetrics fm = g.getFontMetrics();
+        GameFont bitmap = RunePartyFonts.DIALOGUE_BITMAP;
+        if (bitmap != null) return bitmap.getLineHeight();
+        g.setFont(RunePartyFonts.DIALOGUE_PLAIN);
+        return g.getFontMetrics().getHeight();
+    }
 
+    /** This box's own current ascent, in pixels -- see lineHeight's own doc. */
+    protected int ascent(Graphics2D g)
+    {
+        GameFont bitmap = RunePartyFonts.DIALOGUE_BITMAP;
+        if (bitmap != null) return bitmap.getAscent();
+        g.setFont(RunePartyFonts.DIALOGUE_PLAIN);
+        return g.getFontMetrics().getAscent();
+    }
+
+    /** The exact pixel width {@code text} renders at -- see lineHeight's own doc. */
+    protected int textWidth(Graphics2D g, String text)
+    {
+        GameFont bitmap = RunePartyFonts.DIALOGUE_BITMAP;
+        if (bitmap != null) return bitmap.stringWidth(text);
+        g.setFont(RunePartyFonts.DIALOGUE_PLAIN);
+        return g.getFontMetrics().stringWidth(text);
+    }
+
+    /** Draws {@code text} with its baseline at {@code baselineY}, horizontally centered within
+     * [columnX, columnX+columnWidth) -- RunePartyFonts#DIALOGUE_BITMAP when loaded, blitting the
+     * game's own actual glyph pixels exactly as the real client does, else the AWT fallback font.
+     * No shadow, either path -- see this class's own doc for why (dialog text on parchment has
+     * none in the real client). */
+    protected void drawCentered(Graphics2D g, String text, int columnX, int columnWidth, int baselineY, Color color)
+    {
+        int x = columnX + (columnWidth - textWidth(g, text)) / 2;
+        GameFont bitmap = RunePartyFonts.DIALOGUE_BITMAP;
+        if (bitmap != null)
+        {
+            bitmap.drawBaseline(g, text, x, baselineY, color.getRGB() & 0xFFFFFF);
+        }
+        else
+        {
+            g.setFont(RunePartyFonts.DIALOGUE_PLAIN);
+            g.setColor(color);
+            g.drawString(text, x, baselineY);
+        }
+    }
+
+    // Minimum breathing room, below whichever text a screen's own body actually ends at, before
+    // its first option row starts -- applied on top of the returned drawWrappedText offset (see
+    // that method's own doc for why a fixed OPTIONS_TOP_OFFSET alone isn't safe: a greeting that
+    // wraps to as many lines as the reserved band was sized for leaves as little as ~1px between
+    // the last line's own descenders and the first option, before this gap is even added).
+    private static final int BODY_OPTIONS_GAP = 6;
+
+    /** The greeting/prompt text's own nominal column -- BODY_TOP_OFFSET to OPTIONS_TOP_OFFSET
+     * below the box's top edge -- vertically centers its wrapped block within this exact band
+     * when it fits, mirroring Follower Buddy's own FollowerDialog#BODY_HEIGHT ("the game genuinely
+     * spaces a two-line message wider than a three-line one" -- see that class's own
+     * measuredLineHeight doc); we use this font's own natural line height throughout rather than
+     * that plugin's own per-line-count measured table, since that table was measured against the
+     * real client's own bitmap font metrics, not this bundled TTF's.
+     *
+     * Returns the offset (below the box's top edge, same units as OPTIONS_TOP_OFFSET -- NOT an
+     * absolute screen y) immediately below the last line actually drawn, plus BODY_OPTIONS_GAP --
+     * every call site uses {@code Math.max(OPTIONS_TOP_OFFSET, thisReturnValue)} as where its own
+     * options/entries actually start, rather than assuming the nominal OPTIONS_TOP_OFFSET always
+     * has room. Without this, a greeting that wraps to exactly as many lines as the band was sized
+     * for (the common case, not an edge case -- see WiseOldManDialogueOverlay's own greeting,
+     * which does this every time the local player can afford a Golden Gnome steal) leaves the
+     * options row starting within single-digit pixels of the body text's own descenders, reading
+     * as visibly overlapping once real glyph rendering (not just nominal font metrics) is
+     * accounted for. */
+    protected int drawWrappedText(Graphics2D g, String text, int x, int width)
+    {
+        List<String> lines = wrap(g, text, width);
+        int lineHeight = lineHeight(g);
+        int bandHeight = OPTIONS_TOP_OFFSET - BODY_TOP_OFFSET;
+        int blockHeight = lines.size() * lineHeight;
+        int blockTopOffset = BODY_TOP_OFFSET + Math.max(0, (bandHeight - blockHeight) / 2);
+
+        int y = bounds.y + blockTopOffset + ascent(g);
+        for (String line : lines)
+        {
+            // Horizontally centered in the same column every option/name row centers in --
+            // see drawOptionRows/drawName's own doc for why (Follower Buddy's own FollowerDialog
+            // centers every string it draws, name/body/options alike, rather than left-aligning
+            // any of them).
+            drawCentered(g, line, x, width, y, BODY_COLOR);
+            y += lineHeight;
+        }
+
+        return blockTopOffset + blockHeight + BODY_OPTIONS_GAP;
+    }
+
+    /** Plain greedy word-wrap against {@code maxWidth} -- good enough for the short, fixed lines
+     * these dialogues ever show. Measured via textWidth (the real bitmap font's own per-character
+     * advances when loaded, so wrap decisions agree with what actually gets drawn -- not just an
+     * AWT approximation the way this always measured before the bitmap font was ported in). */
+    private List<String> wrap(Graphics2D g, String text, int maxWidth)
+    {
+        List<String> lines = new ArrayList<>();
         StringBuilder line = new StringBuilder();
-        int y = top;
         for (String word : text.split(" "))
         {
             String candidate = line.length() == 0 ? word : line + " " + word;
-            if (fm.stringWidth(candidate) > maxWidth && line.length() > 0)
+            if (textWidth(g, candidate) > maxWidth && line.length() > 0)
             {
-                g.drawString(line.toString(), x, y);
-                y += fm.getHeight();
+                lines.add(line.toString());
                 line = new StringBuilder(word);
             }
             else
@@ -363,6 +503,7 @@ public abstract class ChatboxDialogueOverlay extends Overlay
                 line = new StringBuilder(candidate);
             }
         }
-        if (line.length() > 0) g.drawString(line.toString(), x, y);
+        if (line.length() > 0) lines.add(line.toString());
+        return lines;
     }
 }

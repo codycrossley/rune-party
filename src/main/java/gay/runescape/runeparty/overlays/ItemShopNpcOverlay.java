@@ -29,7 +29,10 @@ import java.util.Set;
  * Recolored by hand to a custom palette (see RECOLOR_FIND/RECOLOR_REPLACE) rather than left in
  * ITEM_SHOP_NPC_ID's own natural colors -- same "the real spawn pipeline applies an NPC's declared
  * recolors automatically, a raw loadNpcModelData composition merge doesn't, so they have to be
- * reapplied by hand here" reasoning ArenaFireModel's own RECOLOR_FIND/RECOLOR_REPLACE doc gives. */
+ * reapplied by hand here" reasoning ArenaFireModel's own RECOLOR_FIND/RECOLOR_REPLACE doc gives.
+ * applyRecolor is also called by ItemShopDialogueOverlay for this same NPC's own chathead portrait
+ * -- see that class's own loadChatheadModel override -- so the two never drift apart into showing
+ * different colors for what's meant to be the same shopkeeper. */
 public final class ItemShopNpcOverlay extends Overlay
 {
     // The shopkeeper's own custom recolor find/replace pairs (packed-HSL swap slots), paired by
@@ -44,6 +47,21 @@ public final class ItemShopNpcOverlay extends Overlay
     {
         (short) 47502, (short) 47502, (short) 47382, (short) 47382, (short) 12, (short) 6057,
     };
+
+    /** Applies the shopkeeper's own RECOLOR_FIND/RECOLOR_REPLACE pairs to raw ModelData -- shared
+     * by this class's own buildRecoloredModel (the in-world model) and
+     * ItemShopDialogueOverlay#loadChatheadModel (the dialogue portrait), so both always show the
+     * exact same palette off one single source of truth. Caller still needs to call
+     * {@code ModelData#light()} on the result themselves. */
+    static ModelData applyRecolor(ModelData raw)
+    {
+        ModelData result = raw;
+        for (int i = 0; i < RECOLOR_FIND.length; i++)
+        {
+            result = result.recolor(RECOLOR_FIND[i], RECOLOR_REPLACE[i]);
+        }
+        return result;
+    }
 
     private final Client client;
     private final RunePartyPlugin plugin;
@@ -127,12 +145,7 @@ public final class ItemShopNpcOverlay extends Overlay
         ModelData raw = RunePartyRender.loadNpcModelData(client, RunePartyPlugin.ITEM_SHOP_NPC_ID);
         if (raw == null) return; // not cached yet -- retried next call
 
-        ModelData result = raw;
-        for (int i = 0; i < RECOLOR_FIND.length; i++)
-        {
-            result = result.recolor(RECOLOR_FIND[i], RECOLOR_REPLACE[i]);
-        }
-        recoloredModel = result.light();
+        recoloredModel = applyRecolor(raw).light();
     }
 
     /** Despawns and forgets every Item Shop RuneLiteObject -- see WiseOldManNpcOverlay's own
