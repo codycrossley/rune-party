@@ -277,6 +277,7 @@ public class AnnouncementOverlay extends Overlay
         renderItemCapBlocked(g);
         renderItemUsedAnnouncement(g);
         renderTeleBlockCastAnnouncement(g);
+        renderTeleOtherUsedAnnouncement(g);
         renderCoinTrapAnnouncement(g);
         renderWiseOldManStolen(g);
         renderItemShopOutcome(g);
@@ -306,6 +307,7 @@ public class AnnouncementOverlay extends Overlay
             renderMinigameCountdown(g);
         }
         renderRainbowRushTrafficLight(g);
+        renderArrivalRoundBeginBanner(g);
         renderTrueOrFalseReveal(g);
         renderTrueOrFalseQuestion(g);
         renderCrabRaveCountdown(g);
@@ -888,6 +890,23 @@ public class AnnouncementOverlay extends Overlay
         drawCenteredRainbowText(g, "MINIGAME OVER!", RAINBOW_LETTER_COLORS, centerX, y, alpha);
     }
 
+    /** The "you're off" moment an arrival-gated mini-game's own gather message
+     * (renderArrivalGatherMessage) never had -- see RunePartyPlugin#ARRIVAL_GATHER_KEYS's own doc
+     * for exactly which mini-games this fires for. Reuses the same rainbow "BEGIN!" the
+     * countdown-driven path's own renderMinigameCountdown pops in with, so every mini-game's round
+     * genuinely starting reads the same way regardless of which path got it there. */
+    private void renderArrivalRoundBeginBanner(Graphics2D g)
+    {
+        Float alpha = BannerAnim.fadeAlpha(plugin.getArrivalRoundBeginBannerUntil(), MINIGAME_FADE_MS);
+        if (alpha == null) return;
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 2;
+
+        g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_COUNTDOWN_SIZE));
+        drawCenteredRainbowText(g, "BEGIN!", RAINBOW_LETTER_COLORS, centerX, y, alpha);
+    }
+
     /** Turf Wars' once-per-round reveal -- "This is your team color!" drawn in that player's own
      * assigned color. Deliberately doesn't name the color, since the text works the same for both
      * shared team colors and an odd round's solo seat colors. */
@@ -1087,6 +1106,28 @@ public class AnnouncementOverlay extends Overlay
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_SUBTITLE_SIZE));
         drawCenteredText(g, subtitle, centerX, y + 28, Color.LIGHT_GRAY, alpha);
+    }
+
+    /** Draws "You/&lt;caster&gt; used Tele Other on &lt;target&gt;!" -- single line, no subtitle,
+     * per this item's own confirmed design (see RunePartyPlugin#scheduleTeleOtherUsedAnnouncement's
+     * own doc for why this differs from renderTeleBlockCastAnnouncement's two-line shape). */
+    private void renderTeleOtherUsedAnnouncement(Graphics2D g)
+    {
+        Float alpha = BannerAnim.fadeAlpha(plugin.getTeleOtherUsedUntil(), ITEM_USED_ANNOUNCE_FADE_MS);
+        if (alpha == null) return;
+        String caster = plugin.getTeleOtherUsedCasterRsn();
+        String target = plugin.getTeleOtherUsedTargetRsn();
+        if (caster == null || target == null) return;
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 3;
+
+        String casterPart = isLocal(caster) ? "You" : caster;
+        String targetPart = isLocal(target) ? "you" : target;
+        String title = casterPart + " used Tele Other on " + targetPart + "!";
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_TITLE_SIZE));
+        drawCenteredText(g, title, centerX, y, Color.WHITE, alpha);
     }
 
     /** Draws "You/&lt;rsn&gt; landed on a Coin Trap!" -- no subtitle, since the actual coin numbers

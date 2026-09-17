@@ -2,10 +2,13 @@ package gay.runescape.runeparty.minigames;
 
 import gay.runescape.runeparty.RunePartyPlugin;
 import gay.runescape.runeparty.TileReducer;
+import gay.runescape.runeparty.net.ApiClient;
+import gay.runescape.runeparty.net.Events;
 
 import net.runelite.api.Player;
 import net.runelite.api.coords.WorldPoint;
 
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -19,7 +22,15 @@ import java.util.concurrent.ConcurrentHashMap;
  * visitedPathIndices is tracked per-player, on purpose: unlike Turf Wars' tile ownership (real
  * shared state living in TileReducer, since a claim is board state everyone sees), visiting a tile
  * here is personal progress, and this repo only ever renders the *local* player's own (see
- * TileOverlay#renderRainbowRushTile, the only reader of isVisited). */
+ * TileOverlay#renderRainbowRushTile, the only reader of isVisited).
+ * <p>
+ * Mario Kart-style ranked payout (1st/2nd/3rd get different amounts, see the server's own
+ * pay_out_ranked) needs every seated player's REAL tile count, not just the winner's -- so the
+ * instant the server sees any submission reach the course's full length, it broadcasts
+ * RAINBOW_RUSH_FINISHER_FOUND (see {@link #apply}) telling every other still-racing client to stop
+ * and submit its own current count right now, rather than waiting for its own local
+ * getEndsAt()-style timer. Without this, only the finisher's own score was ever recorded, and
+ * everyone else's real progress was silently discarded, showing as "0 pts" in the final recap. */
 public final class RainbowRushPresentation implements MinigamePresentationFeature
 {
     private final RunePartyPlugin plugin;
@@ -31,6 +42,23 @@ public final class RainbowRushPresentation implements MinigamePresentationFeatur
     public RainbowRushPresentation(RunePartyPlugin plugin)
     {
         this.plugin = plugin;
+    }
+
+    /** RAINBOW_RUSH_FINISHER_FOUND is the only event type this feature needs to react to beyond
+     * the generic lifecycle hooks below -- see this class's own doc. Ignored once this client has
+     * already submitted (its own finish, or a previous finisher's own signal already handled) --
+     * submitMinigameResult is one-shot, same "submitted latch" every other client-local mini-game
+     * already relies on to never double-report. Ignored during catch-up too: a stale signal from a
+     * round that's already ended has nothing left to submit for. */
+    @Override
+    public void apply(ApiClient.EventOut e, boolean catchingUp)
+    {
+        String type = e.type.toUpperCase(Locale.ROOT);
+        if (Events.RAINBOW_RUSH_FINISHER_FOUND.equals(type) && !catchingUp && !submitted)
+        {
+            submitted = true;
+            plugin.submitMinigameResult(visitedPathIndices.size());
+        }
     }
 
     /** Called once per game tick from RunePartyPlugin#onGameTick while this mini-game is active.

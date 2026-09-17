@@ -30,11 +30,13 @@ import java.util.Set;
  * share a tick (a "chord", both tiles lit at once) or simply overlap partway (one note's tail
  * still lit while the next one's already begun), so a player has to notice which tile lit up and
  * step onto it sometime during its own window, not just react to a single spotlight moving one
- * step at a time. Standing on an active note's own tile scores it once. Nothing about *which*
+ * step at a time. Standing on an active note's own tile scores it once. Wandering off the dance
+ * floor entirely -- anywhere but the anchor or one of its 4 direction tiles, active note or not --
+ * costs 1 point, once per excursion (see {@link #outOfBounds}'s own doc). Nothing about *which*
  * tile is highlighted or *when* is shared with the server or any other client -- every client
  * reads the same hardcoded sequence data and picks the same one for this game independently, with
- * no round-trip involved for that part; only the round's overall duration and the final tally are
- * ever sent, once each. */
+ * no round-trip involved for that part; only the round's overall duration and the final tally
+ * (already reflecting any out-of-bounds deductions) are ever sent, once each. */
 public final class DanceDanceRuneScapePresentation implements MinigamePresentationFeature
 {
     /** Which of the four tiles adjacent to the anchor is currently highlighted. NORTH/SOUTH are
@@ -330,6 +332,11 @@ public final class DanceDanceRuneScapePresentation implements MinigamePresentati
     private volatile Set<Direction> highlighted = Collections.emptySet();
     private volatile int score = 0;
     private volatile boolean submitted = false;
+    // Latch, not a per-tick penalty -- true for as long as the local player is standing anywhere
+    // but the anchor or one of the 4 direction tiles (see onTick's own out-of-bounds check below),
+    // so wandering off costs exactly 1 point the instant you leave, not one point per tick spent
+    // away. Flips back false the moment you return, so leaving again later can cost another point.
+    private volatile boolean outOfBounds = false;
 
     public DanceDanceRuneScapePresentation(RunePartyPlugin plugin)
     {
@@ -409,6 +416,26 @@ public final class DanceDanceRuneScapePresentation implements MinigamePresentati
                         newFlashes.put(sequence[i].direction, System.currentTimeMillis());
                     }
                 }
+
+                // Out-of-bounds check: in-bounds means standing on the anchor or exactly one of
+                // its 4 direction tiles, regardless of whether that direction currently has an
+                // active note -- this is about staying on the dance floor at all, not scoring.
+                // See outOfBounds's own doc for why this is a latch (costs 1 point the instant you
+                // leave, not every tick spent away).
+                boolean inBounds = playerPos.equals(anchor)
+                    || playerPos.equals(tileFor(anchor, Direction.NORTH))
+                    || playerPos.equals(tileFor(anchor, Direction.SOUTH))
+                    || playerPos.equals(tileFor(anchor, Direction.EAST))
+                    || playerPos.equals(tileFor(anchor, Direction.WEST));
+                if (!inBounds && !outOfBounds)
+                {
+                    score--;
+                    outOfBounds = true;
+                }
+                else if (inBounds)
+                {
+                    outOfBounds = false;
+                }
             }
         }
         if (newFlashes != null) flashStartAtMillis = Collections.unmodifiableMap(newFlashes);
@@ -479,6 +506,7 @@ public final class DanceDanceRuneScapePresentation implements MinigamePresentati
         highlighted = Collections.emptySet();
         score = 0;
         submitted = false;
+        outOfBounds = false;
         roundStartAt = 0;
     }
 
@@ -531,6 +559,7 @@ public final class DanceDanceRuneScapePresentation implements MinigamePresentati
         highlighted = Collections.emptySet();
         score = 0;
         submitted = false;
+        outOfBounds = false;
         roundStartAt = 0;
     }
 

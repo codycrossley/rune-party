@@ -533,6 +533,30 @@ public class RunePartyPlugin extends Plugin
      * other back-to-back banner pair here already uses). */
     public static final long MINIGAME_OVER_BANNER_DURATION_MS = 3000;
 
+    /** How long AnnouncementOverlay's brief rainbow "BEGIN!" flash stays up for an arrival-gated
+     * mini-game's own MINIGAME_ROUND_BEGIN -- see ARRIVAL_GATHER_KEYS's own doc. Countdown-driven
+     * mini-games already get an equivalent moment for free (renderMinigameCountdown's own "BEGIN!"
+     * pop, the last beat of the "3...2...1" sequence); arrival-gated ones previously had nothing at
+     * all -- their own gather message (renderArrivalGatherMessage) just silently disappeared the
+     * instant everyone arrived, with no "you're off" moment to replace it. Same duration/fade
+     * treatment as MINIGAME_OVER_BANNER_DURATION_MS -- a distinct constant since the two banners
+     * are conceptually unrelated, even though they happen to share a value today. */
+    public static final long ARRIVAL_ROUND_BEGIN_BANNER_DURATION_MS = 3000;
+
+    /** Mini-games whose MINIGAME_ROUND_BEGIN gets ARRIVAL_ROUND_BEGIN_BANNER_DURATION_MS's own
+     * "BEGIN!" flash -- exactly the keys AnnouncementOverlay routes to renderArrivalGatherMessage
+     * (see that call site's own `||` chain) MINUS Rainbow Rush, which already gets an equivalent
+     * moment from its own dedicated renderRainbowRushTrafficLight (the traffic light's own green
+     * light comes with a "Begin!" pop built in) -- arming this flash for Rainbow Rush too would
+     * just stack a second, redundant "BEGIN!" on top of that. Brutus Attack is ALSO excluded despite
+     * using its own bespoke renderBrutusAttackGatherMessage instead of the generic one: that one
+     * repeats fresh before each of its own 3 rounds off a different lifecycle than
+     * isMinigameRoundBegun()'s single one-shot latch (see that method's own doc), so it isn't a
+     * fit for this same "fire once, when the round begins" flash without its own separate handling
+     * -- left out of scope here rather than half-wired. */
+    public static final Set<String> ARRIVAL_GATHER_KEYS = Set.of(
+        ARENA_KEY, TURF_WARS_KEY, SANDWICH_RUSH_KEY, JADDY_KEY, HOT_POTATO_KEY, DANCE_DANCE_RUNESCAPE_KEY, REPEAT_AFTER_ME_KEY);
+
     /** How long AnnouncementOverlay's mini-game final-score recap ("how did everyone do") stays up
      * -- triggered on MINIGAME_ENDED (see triggerMinigameScoreBanner), shown *after* the "MINIGAME
      * OVER!" banner above and *before* the rewards recap below: chained via the same armBanner/
@@ -779,6 +803,14 @@ public class RunePartyPlugin extends Plugin
      * against the real spell in-client, same caveat every other un-measured animation-hold/effect
      * constant in this codebase already carries (see e.g. JAD_SMASH_ANIMATION_HOLD_MS's own doc). */
     public static final int TELE_BLOCK_IMPACT_SPOTANIM_HEIGHT = 100;
+
+    /** Spotanim played directly on a player's own actor the instant they're eliminated in Flame
+     * Field (see ARENA_PLAYER_ELIMINATED handling) -- the real Voidwaker special attack's own
+     * impact graphic, same choice (and same height=0/delay=0 call shape, see that project's own
+     * spawnStoplightSpotanim) the skwid-games plugin's Red Light Green Light elimination effect
+     * already uses for the identical "you're out" moment. Played via Actor#createSpotAnim (see
+     * triggerSpotAnimOnPlayer), same as TELE_BLOCK_IMPACT_SPOTANIM_ID above. */
+    public static final int ARENA_ELIMINATION_SPOTANIM_ID = SpotanimID.FX_VOIDWAKER_IMPACT;
 
     /** How long after the "vanish" spotanim starts before the model actually disappears from its
      * old spot -- see TileOverlay#updateGoldenGnomeModels, which force-persists the old point past
@@ -1151,6 +1183,12 @@ public class RunePartyPlugin extends Plugin
     // Item#hasUseAnnouncement/ItemPresentation's own itemUsedAnnounce (see TeleBlockItem's own
     // doc for why): that mechanism's payload has no target field, and this banner's title needs one.
     private final TimedBanner<TeleBlockCastPayload> teleBlockCastAnnounce = new TimedBanner<>();
+    // "You/<caster> used Tele Other on <target>!" -- fired on TELE_OTHER_USED. Single line, no
+    // subtitle, unlike teleBlockCastAnnounce's own two-line shape -- the item's own confirmed
+    // design is "just the announcement, nothing else" (the target's actual new position is
+    // conveyed generically by whatever PLAYER_MOVED already renders, same latitude Gnome Glider's
+    // own positive equivalent takes).
+    private final TimedBanner<TeleOtherUsedPayload> teleOtherUsedAnnounce = new TimedBanner<>();
 
     // welcomeBanner lives on SessionManager, along with the session-lifecycle fields/methods it's
     // armed by (createGame/joinGame).
@@ -1225,6 +1263,21 @@ public class RunePartyPlugin extends Plugin
         final String targetRsn;
 
         TeleBlockCastPayload(String casterRsn, String targetRsn)
+        {
+            this.casterRsn = casterRsn;
+            this.targetRsn = targetRsn;
+        }
+    }
+
+    /** Payload for the "You/&lt;caster&gt; used Tele Other on &lt;target&gt;!" banner -- same
+     * two-rsn shape TeleBlockCastPayload uses, kept as its own class since the two banners are
+     * conceptually unrelated even though their payload happens to look identical. */
+    private static final class TeleOtherUsedPayload
+    {
+        final String casterRsn;
+        final String targetRsn;
+
+        TeleOtherUsedPayload(String casterRsn, String targetRsn)
         {
             this.casterRsn = casterRsn;
             this.targetRsn = targetRsn;
@@ -3158,6 +3211,15 @@ public class RunePartyPlugin extends Plugin
             () -> new TeleBlockCastPayload(casterRsn, targetRsn), true);
     }
 
+    /** Arms teleOtherUsedAnnounce -- same duration reused for the same reason
+     * scheduleTeleBlockCastAnnouncement's own doc gives, just a single-line render
+     * (renderTeleOtherUsedAnnouncement) instead of that one's title/subtitle pair. */
+    private void scheduleTeleOtherUsedAnnouncement(String casterRsn, String targetRsn)
+    {
+        armBanner(teleOtherUsedAnnounce, ITEM_USED_ANNOUNCE_DURATION_MS,
+            () -> new TeleOtherUsedPayload(casterRsn, targetRsn), true);
+    }
+
     // scheduleMinigameBanner/scheduleMinigameSpinner/triggerMinigameRewardsBanner/
     // scheduleRoundCompleteBanner, and scheduleItemSpinner/scheduleItemCapBlockedAnnouncement/
     // scheduleItemUsedAnnouncement/scheduleCoinTrapTriggerAnnouncement, live on
@@ -3525,6 +3587,28 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
+            case Events.TELE_OTHER_USED:
+            {
+                // Purely a reveal/announcement -- the real mechanical effect (the target's own new
+                // position) is carried entirely by the PLAYER_MOVED event fired alongside this one
+                // (see items/tele_other.py's own apply_targeted_effect), already handled generically
+                // wherever PLAYER_MOVED is. Deliberately no spotanim/indicator of any kind here, per
+                // this feature's own confirmed design ("nothing else should happen") -- just the
+                // banner and a chat line, same parity every other announcement-only event in this
+                // switch gets.
+                if (!catchingUp)
+                {
+                    String caster = Json.requiredStr(e.payload, type, "caster");
+                    String target = Json.requiredStr(e.payload, type, "target");
+                    if (caster != null && target != null)
+                    {
+                        scheduleTeleOtherUsedAnnouncement(caster, target);
+                        addChatMessage(caster + " used Tele Other on " + target + "!");
+                    }
+                }
+                break;
+            }
+
             case Events.HOT_POTATO_EXPLODED:
             {
                 // minigamePresentation.apply folds the elimination itself (hotPotatoEliminatedRsns)
@@ -3559,6 +3643,25 @@ public class RunePartyPlugin extends Plugin
                     if (eliminatedRsn != null)
                     {
                         addChatMessage("Brutus crashed into " + eliminatedRsn + "! They're eliminated from this round.");
+                    }
+                }
+                break;
+            }
+
+            case Events.ARENA_PLAYER_ELIMINATED:
+            {
+                // No fold needed -- unlike BRUTUS_PLAYER_ELIMINATED's own eliminatedRsns skull
+                // tracking, Flame Field already shows elimination visually (the tile itself turns
+                // fully red before/as this fires), so this is purely a one-shot cosmetic reveal:
+                // the Voidwaker spec spotanim on the eliminated player's own actor, plus a chat
+                // message for parity with every other elimination case in this switch.
+                if (!catchingUp)
+                {
+                    String eliminatedRsn = Json.requiredStr(e.payload, type, "player");
+                    if (eliminatedRsn != null)
+                    {
+                        triggerSpotAnimOnPlayer(ARENA_ELIMINATION_SPOTANIM_ID, eliminatedRsn, 0);
+                        addChatMessage(eliminatedRsn + " was consumed by the flames! They're eliminated from this round.");
                     }
                 }
                 break;
@@ -3686,6 +3789,7 @@ public class RunePartyPlugin extends Plugin
             case Events.MINIGAME_TEAMS_ASSIGNED:
             case Events.HOT_POTATO_ASSIGNED:
             case Events.REPEAT_AFTER_ME_ROUND_STARTED:
+            case Events.RAINBOW_RUSH_FINISHER_FOUND:
             case Events.PLAYER_TRANSFORMED:
             case Events.BRUTUS_ROUND_STARTED:
             case Events.BRUTUS_ARRIVAL_PENDING:
@@ -3849,6 +3953,7 @@ public class RunePartyPlugin extends Plugin
         turnAnnounce.reset();
         turnSkippedAnnounce.reset();
         teleBlockCastAnnounce.reset();
+        teleOtherUsedAnnounce.reset();
         itemPresentation.reset();
         turnEffectGateUntil = 0;
         gameId = null; writeKey = null; playerToken = null;
@@ -4263,9 +4368,13 @@ public class RunePartyPlugin extends Plugin
     public String getTeleBlockCastCasterRsn() { return teleBlockCastAnnounce.payload != null ? teleBlockCastAnnounce.payload.casterRsn : null; }
     public String getTeleBlockCastTargetRsn() { return teleBlockCastAnnounce.payload != null ? teleBlockCastAnnounce.payload.targetRsn : null; }
     public long getTeleBlockCastUntil() { return teleBlockCastAnnounce.until; }
+    public String getTeleOtherUsedCasterRsn() { return teleOtherUsedAnnounce.payload != null ? teleOtherUsedAnnounce.payload.casterRsn : null; }
+    public String getTeleOtherUsedTargetRsn() { return teleOtherUsedAnnounce.payload != null ? teleOtherUsedAnnounce.payload.targetRsn : null; }
+    public long getTeleOtherUsedUntil() { return teleOtherUsedAnnounce.until; }
     public long getWelcomeBannerUntil() { return sessionManager.getWelcomeBannerUntil(); }
     public long getMinigameBannerUntil() { return minigamePresentation.getMinigameBannerUntil(); }
     public long getMinigameOverBannerUntil() { return minigamePresentation.getMinigameOverBannerUntil(); }
+    public long getArrivalRoundBeginBannerUntil() { return minigamePresentation.getArrivalRoundBeginBannerUntil(); }
     public long getMinigameScoreBannerUntil() { return minigamePresentation.getMinigameScoreBannerUntil(); }
     public List<MinigameScore> getMinigameScores() { return minigamePresentation.getMinigameScores(); }
     public long getGameStartBannerUntil() { return gameStartBanner.until; }

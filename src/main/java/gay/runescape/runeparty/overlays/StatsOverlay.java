@@ -28,8 +28,10 @@ import net.runelite.client.ui.overlay.components.TitleComponent;
  * recap) -- a mini-game gets its own dedicated overlay for whatever it needs to show live (see
  * e.g. CoinRushScoreboardOverlay, TurfWarsScoreOverlay, HotPotatoOverlay, SandwichRushHudOverlay),
  * rather than this persistent HUD being repurposed/hijacked the way it briefly was for Coin Rush.
- * Purely a renderer over RosterReducer/RunePartyPlugin -- all the totals it reads are
- * server-mutated, this class never computes or guesses one itself. */
+ * Also hidden outright while the full-screen board map is up (RunePartyPlugin#isMapShowing) --
+ * same reasoning AnnouncementOverlay's own map gate gives, just applied here too. Purely a
+ * renderer over RosterReducer/RunePartyPlugin -- all the totals it reads are server-mutated, this
+ * class never computes or guesses one itself. */
 public class StatsOverlay extends Overlay
 {
     private static final Color COLOR_TURN = new Color(255, 210, 0);
@@ -62,6 +64,12 @@ public class StatsOverlay extends Overlay
         if (!config.showStatsOverlay()) return null;
         GamePhase phase = plugin.getPhase();
         if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE && phase != GamePhase.ENDED) return null;
+
+        // Hidden outright while the full-screen board map is up -- same reasoning
+        // AnnouncementOverlay's own isMapShowing() gate gives: the map already dims/covers the
+        // whole game view, and this HUD's own info (coins/GG counts) has no business competing
+        // with it for attention while the player's looking at the board instead.
+        if (plugin.isMapShowing()) return null;
 
         // Hidden outright for as long as any mini-game is active -- see this class's own doc for
         // why (a mini-game's own dedicated overlay shows whatever it needs to instead).

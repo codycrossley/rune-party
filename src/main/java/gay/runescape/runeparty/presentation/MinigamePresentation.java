@@ -96,6 +96,11 @@ public final class MinigamePresentation
     // payload of its own -- just a beat between the round actually ending and the rewards recap
     // taking over, see triggerMinigameRewardsBanner for how the two chain. ----
     private final TimedBanner<Void> minigameOverBanner = new TimedBanner<>();
+    // ---- arrival-gated "BEGIN!" flash (server-driven, everyone sees it). Fires on
+    // MINIGAME_ROUND_BEGIN, only for RunePartyPlugin#ARRIVAL_GATHER_KEYS -- see that field's own
+    // doc for exactly which mini-games this covers and why (Rainbow Rush/Brutus Attack excluded).
+    // No payload -- see triggerArrivalRoundBeginBanner. ----
+    private final TimedBanner<Void> arrivalRoundBeginBanner = new TimedBanner<>();
     // ---- mini-game final-score recap (server-driven, everyone sees it). Shown after
     // minigameOverBanner above and before minigameRewardsBanner below -- "how did everyone do"
     // comes before "what did that earn you", see triggerMinigameScoreBanner for how the three
@@ -244,6 +249,10 @@ public final class MinigamePresentation
                 // event, so this flips true regardless of which one is active. See its own field
                 // doc for why this exists separately from the generic countdown's fixed timer.
                 minigameRoundBegun = true;
+                if (!catchingUp && RunePartyPlugin.ARRIVAL_GATHER_KEYS.contains(minigameKey))
+                {
+                    triggerArrivalRoundBeginBanner();
+                }
                 break;
             }
 
@@ -370,6 +379,14 @@ public final class MinigamePresentation
         plugin.armBanner(minigameOverBanner, RunePartyPlugin.MINIGAME_OVER_BANNER_DURATION_MS, () -> null, true);
     }
 
+    /** Arms AnnouncementOverlay's brief "BEGIN!" flash for an arrival-gated mini-game's own
+     * MINIGAME_ROUND_BEGIN -- see ARRIVAL_GATHER_KEYS's own doc for which mini-games this fires
+     * for, and arrivalRoundBeginBanner's own doc for why. */
+    private void triggerArrivalRoundBeginBanner()
+    {
+        plugin.armBanner(arrivalRoundBeginBanner, RunePartyPlugin.ARRIVAL_ROUND_BEGIN_BANNER_DURATION_MS, () -> null, true);
+    }
+
     /** Arms AnnouncementOverlay's mini-game final-score recap ("how did everyone do") -- called
      * from handleMinigameEnded, parsing its own "results" list eagerly, same "fixed, already-landed
      * event, nothing to gain from lazy re-parsing" reasoning triggerMinigameRewardsBanner's own doc
@@ -413,6 +430,7 @@ public final class MinigamePresentation
     {
         minigameBanner.reset();
         minigameOverBanner.reset();
+        arrivalRoundBeginBanner.reset();
         minigameScoreBanner.reset();
         if (minigameSpinnerTask != null) { minigameSpinnerTask.cancel(false); minigameSpinnerTask = null; }
         roundCompleteBanner.reset();
@@ -454,6 +472,7 @@ public final class MinigamePresentation
     public boolean isRoundBegun() { return minigameRoundBegun; }
     public long getMinigameBannerUntil() { return minigameBanner.until; }
     public long getMinigameOverBannerUntil() { return minigameOverBanner.until; }
+    public long getArrivalRoundBeginBannerUntil() { return arrivalRoundBeginBanner.until; }
     public long getMinigameScoreBannerUntil() { return minigameScoreBanner.until; }
     public List<MinigameScore> getMinigameScores() { return minigameScoreBanner.payload != null ? minigameScoreBanner.payload : Collections.emptyList(); }
     public long getRoundCompleteBannerUntil() { return roundCompleteBanner.until; }

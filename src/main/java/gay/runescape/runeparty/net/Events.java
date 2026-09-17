@@ -119,6 +119,7 @@ public final class Events
     public static final String PLAYER_MOVED = "PLAYER_MOVED";
     public static final String PLAYER_READY = "PLAYER_READY";
     public static final String PLAYER_TRANSFORMED = "PLAYER_TRANSFORMED";
+    public static final String RAINBOW_RUSH_FINISHER_FOUND = "RAINBOW_RUSH_FINISHER_FOUND";
     public static final String REPEAT_AFTER_ME_RESULT_SUBMITTED = "REPEAT_AFTER_ME_RESULT_SUBMITTED";
     public static final String REPEAT_AFTER_ME_ROUND_STARTED = "REPEAT_AFTER_ME_ROUND_STARTED";
     public static final String ROLE_ASSIGNED = "ROLE_ASSIGNED";
@@ -127,6 +128,7 @@ public final class Events
     public static final String SANDWICH_RUSH_ITEM_SPAWNED = "SANDWICH_RUSH_ITEM_SPAWNED";
     public static final String STANDARD_COURSE_LOCKED = "STANDARD_COURSE_LOCKED";
     public static final String TELE_BLOCK_APPLIED = "TELE_BLOCK_APPLIED";
+    public static final String TELE_OTHER_USED = "TELE_OTHER_USED";
     public static final String TILE_EFFECT = "TILE_EFFECT";
     public static final String TILE_MARKED = "TILE_MARKED";
     public static final String TILE_UNMARKED = "TILE_UNMARKED";
