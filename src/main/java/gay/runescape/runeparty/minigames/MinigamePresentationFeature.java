@@ -9,8 +9,8 @@ import gay.runescape.runeparty.net.ApiClient;
  * CeremonyPresentation already established, just not previously applied per-minigame.
  * MinigamePresentation holds one instance of each implementation, keyed by that minigame's own
  * RunePartyPlugin.*_KEY, and dispatches to whichever one matches the currently-active minigameKey.
- * Not every minigame needs one: Arena has no client-tracked state of its own beyond the generic
- * lifecycle (its own gameplay is entirely tile-color-driven), so it has no implementation at all. */
+ * Not every minigame needs one -- Fishing Contest/Click, Click, Click have nothing of their own to
+ * fold or tick, since their tallies are entirely client-local and never reported mid-round. */
 public interface MinigamePresentationFeature
 {
     /** Folds one event type this minigame owns -- called only while this minigame is the currently

@@ -162,9 +162,10 @@ public final class WiseOldManDialogueOverlay extends ChatboxDialogueOverlay
         String targetRsn = hasCandidates ? candidates.get(Math.floorMod(targetIndex, candidates.size())) : null;
         String nameLine = hasCandidates ? targetRsn : "(nobody eligible)";
 
-        // One blank line's own worth of breathing room below the header, matching
-        // ItemShopDialogueOverlay's own carousel spacing.
-        int nameTop = bounds.y + headerBottomOffset + lineHeight;
+        // A visually distinct break below the header, matching ItemShopDialogueOverlay's own
+        // carousel spacing -- see CAROUSEL_BLANK_LINE_GAP's own doc for why this isn't a full
+        // lineHeight.
+        int nameTop = bounds.y + headerBottomOffset + CAROUSEL_BLANK_LINE_GAP;
         Rectangle nameRow = new Rectangle(bounds.x + TEXT_LEFT, nameTop - ascent, textWidth, lineHeight);
         boolean nameHovered = hasCandidates && mouse != null && nameRow.contains(mouse.getX(), mouse.getY());
         drawCentered(g, nameLine, bounds.x + TEXT_LEFT, textWidth, nameTop, nameHovered ? OPTION_HOVER_COLOR : OPTION_COLOR);
@@ -177,8 +178,10 @@ public final class WiseOldManDialogueOverlay extends ChatboxDialogueOverlay
             callbacks.add(() -> submitFinalChoice(pendingActionChoice, targetRsn));
         }
 
-        // Another blank line before the trailer row(s), same spacing the header-to-name gap above uses.
-        int trailerTop = nameTop + lineHeight * 2;
+        // Same break before the trailer row(s) -- the other lineHeight here is the name row's own
+        // real height, not a spacing gap, so it stays as-is; only the gap itself uses the smaller
+        // constant.
+        int trailerTop = nameTop + lineHeight + CAROUSEL_BLANK_LINE_GAP;
 
         if (candidates.size() > 1)
         {

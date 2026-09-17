@@ -79,14 +79,22 @@ public abstract class ChatboxDialogueOverlay extends Overlay
     private static final int BUTTON_STRIP = 23;
     protected static final int TEXT_LEFT = 140; // clears the chathead portrait on the left
     protected static final int TEXT_RIGHT_MARGIN = 20;
-    // Tuned against RunePartyFonts#DIALOGUE_PLAIN's own real metrics (16pt: ascent 12, line height
-    // 16) rather than the larger FontManager font these were originally measured against -- see
-    // that field's own doc for the font swap. NAME_TOP_OFFSET to BODY_TOP_OFFSET is exactly one
-    // line height (a tight, single-line gap between the speaker name and the first line of body
-    // text); BODY_TOP_OFFSET to OPTIONS_TOP_OFFSET is the same 34px two-line band this class
-    // always reserved, just shifted up to follow the smaller BODY_TOP_OFFSET -- see
+    // Tuned against RunePartyFonts#DIALOGUE_BITMAP's own real metrics (the actual game font: 15px
+    // ascent, 16px line height, almost no descent) -- these are all BASELINE offsets, not "top of
+    // text" ones, since every draw call in this class (drawCentered/drawBaseline) positions a
+    // string by its own baseline; a line's own glyphs extend upward from that baseline by roughly
+    // a full ascent(g) worth of pixels, which is why NAME_TOP_OFFSET needs real clearance above it
+    // (see its own doc) and drawWrappedText's own returned offset has to add ascent(g) before a
+    // caller can safely treat it as the next line's own baseline (see that method's own doc).
+    // NAME_TOP_OFFSET to BODY_TOP_OFFSET is a touch over one line height; BODY_TOP_OFFSET to
+    // OPTIONS_TOP_OFFSET is the same 34px two-line band this class always reserved -- see
     // drawWrappedText's own doc for that band's own role.
-    private static final int NAME_TOP_OFFSET = 16;
+    //
+    // NAME_TOP_OFFSET specifically needs enough room that NAME_TOP_OFFSET - ascent(g) clears the
+    // box's own top border with a visible margin, not just avoids negative territory -- at the
+    // font's own real ascent (15px), anything below ~18 here left a capital letter's own top
+    // pixels reading as touching/overlapping the border above it.
+    private static final int NAME_TOP_OFFSET = 20;
     protected static final int BODY_TOP_OFFSET = 32;
     protected static final int OPTION_ROW_HEIGHT = 18;
     protected static final int OPTIONS_TOP_OFFSET = 66;
@@ -442,6 +450,20 @@ public abstract class ChatboxDialogueOverlay extends Overlay
     // the last line's own descenders and the first option, before this gap is even added).
     private static final int BODY_OPTIONS_GAP = 6;
 
+    // A carousel screen's own visually distinct "blank line" between sections (header -> entry,
+    // entry -> Next/Back) -- see WiseOldManDialogueOverlay#drawTargetCarousel and
+    // ItemShopDialogueOverlay#drawItemCarousel, the two callers. Deliberately its own constant
+    // rather than reusing lineHeight(g) for this: a carousel adds this ON TOP of a
+    // drawWrappedText/headerBottomOffset return value that, since that method started adding
+    // ascent(g) of its own (see its doc), already carries a full ascent's worth of clearance plus
+    // BODY_OPTIONS_GAP -- stacking a second FULL lineHeight on top of that double-counts the
+    // clearance drawWrappedText already guarantees, and in the real chatbox's own fixed-layout
+    // (fallback) size pushed a carousel's final "Next" row all the way to the very bottom edge of
+    // the box with zero margin left. This value still reads as a clear paragraph break (noticeably
+    // more than BODY_OPTIONS_GAP's own tight 6px) without re-adding a whole line's worth of
+    // already-covered clearance.
+    protected static final int CAROUSEL_BLANK_LINE_GAP = 10;
+
     /** The greeting/prompt text's own nominal column -- BODY_TOP_OFFSET to OPTIONS_TOP_OFFSET
      * below the box's top edge -- vertically centers its wrapped block within this exact band
      * when it fits, mirroring Follower Buddy's own FollowerDialog#BODY_HEIGHT ("the game genuinely
@@ -451,15 +473,21 @@ public abstract class ChatboxDialogueOverlay extends Overlay
      * real client's own bitmap font metrics, not this bundled TTF's.
      *
      * Returns the offset (below the box's top edge, same units as OPTIONS_TOP_OFFSET -- NOT an
-     * absolute screen y) immediately below the last line actually drawn, plus BODY_OPTIONS_GAP --
-     * every call site uses {@code Math.max(OPTIONS_TOP_OFFSET, thisReturnValue)} as where its own
+     * absolute screen y) a caller should use as the BASELINE of whatever comes next -- every call
+     * site uses {@code Math.max(OPTIONS_TOP_OFFSET, thisReturnValue)} as where its own
      * options/entries actually start, rather than assuming the nominal OPTIONS_TOP_OFFSET always
-     * has room. Without this, a greeting that wraps to exactly as many lines as the band was sized
-     * for (the common case, not an edge case -- see WiseOldManDialogueOverlay's own greeting,
-     * which does this every time the local player can afford a Golden Gnome steal) leaves the
-     * options row starting within single-digit pixels of the body text's own descenders, reading
-     * as visibly overlapping once real glyph rendering (not just nominal font metrics) is
-     * accounted for. */
+     * has room. Critically, this is {@code blockTopOffset + blockHeight + ascent(g) +
+     * BODY_OPTIONS_GAP}, NOT just {@code blockTopOffset + blockHeight + BODY_OPTIONS_GAP} the way
+     * an earlier version of this method computed it -- every caller (drawOptionRows, and each
+     * carousel's own manual layout) treats the value it gets back as a BASELINE to draw the next
+     * line AT, and a baseline's own glyphs extend UPWARD from it by a full ascent(g) worth of
+     * pixels, not downward. Omitting that ascent left the next line's own ink starting inside the
+     * body text's own line box instead of below it -- reading as visibly overlapping (a name/
+     * option row's own cap-height letters poking up into the line above) even though the two
+     * baselines themselves were several pixels apart, exactly the class of bug this method's own
+     * BODY_OPTIONS_GAP was originally meant to prevent (see git history -- that gap alone wasn't
+     * enough once the real bitmap font's own tall ascent/thin descent ratio replaced the AWT
+     * fallback this was first tuned against). */
     protected int drawWrappedText(Graphics2D g, String text, int x, int width)
     {
         List<String> lines = wrap(g, text, width);
@@ -479,7 +507,7 @@ public abstract class ChatboxDialogueOverlay extends Overlay
             y += lineHeight;
         }
 
-        return blockTopOffset + blockHeight + BODY_OPTIONS_GAP;
+        return blockTopOffset + blockHeight + ascent(g) + BODY_OPTIONS_GAP;
     }
 
     /** Plain greedy word-wrap against {@code maxWidth} -- good enough for the short, fixed lines

@@ -165,17 +165,22 @@ public final class ItemShopDialogueOverlay extends ChatboxDialogueOverlay
         int ascent = ascent(g);
         net.runelite.api.Point mouse = client.getMouseCanvasPosition();
 
-        // One blank line's own worth of breathing room below the header, matching the mock's own
-        // blank line between "Choose One" and the item block.
-        int itemTop = bounds.y + headerBottomOffset + lineHeight;
+        // A visually distinct break below the header, matching the mock's own blank line between
+        // "Choose One" and the item block -- see CAROUSEL_BLANK_LINE_GAP's own doc for why this
+        // isn't a full lineHeight: headerBottomOffset already carries drawWrappedText's own
+        // ascent(g)+BODY_OPTIONS_GAP clearance, so stacking a second full line on top of that
+        // double-counts it.
+        int itemTop = bounds.y + headerBottomOffset + CAROUSEL_BLANK_LINE_GAP;
         Rectangle itemRow = new Rectangle(bounds.x + TEXT_LEFT, itemTop - ascent, textWidth, lineHeight * 2);
         boolean itemHovered = mouse != null && itemRow.contains(mouse.getX(), mouse.getY());
         Color itemColor = itemHovered ? OPTION_HOVER_COLOR : OPTION_COLOR;
         drawCentered(g, nameLine, bounds.x + TEXT_LEFT, textWidth, itemTop, itemColor);
         drawCentered(g, descriptionLine, bounds.x + TEXT_LEFT, textWidth, itemTop + lineHeight, itemColor);
 
-        // Another blank line before "Next", same spacing the header-to-item gap above uses.
-        int nextTop = itemTop + lineHeight * 2 + lineHeight;
+        // Same break before "Next" -- lineHeight * 2 here is the item block's own real height (two
+        // drawn lines), not a spacing gap, so it stays as-is; only the gap itself uses the smaller
+        // constant.
+        int nextTop = itemTop + lineHeight * 2 + CAROUSEL_BLANK_LINE_GAP;
         Rectangle nextRow = new Rectangle(bounds.x + TEXT_LEFT, nextTop - ascent, textWidth, OPTION_ROW_HEIGHT);
         boolean nextHovered = mouse != null && nextRow.contains(mouse.getX(), mouse.getY());
         drawCentered(g, "Next", bounds.x + TEXT_LEFT, textWidth, nextTop, nextHovered ? OPTION_HOVER_COLOR : OPTION_COLOR);

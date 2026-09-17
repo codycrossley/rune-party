@@ -227,6 +227,39 @@ public class ApiClient
         }
     }
 
+    /** One-shot, position-free "I'm on the grid" report for Arena -- fired once, the instant the
+     * local client detects its own position landing on any ARENA_TILE this round, rather than a
+     * continuous heartbeat like reportMinigamePosition. See ArenaPresentation#onTick, the only
+     * caller. */
+    public void confirmArenaArrival(String gameId, String playerRsn, String playerToken) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/confirm-arena-arrival", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Arena arrival failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** A player's own one-shot self-report that it was just caught by the flame field -- fired only
+     * when this client's own local check (ArenaPresentation#onTick) independently found its own
+     * real position either standing on a tile it already knows just turned permanently dead, or off
+     * the grid entirely after having genuinely arrived. See confirmArenaArrival above and
+     * ArenaPresentation's own doc for why no position needs to travel with this call at all. */
+    public void confirmArenaElimination(String gameId, String playerRsn, String playerToken) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/confirm-arena-elimination", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Arena elimination failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     /** One-shot, position-free "I've reached my own required zone" ready-check for Brutus Attack
      * -- fired once, the instant the local client detects standing on its own required zone's
      * colored tile, rather than a continuous heartbeat like reportMinigamePosition. See

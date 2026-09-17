@@ -16,8 +16,20 @@ public final class Events
      * genuinely live events. Not itself a game event, same as EVENTS_BATCH above. */
     public static final String CAUGHT_UP = "CAUGHT_UP";
 
-    /** Server-only bookkeeping fired when a player is eliminated from the Arena. Never dispatched
-     * on by any handler here -- an eliminated player just doesn't get paid at the end. */
+    /** Server-only echo of this client's (or another seated player's) own one-shot
+     * confirm-arena-arrival call -- never dispatched on here, the server's own arrival gate is what
+     * actually reacts to it (see minigames/arena.py). Same treatment BRUTUS_ARRIVAL_CONFIRMED
+     * already gets below, for the same reason: each client tracks its own arrival locally, it never
+     * needs to hear the broadcast of anyone else's. */
+    public static final String ARENA_ARRIVAL_CONFIRMED = "ARENA_ARRIVAL_CONFIRMED";
+    /** Fired when a player is eliminated from the Arena -- either self-detected standing on a tile
+     * the instant it turns permanently dead, or self-detected off the grid after genuinely having
+     * been on it (see ArenaPresentation#onTick, the client-side check that fires the confirming
+     * confirm-arena-elimination call in the first place). Dispatched on directly in
+     * RunePartyPlugin's own event switch for a one-shot cosmetic reveal (Voidwaker spec spotanim +
+     * chat message) -- no fold into any tracked client state, since ArenaFireModel's already-live
+     * tile coloring shows the elimination visually on its own; an eliminated player otherwise just
+     * doesn't get paid at the end. */
     public static final String ARENA_PLAYER_ELIMINATED = "ARENA_PLAYER_ELIMINATED";
     /** Server-only echo of this client's (or another seated player's) own one-shot
      * confirm-brutus-arrival call -- never dispatched on here, the server's own arrival gate is

@@ -28,6 +28,7 @@ import gay.runescape.runeparty.minigames.DanceDanceRuneScapePresentation;
 import com.google.gson.Gson;
 import com.google.inject.Provides;
 import gay.runescape.runeparty.items.Items;
+import gay.runescape.runeparty.models.ArenaFireModel;
 import gay.runescape.runeparty.models.HotPotatoExplosionModel;
 import gay.runescape.runeparty.overlays.AnnouncementOverlay;
 import gay.runescape.runeparty.overlays.ClickClickClickOverlay;
@@ -261,10 +262,13 @@ public class RunePartyPlugin extends Plugin
      * registration, same role COIN_RUSH_KEY plays for Coin Rush. */
     public static final String TRUE_OR_FALSE_KEY = "true-or-false";
 
-    /** Client-side key for the Arena mini-game -- must match the server's own registration, same
-     * role COIN_RUSH_KEY/TRUE_OR_FALSE_KEY play for their own mini-games. Used by
+    /** Client-side key for the Arena ("Flame Field") mini-game -- must match the server's own
+     * registration, same role COIN_RUSH_KEY/TRUE_OR_FALSE_KEY play for their own mini-games. Used by
      * AnnouncementOverlay to swap the generic "3...2...1...BEGIN!" countdown for Arena's own "All
-     * players must stand within the arena!" gather message. */
+     * players must stand within the arena!" gather message. Deliberately NOT in
+     * MINIGAMES_NEEDING_CONTINUOUS_POSITION/_PRE_ROUND_POSITION -- see ArenaPresentation, which
+     * reports arrival/elimination as one-shot, position-free self-reports instead of a continuous
+     * position heartbeat, the same event-driven shape BRUTUS_ATTACK_KEY already uses. */
     public static final String ARENA_KEY = "arena";
 
     /** Client-side key for the Fishing Contest mini-game -- must match the server's own
@@ -1062,14 +1066,17 @@ public class RunePartyPlugin extends Plugin
     // False/Fishing Contest never read positions at all; every other mini-game's own server module
     // was checked directly for every get_positions() call site to build this split, not guessed:
     //   - MINIGAMES_NEEDING_CONTINUOUS_POSITION: reads positions for the round's entire live
-    //     duration, not just to detect arrival -- Arena/Turf Wars evaluate hazard tiles/tile
-    //     capture every tick for as long as the round runs, and Who's Your Jaddy captures whoever's
-    //     standing in the winning zone at the exact (unpredictable -- damage-roll-dependent)
-    //     instant the duel resolves, which could be many ticks after round-begin.
+    //     duration, not just to detect arrival -- Turf Wars evaluates its own live territory claim
+    //     every tick for as long as the round runs, and Who's Your Jaddy captures whoever's standing
+    //     in the winning zone at the exact (unpredictable -- damage-roll-dependent) instant the duel
+    //     resolves, which could be many ticks after round-begin. Arena used to belong here too, but
+    //     no longer does -- see ARENA_KEY's own doc and ArenaPresentation#onTick for the
+    //     event-driven, position-free shape it moved to instead (the same one BRUTUS_ATTACK_KEY
+    //     already uses).
     //   - MINIGAMES_NEEDING_PRE_ROUND_POSITION: reads positions only inside their own
     //     _wait_for_everyone_to_arrive gather gate, never again once MINIGAME_ROUND_BEGIN fires --
     //     Sandwich Rush/Rainbow Rush/Dance Dance RuneScape/Hot Potato all fit this shape.
-    private static final Set<String> MINIGAMES_NEEDING_CONTINUOUS_POSITION = Set.of(ARENA_KEY, TURF_WARS_KEY, JADDY_KEY);
+    private static final Set<String> MINIGAMES_NEEDING_CONTINUOUS_POSITION = Set.of(TURF_WARS_KEY, JADDY_KEY);
     private static final Set<String> MINIGAMES_NEEDING_PRE_ROUND_POSITION = Set.of(
         SANDWICH_RUSH_KEY, RAINBOW_RUSH_KEY, DANCE_DANCE_RUNESCAPE_KEY, HOT_POTATO_KEY, REPEAT_AFTER_ME_KEY);
     // ---- Fishing Contest (entirely client-local until the one final submission -- catches are
@@ -2303,6 +2310,42 @@ public class RunePartyPlugin extends Plugin
         return points;
     }
 
+    /** Every currently-marked Arena tile, regardless of its own current heat-gradient color -- see
+     * ArenaPresentation#onTick, the only reader: the local client checks its own position against
+     * this set every tick to decide when to fire its own one-shot confirm-arena-arrival report (the
+     * instant it's standing on any of these) and, past that, its own confirm-arena-elimination
+     * report (the instant it's standing on none of them, having already arrived). Same "the reducer
+     * is the one source of truth," scanned-on-demand shape findBrutusAttackArenaTiles above already
+     * follows. */
+    public List<WorldPoint> findArenaGridTiles()
+    {
+        List<WorldPoint> points = new ArrayList<>();
+        for (TileReducer.TileEntry entry : tileReducer.snapshot())
+        {
+            if ("ARENA_TILE".equals(entry.tileType)) points.add(entry.point);
+        }
+        return points;
+    }
+
+    /** Whether the Arena tile at {@code pos} has reached the server's own permanently-dead red --
+     * see ArenaPresentation#onTick, the only reader: the local client checks its own position
+     * against this every tick to decide when to self-report confirm-arena-elimination. False for
+     * any point that isn't a currently-marked ARENA_TILE at all (mid-transition colors along the
+     * green -> yellow -> orange gradient are never "dead" -- see ArenaFireModel#isDead, the same
+     * check the client's own Fire-model rendering already uses, so the two can never disagree on
+     * which tiles are actually lethal). */
+    public boolean isArenaTileDead(WorldPoint pos)
+    {
+        for (TileReducer.TileEntry entry : tileReducer.snapshot())
+        {
+            if ("ARENA_TILE".equals(entry.tileType) && entry.point.equals(pos))
+            {
+                return ArenaFireModel.isDead(entry.color);
+            }
+        }
+        return false;
+    }
+
     /** Rolls one Fishing Contest catch -- called from onAnimationChanged the moment the local
      * player's own Headbang emote finishes (see awaitingHeadbangFinish). Re-checks
      * isFishingContestActive()/fishingCatchSubmitted here on top of onAnimationChanged's own gate
@@ -2500,6 +2543,18 @@ public class RunePartyPlugin extends Plugin
         if (isBrutusAttackActive())
         {
             minigamePresentation.brutusAttack().onTick(selfPlayer);
+        }
+
+        // Also independent of the turn engine below -- Arena's own one-shot
+        // confirm-arena-arrival/confirm-arena-elimination reports both live inside this one call
+        // (see ArenaPresentation#onTick), same "replace the continuous position-ping heartbeat with
+        // a self-check against already-broadcast state" shape Brutus Attack's own onTick call just
+        // above already established -- this mini-game is deliberately NOT in
+        // MINIGAMES_NEEDING_CONTINUOUS_POSITION/_PRE_ROUND_POSITION at all (see ARENA_KEY's own
+        // doc).
+        if (isArenaActive())
+        {
+            minigamePresentation.arena().onTick(selfPlayer);
         }
 
         // Also independent of the turn engine below -- unlike a rolled destination (pendingRoll,
@@ -4158,6 +4213,7 @@ public class RunePartyPlugin extends Plugin
     public int getCrabRaveDanceCount() { return minigamePresentation.crabRave().getDanceCount(); }
 
     public boolean isBrutusAttackActive() { return minigamePresentation.isKeyActive(BRUTUS_ATTACK_KEY); }
+    public boolean isArenaActive() { return minigamePresentation.isKeyActive(ARENA_KEY); }
     /** The rsn currently transformed into Brutus for this round -- null before PLAYER_TRANSFORMED
      * lands. See overlays/PlayerTransformOverlay, the only consumer. */
     public String getBrutusAttackBrutusRsn() { return minigamePresentation.brutusAttack().getBrutusRsn(); }
