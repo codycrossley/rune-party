@@ -3492,6 +3492,7 @@ public class RunePartyPlugin extends Plugin
             case Events.ITEM_SHOP_ENCOUNTER_OPENED:
             case Events.ITEM_SHOP_PURCHASED:
             case Events.ITEM_SHOP_PURCHASE_FAILED:
+            case Events.ITEM_SHOP_NO_AFFORDABLE_ITEMS:
             case Events.ITEM_SHOP_DISMISSED:
             {
                 itemShopPresentation.apply(e, catchingUp);
@@ -4513,18 +4514,32 @@ public class RunePartyPlugin extends Plugin
 
     /** Submits the local player's own choice for their currently-open Item Shop encounter --
      * action is "buy_item"/"decline", itemKey is required for "buy_item" (see
-     * ApiClient#itemShopChoose). Called only by ItemShopDialogueOverlay's own click handling,
-     * fire-and-forget same as submitWiseOldManChoice's own doc describes -- the eventual
-     * ITEM_SHOP_DISMISSED that closes the encounter (or a 409 chat message if the server's own
-     * re-check rejects it) is what the dialogue box itself reacts to, not this call's own return. */
-    public void submitItemShopChoice(String action, String itemKey)
+     * ApiClient#itemShopChoose). Called only by ItemShopDialogueOverlay's own click handling.
+     * <p>
+     * No chat-message failure callback -- an insufficient-funds/no-room 409 (the only reachable
+     * rejection for "buy_item", since ItemShopDialogueOverlay always shows the full catalog
+     * regardless of affordability, per this feature's own confirmed design) now also fires
+     * ITEM_SHOP_PURCHASE_FAILED, which ItemShopPresentation turns into a proper "You/&lt;rsn&gt;
+     * can't afford &lt;item&gt;!" on-screen announcement instead -- a raw 409 chat line on top of
+     * that would just be redundant noise, same reasoning purchaseGoldenGnomeAt's own doc gives for
+     * its own identical choice. Any other, genuinely unexpected failure still gets logged (see
+     * submitAction's own doc), just not surfaced to chat. Critically, a failed "buy_item" does NOT
+     * fire ITEM_SHOP_DISMISSED -- itemShopEncounterPending is left open server-side so the player
+     * can try a different item (see item_shop_choose's own doc) -- so ItemShopDialogueOverlay must
+     * NOT optimistically close itself the way declining does; see that class's own submitPurchase
+     * for why {@code onComplete} exists here (clearing its own in-flight guard regardless of
+     * outcome) rather than this method closing anything itself. */
+    public void submitItemShopChoice(String action, String itemKey, Runnable onComplete)
     {
         String self = localRsn();
         final String gid = gameId;
         final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        if (self == null || gid == null || token == null)
+        {
+            if (onComplete != null) onComplete.run();
+            return;
+        }
 
-        submitAction("Item Shop choice", () -> apiClient.itemShopChoose(gid, self, token, action, itemKey),
-            e -> addChatMessage("Failed to submit your choice to the Item Shop: " + e.getMessage()));
+        submitAction("Item Shop choice", () -> apiClient.itemShopChoose(gid, self, token, action, itemKey), null, onComplete);
     }
 }

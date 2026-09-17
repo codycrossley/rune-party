@@ -1173,11 +1173,12 @@ public class AnnouncementOverlay extends Overlay
         drawCenteredText(g, title, centerX, y, Color.WHITE, alpha);
     }
 
-    /** Draws the Item Shop purchase follow-up -- "You/&lt;rsn&gt; purchased &lt;item&gt;!" or
-     * "You/&lt;rsn&gt; can't afford &lt;item&gt;!" -- addressed to whoever the outcome belongs to,
-     * shown to every player same as renderGoldenGnomeOutcome's own doc describes for its own
-     * purchased/failed pair. No banner at all for a decline/timeout -- only a real purchase
-     * attempt (successful or not) is announced. */
+    /** Draws the Item Shop purchase follow-up -- "You/&lt;rsn&gt; purchased &lt;item&gt;!",
+     * "You/&lt;rsn&gt; can't afford &lt;item&gt;!", or "You/&lt;rsn&gt; can't afford any items!" --
+     * addressed to whoever the outcome belongs to, shown to every player same as
+     * renderGoldenGnomeOutcome's own doc describes for its own purchased/failed pair. No banner at
+     * all for a decline/timeout -- only a real purchase attempt (successful or not), or saying
+     * "Yes" to browsing with nothing actually affordable, is announced. */
     private void renderItemShopOutcome(Graphics2D g)
     {
         Float alpha = BannerAnim.fadeAlpha(plugin.getItemShopOutcomeBannerUntil(), ITEM_SHOP_OUTCOME_FADE_MS);
@@ -1202,6 +1203,12 @@ public class AnnouncementOverlay extends Overlay
             text = itemDisplayName == null ? null
                 : isLocal ? "You can't afford " + itemDisplayName + "!"
                 : rsn != null ? rsn + " can't afford " + itemDisplayName + "!" : null;
+            color = DICE_ROLL_BONUS_NEGATIVE_COLOR;
+        }
+        else if ("no_affordable_items".equals(outcome))
+        {
+            text = isLocal ? "You can't afford any items!"
+                : rsn != null ? rsn + " can't afford any items!" : null;
             color = DICE_ROLL_BONUS_NEGATIVE_COLOR;
         }
         else

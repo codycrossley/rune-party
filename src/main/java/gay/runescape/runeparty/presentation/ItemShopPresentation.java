@@ -31,12 +31,14 @@ public final class ItemShopPresentation
     private volatile long awakenedAt = 0;
     private volatile long revealAt = 0;
 
-    // ---- outcome banner ("You/<rsn> purchased <item>!" / "You/<rsn> can't afford <item>!") --
-    // fired the instant a purchase attempt actually resolves (ITEM_SHOP_PURCHASED/
-    // ITEM_SHOP_PURCHASE_FAILED), shown to every player, not just the buyer. Armed via
-    // plugin.armBanner (same queuing-behind-other-reveals shape WiseOldManPresentation's own
-    // outcome banner uses). No banner at all for "declined"/"timed_out" -- only a real purchase
-    // attempt (successful or not) is announced. ----
+    // ---- outcome banner ("You/<rsn> purchased <item>!" / "You/<rsn> can't afford <item>!" /
+    // "You/<rsn> can't afford any items!") -- fired the instant a purchase attempt actually
+    // resolves (ITEM_SHOP_PURCHASED/ITEM_SHOP_PURCHASE_FAILED), or the player says "Yes" with
+    // nothing in the catalog they can afford (ITEM_SHOP_NO_AFFORDABLE_ITEMS), shown to every
+    // player, not just the one involved. Armed via plugin.armBanner (same queuing-behind-other-
+    // reveals shape WiseOldManPresentation's own outcome banner uses). No banner at all for
+    // "declined"/"timed_out" -- only a real purchase attempt (successful or not), or that same
+    // "nothing to browse for" case, is announced. ----
     private final TimedBanner<OutcomePayload> outcome = new TimedBanner<>();
 
     public ItemShopPresentation(RunePartyPlugin plugin)
@@ -94,6 +96,17 @@ public final class ItemShopPresentation
                 break;
             }
 
+            case Events.ITEM_SHOP_NO_AFFORDABLE_ITEMS:
+            {
+                if (!catchingUp)
+                {
+                    String rsn = Json.requiredStr(e.payload, type, "player");
+                    plugin.armBanner(outcome, RunePartyPlugin.ITEM_SHOP_OUTCOME_BANNER_DURATION_MS,
+                        () -> new OutcomePayload("no_affordable_items", rsn, null, null), true);
+                }
+                break;
+            }
+
             case Events.ITEM_SHOP_DISMISSED:
             {
                 encounterRsn = null; // always clear, catch-up or not -- real state
@@ -125,9 +138,11 @@ public final class ItemShopPresentation
     public Integer getOutcomePrice() { return outcome.payload != null ? outcome.payload.price : null; }
     public long getOutcomeBannerUntil() { return outcome.until; }
 
-    /** Payload for the "You/<rsn> purchased/can't afford <item>!" outcome banner -- see the
-     * ITEM_SHOP_PURCHASED/ITEM_SHOP_PURCHASE_FAILED handlers above. outcome is "purchased" or
-     * "failed"; price is only meaningful for "purchased". */
+    /** Payload for the "You/<rsn> purchased/can't afford <item>/can't afford any items!" outcome
+     * banner -- see the ITEM_SHOP_PURCHASED/ITEM_SHOP_PURCHASE_FAILED/ITEM_SHOP_NO_AFFORDABLE_ITEMS
+     * handlers above. outcome is "purchased", "failed", or "no_affordable_items"; price is only
+     * meaningful for "purchased"; itemDisplayName is null for "no_affordable_items" (there's no
+     * single item to name). */
     private static final class OutcomePayload
     {
         final String outcome;

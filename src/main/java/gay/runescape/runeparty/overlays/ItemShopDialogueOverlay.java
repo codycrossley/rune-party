@@ -38,17 +38,41 @@ import java.util.List;
  * to browse) -- a real affordability/inventory-room check still happens server-side regardless
  * (see item_shop_choose), surfaced back to the player as the ITEM_SHOP_PURCHASE_FAILED banner
  * rather than being hidden from the menu the way an earlier version of this dialogue filtered it
- * client-side. Submits via RunePartyPlugin#submitItemShopChoice the instant an item (or "No") is
- * clicked, then closes itself immediately rather than waiting for the server's own confirming
+ * client-side.
+ * <p>
+ * "Yes" is the one exception to "every item always shows" above: if the local player can't afford
+ * a single catalog entry, clicking it doesn't open ITEM_LIST at all -- there'd be nothing there
+ * they could actually buy -- it instead reports "cant_afford_any" (see submitCantAffordAny), which
+ * announces "You/&lt;rsn&gt; can't afford any items!" to everyone and ends the encounter outright,
+ * per this feature's own confirmed design. This check is a client-side nicety, same "server still
+ * re-checks for real" latitude every other client-side affordability pre-check in this codebase
+ * already takes (see item_shop_choose's own doc for the server-side re-check backing it).
+ * <p>
+ * "No" closes itself immediately rather than waiting for the server's own confirming
  * ITEM_SHOP_DISMISSED -- same "set optimistically on submit" latitude WiseOldManDialogueOverlay's
- * own doc describes. A failed purchase does NOT submit-and-close -- the dialogue stays open on
- * ITEM_LIST, still showing the same item, so the player can hit "Next" and try something else. */
+ * own doc describes, safe here since declining can't meaningfully fail. Buying an item (or hitting
+ * "Yes" with nothing affordable) does NOT close optimistically, unlike an earlier version of this
+ * dialogue -- both can genuinely fail/be rejected server-side (see item_shop_choose's own doc)
+ * while leaving the server's own encounter open, and closing the box on this client regardless
+ * left the player stuck with no visible dialogue at all for the full encounter timeout, unable to
+ * tell the encounter was still pending. Instead this box simply mirrors the server's own real
+ * encounter state the whole time -- see getEncounterRsn/getRevealAt (ChatboxDialogueOverlay's own
+ * render() gate) -- closing itself only once ITEM_SHOP_DISMISSED genuinely lands, and staying open
+ * with nothing extra needed on a rejection, since encounterRsn never actually cleared. See
+ * submitPurchase/submitCantAffordAny's own docs for requestInFlight, which guards against a rapid
+ * double-click firing two requests before the first one's own response lands. */
 public final class ItemShopDialogueOverlay extends ChatboxDialogueOverlay
 {
     private enum Screen { GREETING, ITEM_LIST }
 
     private volatile Screen screen = Screen.GREETING;
     private volatile int itemIndex = 0; // index into RunePartyPlugin.ITEM_SHOP_CATALOG, wraps via Math.floorMod
+    // True from the instant a "buy_item" or "cant_afford_any" request goes out until its response
+    // (success or failure) comes back -- see submitPurchase/submitCantAffordAny's own docs.
+    // Cleared from RunePartyPlugin's own background executor thread (submitItemShopChoice's
+    // onComplete callback), not the client thread -- fine for a plain volatile flag flip, same
+    // cross-thread latitude pendingClick's own doc describes.
+    private volatile boolean requestInFlight = false;
 
     public ItemShopDialogueOverlay(Client client, RunePartyPlugin plugin, MouseManager mouseManager, SpriteManager spriteManager, RosterReducer roster)
     {
@@ -85,6 +109,7 @@ public final class ItemShopDialogueOverlay extends ChatboxDialogueOverlay
         super.resetForNextEncounter();
         screen = Screen.GREETING;
         itemIndex = 0;
+        requestInFlight = false;
     }
 
     @Override
@@ -110,10 +135,10 @@ public final class ItemShopDialogueOverlay extends ChatboxDialogueOverlay
         List<Runnable> callbacks = new ArrayList<>();
 
         labels.add("Yes");
-        callbacks.add(() -> { screen = Screen.ITEM_LIST; itemIndex = 0; });
+        callbacks.add(this::handleYes);
 
         labels.add("No");
-        callbacks.add(() -> submitFinalChoice("decline", null));
+        callbacks.add(this::submitDecline);
 
         drawOptionRows(g, labels, callbacks, bounds.y + optionsTopOffset);
     }
@@ -157,14 +182,64 @@ public final class ItemShopDialogueOverlay extends ChatboxDialogueOverlay
 
         optionBounds = new Rectangle[] {itemRow, nextRow};
         optionCallbacks = new Runnable[] {
-            () -> submitFinalChoice("buy_item", entry.itemKey),
+            () -> submitPurchase(entry.itemKey),
             () -> itemIndex = Math.floorMod(itemIndex + 1, catalog.size()),
         };
     }
 
-    private void submitFinalChoice(String action, String itemKey)
+    /** Closes optimistically, same latitude WiseOldManDialogueOverlay's own submitFinalChoice
+     * takes -- declining can't meaningfully fail server-side, so there's nothing to stay open
+     * for. */
+    private void submitDecline()
     {
         submitted = true;
-        plugin.submitItemShopChoice(action, itemKey);
+        plugin.submitItemShopChoice("decline", null, null);
+    }
+
+    /** Deliberately does NOT set {@code submitted} -- see this class's own doc for why closing
+     * optimistically here was the actual bug: a failed purchase leaves the server's own encounter
+     * genuinely open, and this box now simply mirrors that real state instead of assuming success.
+     * requestInFlight guards the one real risk that opens up by not closing immediately -- a rapid
+     * double-click landing before the first request's own response comes back, which could
+     * otherwise fire two separate purchases (and pay for the item twice) instead of one. Cleared
+     * via submitItemShopChoice's own onComplete callback regardless of how the request resolves. */
+    private void submitPurchase(String itemKey)
+    {
+        if (requestInFlight) return;
+        requestInFlight = true;
+        plugin.submitItemShopChoice("buy_item", itemKey, () -> requestInFlight = false);
+    }
+
+    /** "Yes" itself never leaves the client -- this is a plain local pre-check (does the local
+     * player's own coin total, per RosterReducer, cover ANY catalog entry's own price) deciding
+     * whether to advance to ITEM_LIST at all, same "server still re-checks for real" latitude this
+     * class's own doc describes. Affordable: just flips the screen, no server round-trip needed,
+     * exactly as before. Not affordable: reports "cant_afford_any" instead (see
+     * submitCantAffordAny) rather than opening a screen that would only ever show items the
+     * player can't buy. */
+    private void handleYes()
+    {
+        int coins = roster.getCoins(plugin.getLocalRsn());
+        boolean canAffordAnything = RunePartyPlugin.ITEM_SHOP_CATALOG.stream().anyMatch(entry -> entry.price <= coins);
+        if (canAffordAnything)
+        {
+            screen = Screen.ITEM_LIST;
+            itemIndex = 0;
+        }
+        else
+        {
+            submitCantAffordAny();
+        }
+    }
+
+    /** Same "does NOT set submitted, requestInFlight guards a double-fire" shape submitPurchase
+     * uses -- see that method's own doc and this class's own doc for why. Ends the encounter
+     * outright on success (see item_shop_choose's own "cant_afford_any" doc), so this box closes
+     * itself the instant the real ITEM_SHOP_DISMISSED lands, same as any other outcome. */
+    private void submitCantAffordAny()
+    {
+        if (requestInFlight) return;
+        requestInFlight = true;
+        plugin.submitItemShopChoice("cant_afford_any", null, () -> requestInFlight = false);
     }
 }

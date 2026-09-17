@@ -95,6 +95,7 @@ public final class Events
     public static final String ITEM_GRANTED = "ITEM_GRANTED";
     public static final String ITEM_SHOP_DISMISSED = "ITEM_SHOP_DISMISSED";
     public static final String ITEM_SHOP_ENCOUNTER_OPENED = "ITEM_SHOP_ENCOUNTER_OPENED";
+    public static final String ITEM_SHOP_NO_AFFORDABLE_ITEMS = "ITEM_SHOP_NO_AFFORDABLE_ITEMS";
     public static final String ITEM_SHOP_PURCHASE_FAILED = "ITEM_SHOP_PURCHASE_FAILED";
     public static final String ITEM_SHOP_PURCHASED = "ITEM_SHOP_PURCHASED";
     public static final String ITEM_USED = "ITEM_USED";
