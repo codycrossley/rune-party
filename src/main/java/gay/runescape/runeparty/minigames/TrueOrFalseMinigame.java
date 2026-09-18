@@ -1,18 +1,14 @@
 package gay.runescape.runeparty.minigames;
 
-import gay.runescape.runeparty.RunePartyPlugin;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
-import javax.swing.JComponent;
-import javax.swing.JPanel;
 import net.runelite.client.ui.FontManager;
 
 /** 5 rounds, 5 seconds each, one OSRS trivia question per round. An answer is a YES ("True")/NO
  * ("False") emote, and the question, countdown, live "who's answered" tally, and per-round reveal
- * all render screen-centered in AnnouncementOverlay -- so this mini-game has zero side-panel
- * presence (see hasSidePanelPresence), unlike Coin Rush's plain "here's what to do" reminder. */
+ * all render screen-centered in AnnouncementOverlay. */
 public class TrueOrFalseMinigame implements Minigame
 {
     private static final Color CARD_COLOR = new Color(230, 230, 230);
@@ -64,19 +60,5 @@ public class TrueOrFalseMinigame implements Minigame
         g.drawString(f, fX + 1, glyphY + 1);
         g.setColor(new Color(FALSE_COLOR.getRed(), FALSE_COLOR.getGreen(), FALSE_COLOR.getBlue(), a));
         g.drawString(f, fX, glyphY);
-    }
-
-    /** Never actually called -- see hasSidePanelPresence; kept minimal rather than unreachable
-     * purely to satisfy the interface. */
-    @Override
-    public JComponent createControlPanel(RunePartyPlugin plugin)
-    {
-        return new JPanel();
-    }
-
-    @Override
-    public boolean hasSidePanelPresence()
-    {
-        return false;
     }
 }

@@ -1,15 +1,11 @@
 package gay.runescape.runeparty.minigames;
 
-import gay.runescape.runeparty.RunePartyPlugin;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.util.Random;
-import javax.swing.JComponent;
-import javax.swing.JPanel;
 
 /** A 4x4 hazard grid whose gathering message, tile colors, and elimination all render/animate
- * in-world and center-screen, rather than through any side-panel control (see
- * hasSidePanelPresence). */
+ * in-world and center-screen. */
 public class ArenaMinigame implements Minigame
 {
     private static final Color ARENA_RED = new Color(220, 30, 30);
@@ -75,18 +71,5 @@ public class ArenaMinigame implements Minigame
 
         g.setColor(new Color(0, 0, 0, a));
         g.drawRect(left, top, size, size);
-    }
-
-    /** Never actually called -- see hasSidePanelPresence. */
-    @Override
-    public JComponent createControlPanel(RunePartyPlugin plugin)
-    {
-        return new JPanel();
-    }
-
-    @Override
-    public boolean hasSidePanelPresence()
-    {
-        return false;
     }
 }

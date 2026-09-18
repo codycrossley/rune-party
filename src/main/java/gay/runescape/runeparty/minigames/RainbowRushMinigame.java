@@ -5,15 +5,12 @@ import gay.runescape.runeparty.RunePartyPlugin;
 
 import java.awt.Color;
 import java.awt.Graphics2D;
-import javax.swing.JComponent;
-import javax.swing.JPanel;
 
 /** Every tile on the main course temporarily turns one of six rainbow colors, cycling by its own
  * pathIndex (see TileOverlay#renderRainbowRushTile) -- starting as an outline only, filling in
  * solid the instant a player personally steps on it (see RainbowRushPresentation). First to fill
  * every course tile self-reports their own finish; the server settles who actually won and pays
- * out the reward. Entirely board/overlay-driven, no side-panel control (see
- * hasSidePanelPresence), same as Turf Wars/Coin Rush. */
+ * out the reward. */
 public class RainbowRushMinigame implements Minigame
 {
     private static final RunePartyColor[] PALETTE =
@@ -52,18 +49,5 @@ public class RainbowRushMinigame implements Minigame
         }
         g.setColor(new Color(0, 0, 0, a));
         g.drawRect(left, top, totalWidth, cell);
-    }
-
-    /** Never actually called -- see hasSidePanelPresence. */
-    @Override
-    public JComponent createControlPanel(RunePartyPlugin plugin)
-    {
-        return new JPanel();
-    }
-
-    @Override
-    public boolean hasSidePanelPresence()
-    {
-        return false;
     }
 }

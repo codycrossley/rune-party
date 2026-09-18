@@ -5,15 +5,12 @@ import gay.runescape.runeparty.RunePartyPlugin;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.geom.Rectangle2D;
-import javax.swing.JComponent;
-import javax.swing.JPanel;
 
 /** An 8x8 arena of randomly-flashing "club lighting" tiles around a single centerpiece Gemstone
  * Crab -- entirely screen/in-world-driven (see CrabRavePresentation, CrabRaveNpcOverlay, and
  * TileOverlay#renderCrabRaveTile), the icon here just mirrors that same dance-floor-lights look at
  * wheel-icon size rather than the crab itself (a recognizable crab silhouette doesn't read at this
- * size; the colored floor does). Screen-driven, no side-panel control (see hasSidePanelPresence),
- * same shape RepeatAfterMeMinigame/DanceDanceRuneScapeMinigame's own icon-only registrations use. */
+ * size; the colored floor does). */
 public class CrabRaveMinigame implements Minigame
 {
     // Same neon "club lighting" palette as TileOverlay's own CRAB_RAVE_LIGHT_COLORS, just a
@@ -85,18 +82,5 @@ public class CrabRaveMinigame implements Minigame
     private static Color withAlpha(Color c, int alpha)
     {
         return new Color(c.getRed(), c.getGreen(), c.getBlue(), alpha);
-    }
-
-    /** Never actually called -- see hasSidePanelPresence. */
-    @Override
-    public JComponent createControlPanel(RunePartyPlugin plugin)
-    {
-        return new JPanel();
-    }
-
-    @Override
-    public boolean hasSidePanelPresence()
-    {
-        return false;
     }
 }

@@ -1,16 +1,11 @@
 package gay.runescape.runeparty.minigames;
 
-import gay.runescape.runeparty.RunePartyPlugin;
 import java.awt.Color;
 import java.awt.Graphics2D;
-import javax.swing.JComponent;
-import javax.swing.JPanel;
 
 /** Entirely screen-driven -- transformed-Brutus rendering lives in overlays/PlayerTransformOverlay,
  * the gather message/dash countdown in AnnouncementOverlay, the eliminated-target skull in
- * PlayerOverlay -- no side-panel control at all, same reasoning HotPotatoMinigame/WhosYourJaddyMinigame
- * already give (see hasSidePanelPresence). A real, randomly-reachable mini-game, so it needs a real
- * wheel icon. */
+ * PlayerOverlay. A real, randomly-reachable mini-game, so it needs a real wheel icon. */
 public class BrutusAttackMinigame implements Minigame
 {
     // Matches RunePartyPlugin.TEAM_A_COLOR/TEAM_B_COLOR (and the server's own brutus_attack.py
@@ -48,18 +43,5 @@ public class BrutusAttackMinigame implements Minigame
 
         g.setColor(new Color(TARGET_ZONE_COLOR.getRed(), TARGET_ZONE_COLOR.getGreen(), TARGET_ZONE_COLOR.getBlue(), a));
         g.fillRect(x + gap / 2, y - squareSize / 2, squareSize, squareSize);
-    }
-
-    /** Never actually called -- see hasSidePanelPresence. */
-    @Override
-    public JComponent createControlPanel(RunePartyPlugin plugin)
-    {
-        return new JPanel();
-    }
-
-    @Override
-    public boolean hasSidePanelPresence()
-    {
-        return false;
     }
 }

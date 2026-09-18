@@ -5,13 +5,10 @@ import gay.runescape.runeparty.RunePartyPlugin;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.geom.Rectangle2D;
-import javax.swing.JComponent;
-import javax.swing.JPanel;
 
 /** A 3x3 grid of tiles players gather on, then step onto whichever of the four outer tiles lights
  * up next -- entirely client-local (see DanceDanceRuneScapePresentation), the icon here just
- * mirrors that same cross-shaped layout. Screen-driven, no side-panel control (see
- * hasSidePanelPresence). */
+ * mirrors that same cross-shaped layout. */
 public class DanceDanceRuneScapeMinigame implements Minigame
 {
     private static final Color CENTER_COLOR = new Color(0xFF, 0xEE, 0x00);
@@ -58,18 +55,5 @@ public class DanceDanceRuneScapeMinigame implements Minigame
     private static Color withAlpha(Color c, int alpha)
     {
         return new Color(c.getRed(), c.getGreen(), c.getBlue(), alpha);
-    }
-
-    /** Never actually called -- see hasSidePanelPresence. */
-    @Override
-    public JComponent createControlPanel(RunePartyPlugin plugin)
-    {
-        return new JPanel();
-    }
-
-    @Override
-    public boolean hasSidePanelPresence()
-    {
-        return false;
     }
 }

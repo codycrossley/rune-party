@@ -5,8 +5,8 @@ import gay.runescape.runeparty.WheelEntry;
 /** One entry in the client-side item roster -- see Items for the registry that looks these up by
  * key, matching the server's own item keys so the client can tell which item ITEM_GRANTED's
  * payload carried. Extends WheelEntry so AnnouncementOverlay's selection spinner can draw an item
- * the same way it draws a Minigame. Unlike Minigame, there's no createControlPanel here: an item
- * has no play UI, just an effect that fires the instant it's used. */
+ * the same way it draws a Minigame. An item has no play UI at all, just an effect that fires the
+ * instant it's used. */
 public interface Item extends WheelEntry
 {
     /** Short description of what this item does, shown right after it's granted from an Item

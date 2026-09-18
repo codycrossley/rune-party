@@ -1,16 +1,12 @@
 package gay.runescape.runeparty.minigames;
 
-import gay.runescape.runeparty.RunePartyPlugin;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.geom.Ellipse2D;
-import javax.swing.JComponent;
-import javax.swing.JPanel;
 
-/** A pure clicking race -- no dedicated arena, no side-panel controls, players just click bare
- * ground wherever they already are. Local unique-tile-click tally renders via a dedicated
- * corner-of-attention overlay (see ClickClickClickOverlay) rather than any side-panel control (see
- * hasSidePanelPresence). */
+/** A pure clicking race -- no dedicated arena, players just click bare ground wherever they
+ * already are. Local unique-tile-click tally renders via a dedicated corner-of-attention overlay
+ * (see ClickClickClickOverlay). */
 public class ClickClickClickMinigame implements Minigame
 {
     private static final Color RING_COLOR = new Color(255, 210, 0);
@@ -41,18 +37,5 @@ public class ClickClickClickMinigame implements Minigame
         g.draw(new Ellipse2D.Float(x - half + midInset / 2, y - half + midInset / 2, size - midInset, size - midInset));
         int dotSize = Math.max(2, size / 6);
         g.fillOval(x - dotSize / 2, y - dotSize / 2, dotSize, dotSize);
-    }
-
-    /** Never actually called -- see hasSidePanelPresence. */
-    @Override
-    public JComponent createControlPanel(RunePartyPlugin plugin)
-    {
-        return new JPanel();
-    }
-
-    @Override
-    public boolean hasSidePanelPresence()
-    {
-        return false;
     }
 }

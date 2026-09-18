@@ -1,17 +1,14 @@
 package gay.runescape.runeparty.minigames;
 
-import gay.runescape.runeparty.RunePartyPlugin;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.Polygon;
-import javax.swing.JComponent;
-import javax.swing.JPanel;
 
 /** A Turf-Wars-shaped arena in which up to 4 floating ingredients (see models/SandwichItemModel)
  * spawn/respawn continuously; walking onto one collects it, and holding one of each completes a
  * sandwich. Entirely screen/world-driven -- instructions and arrival-gather messages render
  * center-screen, and the local player's held-ingredients/sandwich-count status renders via a
- * dedicated corner overlay (see SandwichRushHudOverlay) -- so this has no side-panel presence. */
+ * dedicated corner overlay (see SandwichRushHudOverlay). */
 public class SandwichRushMinigame implements Minigame
 {
     private static final Color BREAD_COLOR = new Color(222, 168, 92);
@@ -71,18 +68,5 @@ public class SandwichRushMinigame implements Minigame
     private static Color withAlpha(Color c, int a)
     {
         return new Color(c.getRed(), c.getGreen(), c.getBlue(), a);
-    }
-
-    /** Never actually called -- see hasSidePanelPresence. */
-    @Override
-    public JComponent createControlPanel(RunePartyPlugin plugin)
-    {
-        return new JPanel();
-    }
-
-    @Override
-    public boolean hasSidePanelPresence()
-    {
-        return false;
     }
 }

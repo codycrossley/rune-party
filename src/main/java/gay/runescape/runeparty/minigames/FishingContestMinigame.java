@@ -1,17 +1,13 @@
 package gay.runescape.runeparty.minigames;
 
-import gay.runescape.runeparty.RunePartyPlugin;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.Polygon;
 import java.awt.Shape;
 import java.awt.geom.Ellipse2D;
-import javax.swing.JComponent;
-import javax.swing.JPanel;
 
 /** A Pond players catch fish from by performing the Headbang emote nearby, whose local catch tally
- * renders via a dedicated corner overlay (see FishingCatchOverlay) rather than any side-panel
- * control (see hasSidePanelPresence). */
+ * renders via a dedicated corner overlay (see FishingCatchOverlay). */
 public class FishingContestMinigame implements Minigame
 {
     private static final Color WATER_BLUE = new Color(40, 130, 230);
@@ -72,18 +68,5 @@ public class FishingContestMinigame implements Minigame
         g.draw(bowl);
         int rimHeight = Math.max(2, size / 6);
         g.drawOval(x - half, y - half - rimHeight / 2, size, rimHeight);
-    }
-
-    /** Never actually called -- see hasSidePanelPresence. */
-    @Override
-    public JComponent createControlPanel(RunePartyPlugin plugin)
-    {
-        return new JPanel();
-    }
-
-    @Override
-    public boolean hasSidePanelPresence()
-    {
-        return false;
     }
 }

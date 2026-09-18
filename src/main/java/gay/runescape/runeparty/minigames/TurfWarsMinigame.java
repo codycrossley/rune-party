@@ -1,16 +1,12 @@
 package gay.runescape.runeparty.minigames;
 
-import gay.runescape.runeparty.RunePartyPlugin;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.util.Random;
-import javax.swing.JComponent;
-import javax.swing.JPanel;
 
 /** An 8x8 grid whose tiles/scoreboard/team-assignment banner all render/animate in-world and
  * center-screen (see TileOverlay's generic tile rendering, TurfWarsScoreOverlay, and
- * AnnouncementOverlay's team-assigned banner) rather than through any side-panel control (see
- * hasSidePanelPresence). */
+ * AnnouncementOverlay's team-assigned banner). */
 public class TurfWarsMinigame implements Minigame
 {
     // Matches RunePartyPlugin's own TEAM_A_COLOR/TEAM_B_COLOR so this wheel icon, the tiles
@@ -80,18 +76,5 @@ public class TurfWarsMinigame implements Minigame
 
         g.setColor(new Color(0, 0, 0, a));
         g.drawRect(left, top, size, size);
-    }
-
-    /** Never actually called -- see hasSidePanelPresence. */
-    @Override
-    public JComponent createControlPanel(RunePartyPlugin plugin)
-    {
-        return new JPanel();
-    }
-
-    @Override
-    public boolean hasSidePanelPresence()
-    {
-        return false;
     }
 }

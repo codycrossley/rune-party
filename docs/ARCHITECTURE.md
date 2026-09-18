@@ -276,3 +276,4 @@ Conventions this codebase already leans on hard, worth following rather than rei
 | Add a new overlay | extend `net.runelite.client.ui.overlay.Overlay`, register/remove it in `RunePartyPlugin#startUp`/`shutDown` |
 | Add a new tile type | server-side `tiles/` registry — the client picks it up automatically via the served catalog |
 | Understand the companion server | a separate repository; this client only ever assumes the REST/WebSocket contract described in `net/ApiClient.java` and `net/Events.java` |
+| Understand *why* something is shaped the way it is | `docs/DECISIONS.md` — the retrospective of major generalizations/reorganizations/optimizations behind today's structure |

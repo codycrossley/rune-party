@@ -228,9 +228,9 @@ public final class MinigamePresentation
                     {
                         minigameCountdownBannerUntil = System.currentTimeMillis() + RunePartyPlugin.MINIGAME_COUNTDOWN_DURATION_MS;
                         plugin.extendTurnEffectGate(minigameCountdownBannerUntil);
-                        // RunePartyPanel only re-checks isMinigamePlayable() reactively, when
-                        // refreshPanel() runs, so without this the panel's play controls would
-                        // never appear until some unrelated event triggered a refresh. Nested here
+                        // RunePartyPanel only re-checks state that depends on isMinigamePlayable()
+                        // reactively, when refreshPanel() runs, so without this the panel would
+                        // stay stale until some unrelated event triggered a refresh. Nested here
                         // rather than scheduled as its own independent delay off the original
                         // event, so it's guaranteed to fire strictly after
                         // minigameCountdownBannerUntil regardless of scheduler jitter.

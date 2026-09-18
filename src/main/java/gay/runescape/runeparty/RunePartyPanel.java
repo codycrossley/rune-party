@@ -15,7 +15,6 @@ import javax.swing.border.EmptyBorder;
 import net.runelite.client.ui.*;
 import gay.runescape.runeparty.items.Item;
 import gay.runescape.runeparty.items.Items;
-import gay.runescape.runeparty.minigames.Minigames;
 
 /** Sidebar UI -- a CardLayout(Connect/In-Game) switching between the pre-join form and the
  * in-game roster/controls. See RunePartyPlugin for the action methods every button here calls
@@ -48,20 +47,11 @@ public class RunePartyPanel extends PluginPanel
     // plugin.isBoardViewActive() -- see refresh(), the only place that flips it.
     private final JButton viewBoardBtn = new JButton("View Board");
 
-    // Mini-game -- minigameControlSlot holds whichever Minigame's own control panel is active
-    // (see gay.runescape.runeparty.minigames.Minigames#get), rebuilt only when activeMinigameKey
-    // changes rather than on every refresh() -- see the Minigame#createControlPanel contract.
-    private final JPanel minigamePanel = new JPanel();
-    private final JLabel minigameInstructionsLabel = new JLabel(" ");
-    private final JPanel minigameControlSlot = new JPanel(new BorderLayout());
-    private String activeMinigameKey = null;
-
     // Item use -- one button per distinct held item, visible only on the local player's own turn
     // (see RunePartyPlugin#isLocalPlayerReadyToUseItem), rebuilt only when the held items actually
-    // change rather than on every refresh() -- same "rebuild only when the key changes" shape as
-    // minigameControlSlot above. itemsCard is the titled "ITEMS" grouping card wrapping it, same
-    // bordered-card look as hostControlsCard's "HOST CONTROLS" -- only itemsCard's own visibility
-    // is toggled (see refreshItemUse); itemUsePanel itself just holds the buttons.
+    // change rather than on every refresh(). itemsCard is the titled "ITEMS" grouping card
+    // wrapping it, same bordered-card look as hostControlsCard's "HOST CONTROLS" -- only itemsCard's
+    // own visibility is toggled (see refreshItemUse); itemUsePanel itself just holds the buttons.
     private final JPanel itemsCard = new JPanel();
     private final JPanel itemUsePanel = new JPanel();
     private String lastItemsKey = null;
@@ -94,8 +84,8 @@ public class RunePartyPanel extends PluginPanel
     // in-game card (see buildLegendCard/refreshLegend), listing every standard course tile type's
     // own color/name. Rebuilt only once the served catalog's own size actually changes (see
     // legendBuiltForCatalogSize), not on every refresh() -- same "rebuild only when the key
-    // changes" restraint minigameControlSlot/itemUsePanel already use, just keyed on catalog size
-    // rather than a content string since the catalog itself never changes shape mid-game.
+    // changes" restraint itemUsePanel already uses, just keyed on catalog size rather than a
+    // content string since the catalog itself never changes shape mid-game.
     private final JPanel legendCard = new JPanel();
     private final JPanel legendRowsPanel = new JPanel();
     private int legendBuiltForCatalogSize = -1;
@@ -229,9 +219,6 @@ public class RunePartyPanel extends PluginPanel
         viewBoardBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
         viewBoardBtn.addActionListener(e -> plugin.toggleBoardView());
 
-        buildMinigamePanel();
-        minigamePanel.setAlignmentX(LEFT_ALIGNMENT);
-
         buildItemsCard();
         itemsCard.setAlignmentX(LEFT_ALIGNMENT);
 
@@ -267,8 +254,6 @@ public class RunePartyPanel extends PluginPanel
         card.add(showMapBtn);
         card.add(Box.createVerticalStrut(6));
         card.add(viewBoardBtn);
-        card.add(Box.createVerticalStrut(8));
-        card.add(minigamePanel);
         card.add(Box.createVerticalStrut(8));
         card.add(itemsCard);
         card.add(Box.createVerticalStrut(8));
@@ -432,22 +417,6 @@ public class RunePartyPanel extends PluginPanel
         @Override public int getIconHeight() { return SIZE; }
     }
 
-    private void buildMinigamePanel()
-    {
-        minigamePanel.setLayout(new BoxLayout(minigamePanel, BoxLayout.Y_AXIS));
-        minigamePanel.setBackground(new Color(30, 30, 30));
-        minigamePanel.setBorder(new EmptyBorder(6, 6, 6, 6));
-
-        minigameInstructionsLabel.setForeground(Color.WHITE);
-        minigameInstructionsLabel.setFont(FontManager.getRunescapeSmallFont());
-
-        minigameControlSlot.setOpaque(false);
-
-        minigamePanel.add(minigameInstructionsLabel);
-        minigamePanel.add(Box.createVerticalStrut(4));
-        minigamePanel.add(minigameControlSlot);
-    }
-
     /** Groups the item-use buttons under one titled, bordered card -- same look as
      * buildHostControlsCard, just its own blue accent instead of the host's orange/brown, so the
      * two grouping cards read as distinct at a glance. Only itemsCard's own visibility is ever
@@ -587,35 +556,6 @@ public class RunePartyPanel extends PluginPanel
         // the moment the player actually leaves.
         viewBoardBtn.setVisible(phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE);
         viewBoardBtn.setText(plugin.isBoardViewActive() ? "Return to Normal View" : "View Board");
-
-        // Gated on isMinigamePlayable(), not isMinigameActive() -- while the selection
-        // spinner/instructions/ready-check sequence is still playing out in AnnouncementOverlay,
-        // this section stays hidden entirely, same as the Golden Gnome offer has none of its own
-        // either. Also gated on the active mini-game's own hasSidePanelPresence() -- a fully
-        // screen-driven mini-game (see TrueOrFalseMinigame) opts all the way out of this section,
-        // not just its own createControlPanel() slot, so its instructions text doesn't show here
-        // either.
-        String minigameKey = plugin.getMinigameKey();
-        boolean showMinigamePanel = plugin.isMinigamePlayable()
-            && minigameKey != null && Minigames.get(minigameKey).hasSidePanelPresence();
-        minigamePanel.setVisible(showMinigamePanel);
-        if (showMinigamePanel)
-        {
-            minigameInstructionsLabel.setText("<html>" + plugin.getMinigameInstructions() + "</html>");
-
-            if (!java.util.Objects.equals(minigameKey, activeMinigameKey))
-            {
-                activeMinigameKey = minigameKey;
-                minigameControlSlot.removeAll();
-                minigameControlSlot.add(Minigames.get(minigameKey).createControlPanel(plugin));
-                minigameControlSlot.revalidate();
-                minigameControlSlot.repaint();
-            }
-        }
-        else
-        {
-            activeMinigameKey = null; // next activation always rebuilds fresh, even for a repeat mini-game
-        }
 
         hostControlsCard.setVisible(isHost && (phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE));
         courseToolsPanel.setVisible(isHost && phase == GamePhase.LOBBY && !plugin.isStandardCourseLocked());

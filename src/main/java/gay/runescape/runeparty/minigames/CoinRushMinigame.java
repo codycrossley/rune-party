@@ -1,22 +1,18 @@
 package gay.runescape.runeparty.minigames;
 
-import gay.runescape.runeparty.RunePartyPlugin;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
-import javax.swing.BoxLayout;
-import javax.swing.JComponent;
-import javax.swing.JLabel;
-import javax.swing.JPanel;
 import net.runelite.client.ui.FontManager;
 
 /** 2-4 coin spawns appear on random tiles over a 30-second round; whoever physically reaches a
  * spawn's tile first gets +2 coins and it disappears, then another can spawn elsewhere. There's
  * nothing for the player to actually operate here -- collection is automatic the instant they walk
- * onto a live spawn's tile -- so this control panel is purely a "here's what to do" reminder; the
- * actual gameplay renders in-world and the live per-round tally lives in StatsOverlay's
- * scoreboard. */
+ * onto a live spawn's tile -- the actual gameplay renders in-world, the live per-round tally lives
+ * in StatsOverlay's scoreboard, and the "here's what to do" reminder is the MINIGAME_STARTED
+ * instructions banner AnnouncementOverlay already shows (this used to also repeat as a side-panel
+ * control-panel hint -- see docs/ARCHITECTURE_REVIEW.md's S7 for why that was removed). */
 public class CoinRushMinigame implements Minigame
 {
     private static final Color COIN_COLOR = new Color(255, 215, 0);
@@ -62,19 +58,5 @@ public class CoinRushMinigame implements Minigame
         g.drawString(text, textX + 1, textY + 1);
         g.setColor(new Color(255, 255, 255, a));
         g.drawString(text, textX, textY);
-    }
-
-    @Override
-    public JComponent createControlPanel(RunePartyPlugin plugin)
-    {
-        JLabel hint = new JLabel("<html>Run to the coins as they appear -- first one there gets +2!</html>");
-        hint.setForeground(Color.LIGHT_GRAY);
-        hint.setFont(FontManager.getRunescapeSmallFont());
-
-        JPanel panel = new JPanel();
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setOpaque(false);
-        panel.add(hint);
-        return panel;
     }
 }

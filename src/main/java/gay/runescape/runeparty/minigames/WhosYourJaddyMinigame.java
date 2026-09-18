@@ -1,15 +1,11 @@
 package gay.runescape.runeparty.minigames;
 
-import gay.runescape.runeparty.RunePartyPlugin;
 import java.awt.Color;
 import java.awt.Graphics2D;
-import javax.swing.JComponent;
-import javax.swing.JPanel;
 
 /** Two duelling Jads whose zones/recolor/attack animations/duel-resolved banner all render/animate
  * in-world and center-screen (see models/JaddyDuelModel, TileOverlay's per-zone-color bounding box
- * outlines, and AnnouncementOverlay's duel-resolved banner) rather than through any side-panel
- * control (see hasSidePanelPresence). */
+ * outlines, and AnnouncementOverlay's duel-resolved banner). */
 public class WhosYourJaddyMinigame implements Minigame
 {
     // Matches RunePartyPlugin's own TEAM_A_COLOR/TEAM_B_COLOR so this wheel icon and the two Jads'
@@ -57,18 +53,5 @@ public class WhosYourJaddyMinigame implements Minigame
 
         g.setColor(new Color(0, 0, 0, a));
         g.drawRect(x - half, y - half, size, size);
-    }
-
-    /** Never actually called -- see hasSidePanelPresence. */
-    @Override
-    public JComponent createControlPanel(RunePartyPlugin plugin)
-    {
-        return new JPanel();
-    }
-
-    @Override
-    public boolean hasSidePanelPresence()
-    {
-        return false;
     }
 }

@@ -5,14 +5,11 @@ import gay.runescape.runeparty.RunePartyPlugin;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.geom.Rectangle2D;
-import javax.swing.JComponent;
-import javax.swing.JPanel;
 
 /** A 4x4 grid of tiles briefly reveals a memorized-then-hidden pattern each round -- entirely
  * screen/in-world-driven (see RepeatAfterMePresentation and TileOverlay#renderRepeatAfterMeTile),
  * the icon here just mirrors that same grid with a couple of cells lit, matching how the real
- * sneak peek looks. Screen-driven, no side-panel control (see hasSidePanelPresence), same shape
- * DanceDanceRuneScapeMinigame's own icon-only registration uses. */
+ * sneak peek looks. */
 public class RepeatAfterMeMinigame implements Minigame
 {
     private static final Color CELL_COLOR = new Color(255, 215, 0); // matches TileOverlay's own REPEAT_AFTER_ME_PEEK_FILL_COLOR
@@ -73,18 +70,5 @@ public class RepeatAfterMeMinigame implements Minigame
     private static Color withAlpha(Color c, int alpha)
     {
         return new Color(c.getRed(), c.getGreen(), c.getBlue(), alpha);
-    }
-
-    /** Never actually called -- see hasSidePanelPresence. */
-    @Override
-    public JComponent createControlPanel(RunePartyPlugin plugin)
-    {
-        return new JPanel();
-    }
-
-    @Override
-    public boolean hasSidePanelPresence()
-    {
-        return false;
     }
 }
