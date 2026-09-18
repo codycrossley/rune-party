@@ -15,3 +15,9 @@ out/
 
 # Local-only dev convenience (multi-instance test launchers) -- not for Plugin Hub submission
 local-dev.gradle
+
+# Local-reference-only docs -- not meant to be committed (SECURITY.md tracks unpatched gaps by
+# design; ARCHITECTURE_REVIEW.md/DECISIONS.md are working notes, not shipped documentation)
+docs/ARCHITECTURE_REVIEW.md
+docs/DECISIONS.md
+docs/SECURITY.md
