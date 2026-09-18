@@ -15,6 +15,8 @@ import javax.swing.border.EmptyBorder;
 import net.runelite.client.ui.*;
 import gay.runescape.runeparty.items.Item;
 import gay.runescape.runeparty.items.Items;
+import gay.runescape.runeparty.minigames.Minigame;
+import gay.runescape.runeparty.minigames.Minigames;
 
 /** Sidebar UI -- a CardLayout(Connect/In-Game) switching between the pre-join form and the
  * in-game roster/controls. See RunePartyPlugin for the action methods every button here calls
@@ -69,6 +71,18 @@ public class RunePartyPanel extends PluginPanel
     private final JButton clearCourseBtn = new JButton("Clear Course");
     private final JButton buildCustomBtn = new JButton("Build Custom Course");
 
+    // Host mini-game spawn placement (LOBBY only) -- unlike courseToolsPanel above, deliberately
+    // NOT hidden once the course is a locked Standard Course (see RunePartyPlugin#
+    // enterMinigameSpawnPlacementMode's own doc for why this is a different, orthogonal concern
+    // from editing the course itself). minigameSpawnStatusLabel/clearMinigameSpawnBtn's own
+    // enabled-state track whichever mini-game the dropdown currently has selected, refreshed by
+    // refreshMinigameSpawnPanel() below.
+    private final JPanel minigameSpawnPanel = new JPanel();
+    private final JComboBox<Minigame> minigameSpawnDropdown = new JComboBox<>();
+    private final JLabel minigameSpawnStatusLabel = new JLabel(" ");
+    private final JButton placeMinigameSpawnBtn = new JButton("Place");
+    private final JButton clearMinigameSpawnBtn = new JButton("Clear");
+
     // Host game settings (LOBBY only) -- turns-per-player, sent along with Start Game
     private static final int DEFAULT_MAX_ROUNDS = 5;
     private final JSpinner maxRoundsSpinner = new JSpinner(new SpinnerNumberModel(DEFAULT_MAX_ROUNDS, 2, 50, 1));
@@ -109,6 +123,18 @@ public class RunePartyPanel extends PluginPanel
             presetDropdown.setSelectedIndex(0);
             plugin.selectPreset((CoursePreset) presetDropdown.getSelectedItem());
         }
+
+        List<Minigame> boardSwappingMinigames = new java.util.ArrayList<>();
+        for (Minigame m : Minigames.all())
+        {
+            if (RunePartyPlugin.BOARD_SWAPPING_MINIGAME_KEYS.contains(m.getKey())) boardSwappingMinigames.add(m);
+        }
+        boardSwappingMinigames.sort(java.util.Comparator.comparing(Minigame::getDisplayName));
+        for (Minigame m : boardSwappingMinigames) minigameSpawnDropdown.addItem(m);
+        minigameSpawnDropdown.setRenderer((list, value, index, isSelected, cellHasFocus) ->
+            new JLabel(value != null ? value.getDisplayName() : ""));
+        minigameSpawnDropdown.addActionListener(e -> refreshMinigameSpawnPanel());
+        if (minigameSpawnDropdown.getItemCount() > 0) minigameSpawnDropdown.setSelectedIndex(0);
 
         refresh();
     }
@@ -229,6 +255,9 @@ public class RunePartyPanel extends PluginPanel
         buildCourseToolsPanel();
         courseToolsPanel.setAlignmentX(LEFT_ALIGNMENT);
 
+        buildMinigameSpawnPanel();
+        minigameSpawnPanel.setAlignmentX(LEFT_ALIGNMENT);
+
         startGameBtn.setAlignmentX(LEFT_ALIGNMENT);
         startGameBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
         startGameBtn.addActionListener(e -> plugin.startGame((Integer) maxRoundsSpinner.getValue()));
@@ -288,6 +317,8 @@ public class RunePartyPanel extends PluginPanel
         hostControlsCard.add(title);
         hostControlsCard.add(Box.createVerticalStrut(6));
         hostControlsCard.add(courseToolsPanel);
+        hostControlsCard.add(Box.createVerticalStrut(8));
+        hostControlsCard.add(minigameSpawnPanel);
         hostControlsCard.add(Box.createVerticalStrut(8));
         hostControlsCard.add(buildGameSettingsRow());
         hostControlsCard.add(Box.createVerticalStrut(4));
@@ -503,6 +534,78 @@ public class RunePartyPanel extends PluginPanel
         placeBtn.setEnabled(!building);
     }
 
+    /** Lets the host pin a specific board-swapping mini-game's own arena to an exact world point
+     * for the rest of this game -- see RunePartyPlugin#enterMinigameSpawnPlacementMode's own doc
+     * for why this stays available even once the course is a locked Standard Course, unlike
+     * courseToolsPanel above. Dropdown is restricted to RunePartyPlugin#BOARD_SWAPPING_MINIGAME_KEYS
+     * -- placing a spawn point for a mini-game with no arena to swap at all would be dead
+     * configuration. placeMinigameSpawnBtn toggles to "Cancel" while this exact mini-game's own
+     * placement mode is armed (see refreshMinigameSpawnPanel), same convention buildCustomBtn
+     * already uses for its own build-mode toggle. */
+    private void buildMinigameSpawnPanel()
+    {
+        minigameSpawnPanel.setLayout(new BoxLayout(minigameSpawnPanel, BoxLayout.Y_AXIS));
+        minigameSpawnPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+
+        JLabel caption = sectionLabel("Mini-game Spawn Points");
+
+        minigameSpawnDropdown.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        minigameSpawnDropdown.setAlignmentX(LEFT_ALIGNMENT);
+
+        minigameSpawnStatusLabel.setForeground(Color.LIGHT_GRAY);
+        minigameSpawnStatusLabel.setFont(FontManager.getRunescapeSmallFont());
+        minigameSpawnStatusLabel.setAlignmentX(LEFT_ALIGNMENT);
+
+        placeMinigameSpawnBtn.setAlignmentX(LEFT_ALIGNMENT);
+        placeMinigameSpawnBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        placeMinigameSpawnBtn.addActionListener(e -> {
+            Minigame selected = (Minigame) minigameSpawnDropdown.getSelectedItem();
+            if (selected == null) return;
+            if (selected.getKey().equals(plugin.getMinigameSpawnPlacementKey())) plugin.cancelMinigameSpawnPlacementMode();
+            else plugin.enterMinigameSpawnPlacementMode(selected.getKey());
+        });
+
+        clearMinigameSpawnBtn.setAlignmentX(LEFT_ALIGNMENT);
+        clearMinigameSpawnBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        clearMinigameSpawnBtn.addActionListener(e -> {
+            Minigame selected = (Minigame) minigameSpawnDropdown.getSelectedItem();
+            if (selected != null) plugin.clearMinigameSpawnPoint(selected.getKey());
+        });
+
+        minigameSpawnPanel.add(caption);
+        minigameSpawnPanel.add(Box.createVerticalStrut(4));
+        minigameSpawnPanel.add(minigameSpawnDropdown);
+        minigameSpawnPanel.add(Box.createVerticalStrut(4));
+        minigameSpawnPanel.add(minigameSpawnStatusLabel);
+        minigameSpawnPanel.add(Box.createVerticalStrut(4));
+        minigameSpawnPanel.add(placeMinigameSpawnBtn);
+        minigameSpawnPanel.add(Box.createVerticalStrut(4));
+        minigameSpawnPanel.add(clearMinigameSpawnBtn);
+    }
+
+    /** Keeps the status line/button labels in sync with whichever mini-game the dropdown currently
+     * has selected and whether it already has a host-placed spawn point -- called from refresh()
+     * and whenever the dropdown selection itself changes. */
+    private void refreshMinigameSpawnPanel()
+    {
+        Minigame selected = (Minigame) minigameSpawnDropdown.getSelectedItem();
+        if (selected == null)
+        {
+            minigameSpawnStatusLabel.setText(" ");
+            placeMinigameSpawnBtn.setEnabled(false);
+            clearMinigameSpawnBtn.setEnabled(false);
+            return;
+        }
+
+        boolean armedForThisOne = selected.getKey().equals(plugin.getMinigameSpawnPlacementKey());
+        placeMinigameSpawnBtn.setText(armedForThisOne ? "Cancel" : "Place");
+        placeMinigameSpawnBtn.setEnabled(true);
+
+        boolean hasCustomSpot = plugin.getMinigameSpawnPoint(selected.getKey()) != null;
+        minigameSpawnStatusLabel.setText(hasCustomSpot ? "Custom spot set" : "Default (course center)");
+        clearMinigameSpawnBtn.setEnabled(hasCustomSpot);
+    }
+
     private void copyJoinCodeToClipboard()
     {
         String code = plugin.getJoinCode();
@@ -560,6 +663,8 @@ public class RunePartyPanel extends PluginPanel
         hostControlsCard.setVisible(isHost && (phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE));
         courseToolsPanel.setVisible(isHost && phase == GamePhase.LOBBY && !plugin.isStandardCourseLocked());
         refreshCourseBuildButton();
+        minigameSpawnPanel.setVisible(isHost && phase == GamePhase.LOBBY);
+        refreshMinigameSpawnPanel();
         gameSettingsRow.setVisible(isHost && phase == GamePhase.LOBBY);
         startGameBtn.setVisible(isHost && phase == GamePhase.LOBBY);
         endGameBtn.setVisible(isHost && phase == GamePhase.ACTIVE);

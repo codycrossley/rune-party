@@ -180,7 +180,18 @@ duplicated at multiple call sites first — reach for these before writing a new
   removed tile's own slot is deliberately never reclaimed/renumbered — the gap is left for the
   host to notice rather than silently rewriting neighboring tiles' own edges.
 - **`HardcodedCourse`** — the built-in "Standard Loop" fallback course plus the registered set of
-  real Standard Courses (e.g. Fally Park).
+  real Standard Courses (e.g. Fally Park, Varrock Square, Cow Town).
+- **Mini-game spawn points** — the host can pin any board-swapping minigame's own arena to an exact
+  world point ("Place Minigame" dropdown → right-click "Place &lt;Name&gt; Here", `CourseBuilder`'s
+  `enterMinigameSpawnPlacementMode`), overriding the default bounding-box-center placement for the
+  rest of the game. Real, durable per-game state (`MINIGAME_SPAWN_POINT_SET`/`_CLEARED`,
+  `state["minigameSpawnPoints"]`) read by every board-swapping minigame's own `prepare()` through
+  one shared `MinigameContext.arena_center` — see `docs/DECISIONS.md` for why that centralization
+  is what made this a one-line addition per minigame rather than a ten-file one. Allowed regardless
+  of whether the course is a locked Standard Course, unlike tile editing — it's configuring this
+  game's own minigame behavior, not the course itself. Deliberately shows nothing once committed
+  (only a live hover preview while placing) — there's nothing to render until that minigame's own
+  round actually swaps its arena in.
 
 ## Tests / build
 

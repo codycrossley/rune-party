@@ -125,6 +125,8 @@ public final class Events
     public static final String MINIGAME_PLAYER_READY = "MINIGAME_PLAYER_READY";
     public static final String MINIGAME_RESULT_SUBMITTED = "MINIGAME_RESULT_SUBMITTED";
     public static final String MINIGAME_ROUND_BEGIN = "MINIGAME_ROUND_BEGIN";
+    public static final String MINIGAME_SPAWN_POINT_CLEARED = "MINIGAME_SPAWN_POINT_CLEARED";
+    public static final String MINIGAME_SPAWN_POINT_SET = "MINIGAME_SPAWN_POINT_SET";
     public static final String MINIGAME_STARTED = "MINIGAME_STARTED";
     public static final String MINIGAME_TEAMS_ASSIGNED = "MINIGAME_TEAMS_ASSIGNED";
     public static final String PLAYER_JOINED = "PLAYER_JOINED";

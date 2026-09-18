@@ -117,5 +117,159 @@ public final class HardcodedCourse
 
     public static final HardcodedCourse FALLY_PARK_COURSE = buildFallyParkCourse();
 
-    public static final List<HardcodedCourse> ALL = List.of(FALLY_PARK_COURSE);
+    /** Captured from a real, host-built course (43 tiles, non-contiguous pathIndex from in-game
+     * tile removals) -- an outward spiral from START at the center, winding clockwise and closing
+     * back on itself at index 49 -> 0. Reconstructed from that course's own TILES_MARKED/
+     * TILES_UNMARKED event log (game 20260918-062850-C528 on prod, still mid-build in LOBBY when
+     * captured), same "captured verbatim, strip stale editing leftovers" approach
+     * buildFallyParkCourse's own doc describes -- but this one needed real logical fixes, not just
+     * stripping, found by checking every tile's (dx, dy) relative to START against its own place in
+     * the intended winding order (radius should grow and angle should sweep clockwise,
+     * monotonically, tile to tile):
+     * <ul>
+     * <li>Six tiles (27, 34, 38, 42, 52, 55) each had two outgoing edges -- one real, one a stale
+     * leftover pointing at a pathIndex the host had since deleted (28, 40, 41, 43, 44, 30
+     * respectively, none of which exist in the final tile set at all). Dropped the dangling one,
+     * same as Fally Park's own precedent.</li>
+     * <li>Tiles 9, 10, 53, and 11 formed a real logical error, not just a stray edge: 9 was a dead
+     * end (no outgoing edge at all), while 11 -&gt; 53 -&gt; 10 -&gt; 9 wired that whole short
+     * segment backward -- into the dead end instead of out of it -- leaving 11 itself
+     * unreachable (nothing pointed to it) and the spiral broken in two unconnected pieces at
+     * exactly the point they should have met. Geometrically, 10/53/11 sit precisely between 9 and
+     * 14 in the winding order (radius 4.12 -&gt; 4.47 -&gt; 5.00, angle 256&deg; -&gt; 243&deg; -&gt;
+     * 217&deg;, continuing the same clockwise sweep 9 -&gt; 14 already have on either side) --
+     * reversed the segment to 9 -&gt; 10 -&gt; 53 -&gt; 11 -&gt; 14, which turns the whole course
+     * into one single 43-tile cycle with no dead ends and no unreachable tiles.</li>
+     * </ul>
+     * Verified by simulating the full forward walk from index 0: visits all 43 tiles exactly once
+     * and returns to 0, with every tile's own (radius, angle) from START increasing/sweeping
+     * clockwise in step with its place in that walk. */
+    private static HardcodedCourse buildVarrockSquareCourse()
+    {
+        WorldPoint start = new WorldPoint(3213, 3429, 0);
+        List<ApiClient.TileSpec> tiles = List.of(
+            t(3213, 3429, "START", 0, 1),
+            t(3213, 3430, "PATH", 1, 2),
+            t(3213, 3431, "PATH", 2, 3),
+            t(3213, 3432, "PENALTY_TILE", 3, 4),
+            t(3214, 3432, "ITEM_TILE", 4, 5),
+            t(3216, 3431, "PATH", 5, 12),
+            t(3216, 3426, "PATH", 7, 8),
+            t(3214, 3425, "ITEM_TILE", 8, 9),
+            t(3213, 3425, "PATH", 9, 10),
+            t(3212, 3425, "ITEM_SHOP_TILE", 10, 53),
+            t(3209, 3426, "PENALTY_TILE", 11, 14),
+            t(3217, 3430, "ITEM_TILE", 12, 13),
+            t(3217, 3427, "PATH", 13, 7),
+            t(3208, 3427, "PENALTY_TILE", 14, 15),
+            t(3208, 3430, "ITEM_TILE", 15, 16),
+            t(3209, 3432, "PENALTY_TILE", 16, 17),
+            t(3210, 3433, "CHANCE_TILE", 17, 19),
+            t(3212, 3434, "JAD_TILE", 19, 20),
+            t(3213, 3434, "ITEM_TILE", 20, 54),
+            t(3218, 3432, "PATH", 22, 24),
+            t(3217, 3433, "PATH", 23, 22),
+            t(3219, 3430, "WISE_OLD_MAN_TILE", 24, 25),
+            t(3219, 3427, "PATH", 25, 27),
+            t(3218, 3425, "PATH", 27, 55),
+            t(3212, 3422, "JAD_TILE", 34, 63),
+            t(3206, 3427, "CHANCE_TILE", 38, 64),
+            t(3207, 3433, "PENALTY_TILE", 42, 52),
+            t(3215, 3436, "PATH", 45, 46),
+            t(3218, 3435, "PATH", 46, 47),
+            t(3220, 3433, "ITEM_TILE", 47, 48),
+            t(3222, 3430, "PATH", 48, 49),
+            t(3222, 3429, "PATH", 49, 0),
+            t(3209, 3435, "PENALTY_TILE", 52, 59),
+            t(3211, 3425, "PENALTY_TILE", 53, 11),
+            t(3214, 3434, "PATH", 54, 23),
+            t(3216, 3423, "PATH", 55, 58),
+            t(3213, 3422, "CHANCE_TILE", 57, 34),
+            t(3214, 3422, "ITEM_SHOP_TILE", 58, 57),
+            t(3211, 3436, "PENALTY_TILE", 59, 60),
+            t(3213, 3436, "ITEM_SHOP_TILE", 60, 45),
+            t(3207, 3425, "PENALTY_TILE", 62, 38),
+            t(3209, 3423, "PENALTY_TILE", 63, 62),
+            t(3206, 3430, "CHANCE_TILE", 64, 42),
+            new ApiClient.TileSpec(start.getX(), start.getY(), start.getPlane(), "GOLDEN_GNOME_TILE", null, null, null, new int[0])
+        );
+        return new HardcodedCourse("Varrock Square", "varrock_square", start, tiles);
+    }
+
+    public static final HardcodedCourse VARROCK_SQUARE_COURSE = buildVarrockSquareCourse();
+
+    /** Captured from a real, host-built course (45 tiles, one gap at pathIndex 25 from an in-game
+     * tile removal) -- a clockwise loop, no spiral this time (radius from START stays roughly
+     * within one band rather than growing outward), same "captured verbatim" approach
+     * buildFallyParkCourse/buildVarrockSquareCourse's own docs describe. Unlike those two, this
+     * course had never been wired at all: every tile's own nextIndices was still empty
+     * (host had placed all 45 in order but hadn't gotten to "Connect From"/"Connect To" yet), so
+     * there was no existing graph to strip stale edges from or repair a broken segment in -- the
+     * connections below are entirely inferred from geometry, by checking each tile's own (radius,
+     * angle) from START against its place in ascending pathIndex order (the same check
+     * buildVarrockSquareCourse's own doc describes). That check found the whole 0-45 sequence
+     * already swept clockwise cleanly with exactly one exception: pathIndex 26 and 27 sit swapped
+     * relative to the real clockwise order at that point (26 at angle 59.5&deg;/radius 19.72
+     * comes geometrically *after* 27 at 63.4&deg;/22.36, not before) -- wired as 24 -&gt; 27 -&gt;
+     * 26 -&gt; 28 rather than the naive ascending-pathIndex 24 -&gt; 26 -&gt; 27 -&gt; 28, which
+     * would have doubled back counter-clockwise for one step. Verified the same way as Varrock
+     * Square: simulating the full forward walk from index 0 visits all 45 tiles exactly once and
+     * returns to 0, angle sweeping clockwise in step with the walk the entire way around. */
+    private static HardcodedCourse buildCowTownCourse()
+    {
+        WorldPoint start = new WorldPoint(3254, 3267, 0);
+        List<ApiClient.TileSpec> tiles = List.of(
+            t(3254, 3267, "START", 0, 1),
+            t(3254, 3269, "PATH", 1, 2),
+            t(3254, 3271, "PATH", 2, 3),
+            t(3254, 3273, "PENALTY_TILE", 3, 4),
+            t(3254, 3275, "ITEM_TILE", 4, 5),
+            t(3254, 3277, "PATH", 5, 6),
+            t(3253, 3279, "ITEM_TILE", 6, 7),
+            t(3252, 3280, "CHANCE_TILE", 7, 8),
+            t(3251, 3281, "PENALTY_TILE", 8, 9),
+            t(3249, 3282, "PENALTY_TILE", 9, 10),
+            t(3247, 3282, "PATH", 10, 11),
+            t(3244, 3283, "ITEM_SHOP_TILE", 11, 12),
+            t(3243, 3285, "ITEM_TILE", 12, 13),
+            t(3243, 3287, "CHANCE_TILE", 13, 14),
+            t(3245, 3289, "PENALTY_TILE", 14, 15),
+            t(3245, 3291, "PATH", 15, 16),
+            t(3245, 3293, "PATH", 16, 17),
+            t(3246, 3295, "ITEM_TILE", 17, 18),
+            t(3249, 3295, "PATH", 18, 19),
+            t(3252, 3293, "PENALTY_TILE", 19, 20),
+            t(3255, 3291, "JAD_TILE", 20, 21),
+            t(3258, 3292, "PATH", 21, 22),
+            t(3260, 3292, "ITEM_SHOP_TILE", 22, 23),
+            t(3262, 3291, "PATH", 23, 24),
+            t(3263, 3289, "CHANCE_TILE", 24, 27),
+            t(3264, 3284, "WISE_OLD_MAN_TILE", 26, 28),
+            t(3264, 3287, "PENALTY_TILE", 27, 26),
+            t(3264, 3281, "ITEM_TILE", 28, 29),
+            t(3264, 3279, "PATH", 29, 30),
+            t(3264, 3277, "PATH", 30, 31),
+            t(3264, 3275, "PENALTY_TILE", 31, 32),
+            t(3264, 3273, "PENALTY_TILE", 32, 33),
+            t(3264, 3271, "PATH", 33, 34),
+            t(3264, 3269, "ITEM_TILE", 34, 35),
+            t(3264, 3267, "CHANCE_TILE", 35, 36),
+            t(3264, 3265, "PATH", 36, 37),
+            t(3264, 3263, "PENALTY_TILE", 37, 38),
+            t(3264, 3261, "PENALTY_TILE", 38, 39),
+            t(3263, 3259, "PATH", 39, 40),
+            t(3261, 3258, "ITEM_TILE", 40, 41),
+            t(3259, 3257, "JAD_TILE", 41, 42),
+            t(3257, 3258, "ITEM_SHOP_TILE", 42, 43),
+            t(3255, 3260, "PATH", 43, 44),
+            t(3254, 3262, "PENALTY_TILE", 44, 45),
+            t(3254, 3265, "PATH", 45, 0),
+            new ApiClient.TileSpec(start.getX(), start.getY(), start.getPlane(), "GOLDEN_GNOME_TILE", null, null, null, new int[0])
+        );
+        return new HardcodedCourse("Cow Town", "cow_town", start, tiles);
+    }
+
+    public static final HardcodedCourse COW_TOWN_COURSE = buildCowTownCourse();
+
+    public static final List<HardcodedCourse> ALL = List.of(FALLY_PARK_COURSE, VARROCK_SQUARE_COURSE, COW_TOWN_COURSE);
 }

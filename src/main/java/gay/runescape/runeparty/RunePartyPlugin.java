@@ -564,6 +564,16 @@ public class RunePartyPlugin extends Plugin
     public static final Set<String> ARRIVAL_GATHER_KEYS = Set.of(
         ARENA_KEY, TURF_WARS_KEY, SANDWICH_RUSH_KEY, JADDY_KEY, HOT_POTATO_KEY, DANCE_DANCE_RUNESCAPE_KEY, REPEAT_AFTER_ME_KEY);
 
+    /** Every mini-game that actually board-swaps in a dedicated arena (see each one's own
+     * prepare()/app.py's MinigameContext.arena_center) -- the only ones a host-placed spawn point
+     * (see CourseBuilder#enterMinigameSpawnPlacementMode) means anything for. Coin Rush, True or
+     * False, Click Click Click, and Rainbow Rush are deliberately excluded: none of them swap the
+     * board at all (Rainbow Rush repaints the existing course instead), so placing a spawn point
+     * for one would be dead configuration with nothing to ever read it. */
+    public static final Set<String> BOARD_SWAPPING_MINIGAME_KEYS = Set.of(
+        ARENA_KEY, TURF_WARS_KEY, SANDWICH_RUSH_KEY, JADDY_KEY, HOT_POTATO_KEY, DANCE_DANCE_RUNESCAPE_KEY,
+        REPEAT_AFTER_ME_KEY, CRAB_RAVE_KEY, BRUTUS_ATTACK_KEY, FISHING_CONTEST_KEY);
+
     /** How long AnnouncementOverlay's mini-game final-score recap ("how did everyone do") stays up
      * -- triggered on MINIGAME_ENDED (see triggerMinigameScoreBanner), shown *after* the "MINIGAME
      * OVER!" banner above and *before* the rewards recap below: chained via the same armBanner/
@@ -1191,6 +1201,14 @@ public class RunePartyPlugin extends Plugin
     // is on pathIndex 0 (START), same default the server uses. See TileOverlay#
     // renderReturnToPositionArrow, which is what actually uses this to gate re-rolling.
     private final Map<String, Integer> playerPositions = new ConcurrentHashMap<>();
+
+    // Host-placed arena spawn point per mini-game key (see CourseBuilder's own placement-mode
+    // fields), mirroring the server's own state["minigameSpawnPoints"] -- real, durable state
+    // (folded unconditionally, catch-up or not), persists for the whole game the same way the real
+    // course tiles do. A key with no entry here just uses the default bounding-box-center
+    // placement -- see TileOverlay#renderMinigameSpawnPlacementPreview, the only reader that cares
+    // whether a given key already has one set, and RunePartyPanel's own minigame-placement section.
+    private final Map<String, WorldPoint> minigameSpawnPoints = new ConcurrentHashMap<>();
 
     // ---- pre-game gathering (GAME_STARTED fired, but currentTurnRsn still null -- see confirmStart) ----
     private volatile boolean startConfirmSubmitted = false; // guards confirm-start firing every tick while the echo is in flight
@@ -1992,6 +2010,17 @@ public class RunePartyPlugin extends Plugin
      * TileOverlay#renderConnectFromIndicator, the only reader. */
     public WorldPoint getCourseConnectFromPoint() { return courseBuilder.getCourseConnectFromPoint(); }
 
+    // ---- Mini-game spawn placement (host, LOBBY only) -- same delegating-facade shape as course
+    // building above, see CourseBuilder's own doc for why this lives there rather than a new class. ----
+    public boolean isMinigameSpawnPlacementMode() { return courseBuilder.isMinigameSpawnPlacementMode(); }
+    public String getMinigameSpawnPlacementKey() { return courseBuilder.getMinigameSpawnPlacementKey(); }
+    public void enterMinigameSpawnPlacementMode(String minigameKey) { courseBuilder.enterMinigameSpawnPlacementMode(minigameKey); }
+    public void cancelMinigameSpawnPlacementMode() { courseBuilder.cancelMinigameSpawnPlacementMode(); }
+    public void clearMinigameSpawnPoint(String minigameKey) { courseBuilder.clearMinigameSpawnPoint(minigameKey); }
+    /** This mini-game's own host-placed arena spawn point, or null if it's still using the default
+     * bounding-box-center placement -- see minigameSpawnPoints' own doc. */
+    public WorldPoint getMinigameSpawnPoint(String minigameKey) { return minigameSpawnPoints.get(minigameKey); }
+
     // -------------------------------------------------------------------------
     // Board interaction helpers -- Golden Gnome purchase, Click Click Click tile clicks, Fishing
     // Contest catches, and the generic menu-hover plumbing behind all of them plus the hard-coded
@@ -2658,6 +2687,11 @@ public class RunePartyPlugin extends Plugin
         if (phase == GamePhase.LOBBY && isHost() && courseBuilder.isCustomCourseBuildMode())
         {
             courseBuilder.addCustomCourseBuildMenuEntries();
+            return;
+        }
+        if (phase == GamePhase.LOBBY && isHost() && courseBuilder.isMinigameSpawnPlacementMode())
+        {
+            courseBuilder.addMinigameSpawnMenuEntries();
             return;
         }
         if (phase == GamePhase.ACTIVE && itemPlacementKey != null)
@@ -3469,6 +3503,27 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
+            case Events.MINIGAME_SPAWN_POINT_SET:
+            {
+                // Real state, applied catch-up or not -- see minigameSpawnPoints' own doc.
+                String spawnKey = Json.requiredStr(e.payload, type, "minigameKey");
+                Integer spawnX = Json.requiredInt(e.payload, type, "x");
+                Integer spawnY = Json.requiredInt(e.payload, type, "y");
+                Integer spawnPlane = Json.requiredInt(e.payload, type, "plane");
+                if (spawnKey != null && spawnX != null && spawnY != null && spawnPlane != null)
+                {
+                    minigameSpawnPoints.put(spawnKey, new WorldPoint(spawnX, spawnY, spawnPlane));
+                }
+                break;
+            }
+
+            case Events.MINIGAME_SPAWN_POINT_CLEARED:
+            {
+                String spawnKey = Json.requiredStr(e.payload, type, "minigameKey");
+                if (spawnKey != null) minigameSpawnPoints.remove(spawnKey);
+                break;
+            }
+
             case Events.GOLDEN_GNOME_PURCHASED:
             {
                 // Real state, applied catch-up or not -- see goldenGnomePurchasedThisTurn's own
@@ -4044,6 +4099,7 @@ public class RunePartyPlugin extends Plugin
         minigamePresentation.reset();
         maxRounds = 0; completedRounds = 0;
         playerPositions.clear();
+        minigameSpawnPoints.clear();
         startConfirmSubmitted = false;
         gameStartBanner.reset();
         ceremonyPresentation.reset();

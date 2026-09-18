@@ -16,6 +16,7 @@ import gay.runescape.runeparty.models.GoldenGnomeModel;
 import gay.runescape.runeparty.models.PondModel;
 import gay.runescape.runeparty.models.SandwichItemModel;
 import gay.runescape.runeparty.models.TableModel;
+import gay.runescape.runeparty.minigames.Minigames;
 import gay.runescape.runeparty.minigames.RepeatAfterMePresentation;
 import net.runelite.api.Client;
 import net.runelite.api.Perspective;
@@ -166,6 +167,7 @@ public class TileOverlay extends Overlay
 
     private static final Color COLOR_PLACEMENT_ARROW = new Color(255, 140, 0);
     private static final Color COLOR_CONNECT_FROM_ARROW = new Color(0, 220, 255);
+    private static final Color COLOR_MINIGAME_SPAWN_ARROW = new Color(180, 0, 255);
 
     private final Client client;
     private final RunePartyConfig config;
@@ -247,6 +249,7 @@ public class TileOverlay extends Overlay
         renderItemPlacementArrows(g);
         renderGoldenGnomePurchaseArrow(g);
         renderConnectFromIndicator(g);
+        renderMinigameSpawnPlacementPreview(g);
 
         return null;
     }
@@ -715,6 +718,28 @@ public class TileOverlay extends Overlay
         if (connectFromPoint == null) return;
 
         drawBouncingArrowWithLabel(g, connectFromPoint, "Connecting From Here", COLOR_CONNECT_FROM_ARROW);
+    }
+
+    /** Live hover preview while "Place Minigame" is armed (see RunePartyPlugin#
+     * isMinigameSpawnPlacementMode) -- follows whichever ground tile is currently under the
+     * cursor, same "getSelectedSceneTile every frame" idiom renderPresetPreview uses, just a
+     * single labeled arrow instead of a whole tile footprint. Deliberately the only visual this
+     * feature ever shows: once actually committed (right-click "Place &lt;Name&gt; Here"), nothing
+     * renders at all -- see the server's own set_minigame_spawn_point doc for why a placement is
+     * silent by design (there's nothing to show until that mini-game's own round actually runs and
+     * swaps its arena in). */
+    private void renderMinigameSpawnPlacementPreview(Graphics2D g)
+    {
+        String minigameKey = plugin.getMinigameSpawnPlacementKey();
+        if (minigameKey == null) return;
+
+        Tile hovered = client.getTopLevelWorldView().getSelectedSceneTile();
+        if (hovered == null) return;
+        WorldPoint point = hovered.getWorldLocation();
+        if (point == null) return;
+
+        String label = "Place " + Minigames.get(minigameKey).getDisplayName() + " Here";
+        drawBouncingArrowWithLabel(g, point, label, COLOR_MINIGAME_SPAWN_ARROW);
     }
 
     private Player findPlayerByRsn(String rsn)

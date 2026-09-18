@@ -2,6 +2,8 @@ package gay.runescape.runeparty.courses;
 
 import gay.runescape.runeparty.RunePartyPlugin;
 import gay.runescape.runeparty.TileReducer;
+import gay.runescape.runeparty.minigames.Minigame;
+import gay.runescape.runeparty.minigames.Minigames;
 import gay.runescape.runeparty.net.ApiClient;
 
 import net.runelite.api.Menu;
@@ -45,6 +47,14 @@ public final class CourseBuilder
     // reads this (via getCourseConnectFromPoint) to show which tile is actually armed -- there's
     // otherwise nothing on screen distinguishing it from any other course tile.
     private volatile Integer courseConnectFromIndex = null;
+    // Which mini-game key (see RunePartyPlugin#BOARD_SWAPPING_MINIGAME_KEYS) is currently being
+    // placed via "Place Minigame" -> right-click "Place <Name> Here", or null when not in this
+    // mode -- see enterMinigameSpawnPlacementMode/addMinigameSpawnMenuEntries. Mutually exclusive
+    // with coursePlacementMode/customCourseBuildMode, same "only one placement mode armed at a
+    // time" invariant those two already keep between each other. Unlike course tile placement,
+    // this is allowed regardless of whether the course is a locked Standard Course -- see
+    // enterMinigameSpawnPlacementMode's own doc.
+    private volatile String minigameSpawnPlacementKey = null;
 
     public CourseBuilder(RunePartyPlugin plugin)
     {
@@ -61,6 +71,7 @@ public final class CourseBuilder
     {
         if (plugin.isStandardCourseLocked()) return;
         customCourseBuildMode = false; // mutually exclusive -- see that field's own doc
+        minigameSpawnPlacementKey = null;
         courseConnectFromIndex = null;
         coursePlacementMode = true;
         plugin.refreshPanel();
@@ -86,6 +97,7 @@ public final class CourseBuilder
     {
         if (!plugin.isHost() || plugin.isStandardCourseLocked()) return;
         coursePlacementMode = false; // mutually exclusive -- see customCourseBuildMode's own doc
+        minigameSpawnPlacementKey = null;
         customCourseBuildMode = true;
         courseConnectFromIndex = null;
         plugin.refreshPanel();
@@ -96,6 +108,87 @@ public final class CourseBuilder
         customCourseBuildMode = false;
         courseConnectFromIndex = null;
         plugin.refreshPanel();
+    }
+
+    public boolean isMinigameSpawnPlacementMode()
+    {
+        return minigameSpawnPlacementKey != null;
+    }
+
+    public String getMinigameSpawnPlacementKey()
+    {
+        return minigameSpawnPlacementKey;
+    }
+
+    /** Arms "Place Minigame" -- unlike enterCoursePlacementMode/enterCustomCourseBuildMode, NOT
+     * refused once the course is a locked Standard Course: this isn't editing the course itself,
+     * just configuring where one mini-game's own arena goes for this specific game, which is just
+     * as meaningful on a locked Fally Park/Varrock Square as on a freeform course (see the
+     * server's own set_minigame_spawn_point doc). */
+    public void enterMinigameSpawnPlacementMode(String minigameKey)
+    {
+        if (!plugin.isHost() || !RunePartyPlugin.BOARD_SWAPPING_MINIGAME_KEYS.contains(minigameKey)) return;
+        coursePlacementMode = false; // mutually exclusive -- see minigameSpawnPlacementKey's own doc
+        customCourseBuildMode = false;
+        courseConnectFromIndex = null;
+        minigameSpawnPlacementKey = minigameKey;
+        plugin.refreshPanel();
+    }
+
+    public void cancelMinigameSpawnPlacementMode()
+    {
+        minigameSpawnPlacementKey = null;
+        plugin.refreshPanel();
+    }
+
+    /** Same "Walk here" -> custom RUNELITE entries idiom as addPresetMenuEntries, for a single
+     * point instead of a whole tile footprint -- offered on whatever ground tile is currently
+     * hovered, same as course placement (not restricted to an existing course tile at all). */
+    public void addMinigameSpawnMenuEntries()
+    {
+        Tile tile = plugin.client.getTopLevelWorldView().getSelectedSceneTile();
+        if (tile == null) return;
+        WorldPoint point = tile.getWorldLocation();
+        if (point == null) return;
+        String minigameKey = minigameSpawnPlacementKey;
+        if (minigameKey == null) return;
+        Minigame minigame = Minigames.get(minigameKey);
+
+        plugin.client.createMenuEntry(-1)
+            .setOption("Cancel")
+            .setTarget("")
+            .setType(MenuAction.RUNELITE)
+            .onClick(me -> cancelMinigameSpawnPlacementMode());
+
+        plugin.client.createMenuEntry(-1)
+            .setOption("<col=00FF00>Place " + minigame.getDisplayName() + " Here</col>")
+            .setTarget("")
+            .setType(MenuAction.RUNELITE)
+            .onClick(me -> commitMinigameSpawnPoint(minigameKey, point));
+    }
+
+    private void commitMinigameSpawnPoint(String minigameKey, WorldPoint point)
+    {
+        cancelMinigameSpawnPlacementMode();
+        final String gid = plugin.gameId;
+        final String wk = plugin.writeKey;
+        if (gid == null || wk == null) return;
+
+        plugin.submitAction("Place mini-game spawn point",
+            () -> plugin.apiClient.setMinigameSpawnPoint(gid, wk, minigameKey, point.getX(), point.getY(), point.getPlane()));
+    }
+
+    /** Resets a mini-game back to the default bounding-box-center placement -- called from
+     * RunePartyPanel's own "Clear" button, only ever enabled once getMinigameSpawnPoint(key)
+     * already returns non-null for the selected mini-game. */
+    public void clearMinigameSpawnPoint(String minigameKey)
+    {
+        final String gid = plugin.gameId;
+        final String wk = plugin.writeKey;
+        if (gid == null || wk == null || minigameKey == null) return;
+
+        plugin.submitAction("Clear mini-game spawn point",
+            () -> plugin.apiClient.clearMinigameSpawnPoint(gid, wk, minigameKey));
     }
 
     /** Unmarks every currently-committed course tile -- the host's "start over" button. */
@@ -451,6 +544,7 @@ public final class CourseBuilder
         presetRotationSteps = 0;
         customCourseBuildMode = false;
         courseConnectFromIndex = null;
+        minigameSpawnPlacementKey = null;
     }
 
     public boolean isCoursePlacementMode() { return coursePlacementMode; }
