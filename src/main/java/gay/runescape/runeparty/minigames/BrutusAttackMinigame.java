@@ -1,19 +1,21 @@
 package gay.runescape.runeparty.minigames;
 
-import java.awt.Color;
+import java.awt.AlphaComposite;
+import java.awt.Composite;
 import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
+import javax.imageio.ImageIO;
+import lombok.extern.slf4j.Slf4j;
 
 /** Entirely screen-driven -- transformed-Brutus rendering lives in overlays/PlayerTransformOverlay,
  * the gather message/dash countdown in AnnouncementOverlay, the eliminated-target skull in
  * PlayerOverlay. A real, randomly-reachable mini-game, so it needs a real wheel icon. */
+@Slf4j
 public class BrutusAttackMinigame implements Minigame
 {
-    // Matches RunePartyPlugin.TEAM_A_COLOR/TEAM_B_COLOR (and the server's own brutus_attack.py
-    // BRUTUS_ZONE_COLOR/TARGET_ZONE_COLOR) -- the same pink/teal pairing PlayerOverlay's own Brutus
-    // Attack player-token coloring and the arena's own ground tiles both use now, so this wheel
-    // icon agrees with what the round actually looks like.
-    private static final Color BRUTUS_ZONE_COLOR = new Color(0xE6, 0x1E, 0x96);
-    private static final Color TARGET_ZONE_COLOR = new Color(0x00, 0xAA, 0xAA);
+    private static final BufferedImage ICON = loadIcon();
 
     @Override
     public String getKey()
@@ -27,21 +29,28 @@ public class BrutusAttackMinigame implements Minigame
         return "Brutus Bullet";
     }
 
-    /** Two small colored squares facing each other -- Brutus's own zone (pink) and the targets'
-     * zone (teal), the exact same two hex colors the server's own brutus_attack.py colors the
-     * arena's two ends with -- purely programmatic, same "no bundled raster asset needed for a
-     * wheel icon" convention ClickClickClickMinigame/HotPotatoMinigame's own docs give. */
     @Override
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
-        int a = Math.max(0, Math.min(255, Math.round(alpha * 255)));
-        int squareSize = Math.max(2, size / 3);
-        int gap = Math.max(1, size / 8);
+        if (ICON == null) return;
 
-        g.setColor(new Color(BRUTUS_ZONE_COLOR.getRed(), BRUTUS_ZONE_COLOR.getGreen(), BRUTUS_ZONE_COLOR.getBlue(), a));
-        g.fillRect(x - gap / 2 - squareSize, y - squareSize / 2, squareSize, squareSize);
+        Composite original = g.getComposite();
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, Math.min(1f, alpha))));
+        g.drawImage(ICON, x - size / 2, y - size / 2, size, size, null);
+        g.setComposite(original);
+    }
 
-        g.setColor(new Color(TARGET_ZONE_COLOR.getRed(), TARGET_ZONE_COLOR.getGreen(), TARGET_ZONE_COLOR.getBlue(), a));
-        g.fillRect(x + gap / 2, y - squareSize / 2, squareSize, squareSize);
+    private static BufferedImage loadIcon()
+    {
+        try (InputStream is = BrutusAttackMinigame.class.getResourceAsStream("/gay/runescape/runeparty/minigame_icons/brutus-bullet.png"))
+        {
+            if (is == null) throw new IOException("brutus-bullet.png resource not found");
+            return ImageIO.read(is);
+        }
+        catch (IOException e)
+        {
+            log.warn("Failed to load the Brutus Bullet wheel icon", e);
+            return null;
+        }
     }
 }

@@ -1,23 +1,25 @@
 package gay.runescape.runeparty.minigames;
 
-import gay.runescape.runeparty.RunePartyColor;
 import gay.runescape.runeparty.RunePartyPlugin;
 
-import java.awt.Color;
+import java.awt.AlphaComposite;
+import java.awt.Composite;
 import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
+import javax.imageio.ImageIO;
+import lombok.extern.slf4j.Slf4j;
 
 /** Every tile on the main course temporarily turns one of six rainbow colors, cycling by its own
  * pathIndex (see TileOverlay#renderRainbowRushTile) -- starting as an outline only, filling in
  * solid the instant a player personally steps on it (see RainbowRushPresentation). First to fill
  * every course tile self-reports their own finish; the server settles who actually won and pays
  * out the reward. */
+@Slf4j
 public class RainbowRushMinigame implements Minigame
 {
-    private static final RunePartyColor[] PALETTE =
-    {
-        RunePartyColor.RED, RunePartyColor.ORANGE, RunePartyColor.YELLOW,
-        RunePartyColor.GREEN, RunePartyColor.BLUE, RunePartyColor.PURPLE
-    };
+    private static final BufferedImage ICON = loadIcon();
 
     @Override
     public String getKey()
@@ -31,23 +33,28 @@ public class RainbowRushMinigame implements Minigame
         return "Rainbow Rush";
     }
 
-    /** A small ROYGBP strip of squares -- reads as "rainbow board" at wheel-icon size. */
     @Override
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
-        int a = Math.max(0, Math.min(255, Math.round(alpha * 255)));
-        int cell = Math.max(2, size / PALETTE.length);
-        int totalWidth = cell * PALETTE.length;
-        int left = x - totalWidth / 2;
-        int top = y - cell / 2;
+        if (ICON == null) return;
 
-        for (int i = 0; i < PALETTE.length; i++)
+        Composite original = g.getComposite();
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, Math.min(1f, alpha))));
+        g.drawImage(ICON, x - size / 2, y - size / 2, size, size, null);
+        g.setComposite(original);
+    }
+
+    private static BufferedImage loadIcon()
+    {
+        try (InputStream is = RainbowRushMinigame.class.getResourceAsStream("/gay/runescape/runeparty/minigame_icons/rainbow-rush.png"))
         {
-            Color c = PALETTE[i].awt;
-            g.setColor(new Color(c.getRed(), c.getGreen(), c.getBlue(), a));
-            g.fillRect(left + i * cell, top, cell, cell);
+            if (is == null) throw new IOException("rainbow-rush.png resource not found");
+            return ImageIO.read(is);
         }
-        g.setColor(new Color(0, 0, 0, a));
-        g.drawRect(left, top, totalWidth, cell);
+        catch (IOException e)
+        {
+            log.warn("Failed to load the Rainbow Rush wheel icon", e);
+            return null;
+        }
     }
 }

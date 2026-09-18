@@ -1,19 +1,20 @@
 package gay.runescape.runeparty.minigames;
 
-import java.awt.Color;
+import java.awt.AlphaComposite;
+import java.awt.Composite;
 import java.awt.Graphics2D;
-import java.awt.Polygon;
-import java.awt.Shape;
-import java.awt.geom.Ellipse2D;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
+import javax.imageio.ImageIO;
+import lombok.extern.slf4j.Slf4j;
 
 /** A Pond players catch fish from by performing the Headbang emote nearby, whose local catch tally
  * renders via a dedicated corner overlay (see FishingCatchOverlay). */
+@Slf4j
 public class FishingContestMinigame implements Minigame
 {
-    private static final Color WATER_BLUE = new Color(40, 130, 230);
-    private static final Color FIN_BLUE = new Color(20, 70, 140);
-    private static final Color GLASS_FILL = new Color(220, 240, 255);
-    private static final Color GLASS_OUTLINE = new Color(255, 255, 255);
+    private static final BufferedImage ICON = loadIcon();
 
     @Override
     public String getKey()
@@ -27,46 +28,28 @@ public class FishingContestMinigame implements Minigame
         return "Fishing Contest";
     }
 
-    /** A round glass fish bowl -- faint glass fill, a water line across the lower portion with a
-     * small fin poking out of it, and a flattened rim ellipse at the top marking the bowl's open
-     * mouth. Purely programmatic -- the raster shrimp/anchovy icons are reserved for
-     * FishingCatchOverlay instead. */
     @Override
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
-        int a = Math.max(0, Math.min(255, Math.round(alpha * 255)));
-        int half = size / 2;
+        if (ICON == null) return;
 
-        // The glass bowl itself -- a faintly-filled circle, so it reads as glass rather than a
-        // solid ball.
-        Shape bowl = new Ellipse2D.Float(x - half, y - half, size, size);
-        g.setColor(new Color(GLASS_FILL.getRed(), GLASS_FILL.getGreen(), GLASS_FILL.getBlue(), a / 3));
-        g.fill(bowl);
+        Composite original = g.getComposite();
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, Math.min(1f, alpha))));
+        g.drawImage(ICON, x - size / 2, y - size / 2, size, size, null);
+        g.setComposite(original);
+    }
 
-        // Water fill and fin, clipped to the bowl's own circle so the water line reads as an
-        // actual level inside the glass rather than a separate shape overlapping it.
-        Shape oldClip = g.getClip();
-        g.clip(bowl);
-
-        int waterTop = y - half + Math.round(size * 0.4f);
-        g.setColor(new Color(WATER_BLUE.getRed(), WATER_BLUE.getGreen(), WATER_BLUE.getBlue(), a));
-        g.fillRect(x - half, waterTop, size, size);
-
-        int finBase = Math.max(2, size / 5);
-        Polygon fin = new Polygon();
-        fin.addPoint(x - finBase / 2, waterTop + finBase / 3);
-        fin.addPoint(x + finBase / 2, waterTop + finBase / 3);
-        fin.addPoint(x, waterTop - finBase);
-        g.setColor(new Color(FIN_BLUE.getRed(), FIN_BLUE.getGreen(), FIN_BLUE.getBlue(), a));
-        g.fillPolygon(fin);
-
-        g.setClip(oldClip);
-
-        // Glass outline, plus a flattened rim ellipse marking the bowl's open top -- what actually
-        // sells "bowl" rather than just "ball".
-        g.setColor(new Color(GLASS_OUTLINE.getRed(), GLASS_OUTLINE.getGreen(), GLASS_OUTLINE.getBlue(), a));
-        g.draw(bowl);
-        int rimHeight = Math.max(2, size / 6);
-        g.drawOval(x - half, y - half - rimHeight / 2, size, rimHeight);
+    private static BufferedImage loadIcon()
+    {
+        try (InputStream is = FishingContestMinigame.class.getResourceAsStream("/gay/runescape/runeparty/minigame_icons/fishing-contest.png"))
+        {
+            if (is == null) throw new IOException("fishing-contest.png resource not found");
+            return ImageIO.read(is);
+        }
+        catch (IOException e)
+        {
+            log.warn("Failed to load the Fishing Contest wheel icon", e);
+            return null;
+        }
     }
 }

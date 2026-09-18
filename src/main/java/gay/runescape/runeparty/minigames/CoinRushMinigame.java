@@ -1,10 +1,13 @@
 package gay.runescape.runeparty.minigames;
 
-import java.awt.Color;
-import java.awt.Font;
-import java.awt.FontMetrics;
+import java.awt.AlphaComposite;
+import java.awt.Composite;
 import java.awt.Graphics2D;
-import net.runelite.client.ui.FontManager;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
+import javax.imageio.ImageIO;
+import lombok.extern.slf4j.Slf4j;
 
 /** 2-4 coin spawns appear on random tiles over a 30-second round; whoever physically reaches a
  * spawn's tile first gets +2 coins and it disappears, then another can spawn elsewhere. There's
@@ -13,10 +16,10 @@ import net.runelite.client.ui.FontManager;
  * in StatsOverlay's scoreboard, and the "here's what to do" reminder is the MINIGAME_STARTED
  * instructions banner AnnouncementOverlay already shows (this used to also repeat as a side-panel
  * control-panel hint -- see docs/ARCHITECTURE_REVIEW.md's S7 for why that was removed). */
+@Slf4j
 public class CoinRushMinigame implements Minigame
 {
-    private static final Color COIN_COLOR = new Color(255, 215, 0);
-    private static final Color COIN_OUTLINE = new Color(120, 90, 0);
+    private static final BufferedImage ICON = loadIcon();
 
     @Override
     public String getKey()
@@ -30,33 +33,28 @@ public class CoinRushMinigame implements Minigame
         return "Coin Rush";
     }
 
-    /** A small pile of overlapping gold coins -- reads as "grab the coins" at wheel-icon size. */
     @Override
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
-        int a = Math.max(0, Math.min(255, Math.round(alpha * 255)));
-        int r = Math.max(3, size / 5);
+        if (ICON == null) return;
 
-        int[][] offsets = { { -r, r / 2 }, { r, r / 2 }, { 0, -r / 2 } };
-        for (int[] offset : offsets)
+        Composite original = g.getComposite();
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, Math.min(1f, alpha))));
+        g.drawImage(ICON, x - size / 2, y - size / 2, size, size, null);
+        g.setComposite(original);
+    }
+
+    private static BufferedImage loadIcon()
+    {
+        try (InputStream is = CoinRushMinigame.class.getResourceAsStream("/gay/runescape/runeparty/minigame_icons/coin-rush.png"))
         {
-            int cx = x + offset[0];
-            int cy = y + offset[1];
-            g.setColor(new Color(COIN_COLOR.getRed(), COIN_COLOR.getGreen(), COIN_COLOR.getBlue(), a));
-            g.fillOval(cx - r, cy - r, r * 2, r * 2);
-            g.setColor(new Color(COIN_OUTLINE.getRed(), COIN_OUTLINE.getGreen(), COIN_OUTLINE.getBlue(), a));
-            g.drawOval(cx - r, cy - r, r * 2, r * 2);
+            if (is == null) throw new IOException("coin-rush.png resource not found");
+            return ImageIO.read(is);
         }
-
-        Font font = FontManager.getRunescapeBoldFont().deriveFont((float) (size * 0.32));
-        g.setFont(font);
-        FontMetrics fm = g.getFontMetrics();
-        String text = "+2";
-        int textX = x - fm.stringWidth(text) / 2;
-        int textY = y + size / 2 + fm.getAscent();
-        g.setColor(new Color(0, 0, 0, a));
-        g.drawString(text, textX + 1, textY + 1);
-        g.setColor(new Color(255, 255, 255, a));
-        g.drawString(text, textX, textY);
+        catch (IOException e)
+        {
+            log.warn("Failed to load the Coin Rush wheel icon", e);
+            return null;
+        }
     }
 }

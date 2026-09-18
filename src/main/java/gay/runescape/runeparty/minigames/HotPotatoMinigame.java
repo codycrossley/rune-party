@@ -1,16 +1,21 @@
 package gay.runescape.runeparty.minigames;
 
-import java.awt.Color;
+import java.awt.AlphaComposite;
+import java.awt.Composite;
 import java.awt.Graphics2D;
-import java.awt.geom.Ellipse2D;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
+import javax.imageio.ImageIO;
+import lombok.extern.slf4j.Slf4j;
 
 /** Entirely emote-driven (the SPIN emote passes it, see RunePartyPlugin#isLocalPlayerHoldingHotPotato/
  * onAnimationChanged). The status overview (who's holding it, the round countdown) renders
  * center-screen via HotPotatoOverlay instead. */
+@Slf4j
 public class HotPotatoMinigame implements Minigame
 {
-    private static final Color POTATO_COLOR = new Color(168, 120, 74);
-    private static final Color SPECKLE_COLOR = new Color(96, 64, 36);
+    private static final BufferedImage ICON = loadIcon();
 
     @Override
     public String getKey()
@@ -24,24 +29,30 @@ public class HotPotatoMinigame implements Minigame
         return "Hot Potato";
     }
 
-    /** A simple potato-brown oval with a couple of darker speckles -- purely programmatic, same
-     * "no bundled raster asset needed for a wheel icon" convention ClickClickClickMinigame's own
-     * doc gives (the bundled potato.png raster is reserved for HotPotatoOverlay, where it needs to
-     * read as a real potato at a larger, steadier size). */
     @Override
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
-        int a = Math.max(0, Math.min(255, Math.round(alpha * 255)));
-        int halfW = size / 2;
-        int halfH = Math.round(size * 0.38f);
+        if (ICON == null) return;
 
-        g.setColor(new Color(POTATO_COLOR.getRed(), POTATO_COLOR.getGreen(), POTATO_COLOR.getBlue(), a));
-        g.fill(new Ellipse2D.Float(x - halfW, y - halfH, halfW * 2, halfH * 2));
+        Composite original = g.getComposite();
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, Math.min(1f, alpha))));
+        g.drawImage(ICON, x - size / 2, y - size / 2, size, size, null);
+        g.setComposite(original);
+    }
 
-        g.setColor(new Color(SPECKLE_COLOR.getRed(), SPECKLE_COLOR.getGreen(), SPECKLE_COLOR.getBlue(), a));
-        int speckle = Math.max(2, size / 10);
-        g.fillOval(x - halfW / 2, y - speckle / 2, speckle, speckle);
-        g.fillOval(x + halfW / 4, y - halfH / 3, speckle, speckle);
-        g.fillOval(x - halfW / 4, y + halfH / 3, speckle, speckle);
+    /** Distinct from HotPotatoOverlay's own bundled potato.png (a larger, steadier in-world/HUD
+     * raster) -- this one's sized and cached purely for the wheel-icon slot. */
+    private static BufferedImage loadIcon()
+    {
+        try (InputStream is = HotPotatoMinigame.class.getResourceAsStream("/gay/runescape/runeparty/minigame_icons/hot-potato.png"))
+        {
+            if (is == null) throw new IOException("hot-potato.png resource not found");
+            return ImageIO.read(is);
+        }
+        catch (IOException e)
+        {
+            log.warn("Failed to load the Hot Potato wheel icon", e);
+            return null;
+        }
     }
 }

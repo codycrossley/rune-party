@@ -1,20 +1,21 @@
 package gay.runescape.runeparty.minigames;
 
-import java.awt.Color;
-import java.awt.Font;
-import java.awt.FontMetrics;
+import java.awt.AlphaComposite;
+import java.awt.Composite;
 import java.awt.Graphics2D;
-import net.runelite.client.ui.FontManager;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
+import javax.imageio.ImageIO;
+import lombok.extern.slf4j.Slf4j;
 
 /** 5 rounds, 5 seconds each, one OSRS trivia question per round. An answer is a YES ("True")/NO
  * ("False") emote, and the question, countdown, live "who's answered" tally, and per-round reveal
  * all render screen-centered in AnnouncementOverlay. */
+@Slf4j
 public class TrueOrFalseMinigame implements Minigame
 {
-    private static final Color CARD_COLOR = new Color(230, 230, 230);
-    private static final Color CARD_OUTLINE = new Color(60, 60, 60);
-    private static final Color TRUE_COLOR = new Color(80, 220, 80);
-    private static final Color FALSE_COLOR = new Color(220, 70, 70);
+    private static final BufferedImage ICON = loadIcon();
 
     @Override
     public String getKey()
@@ -28,37 +29,28 @@ public class TrueOrFalseMinigame implements Minigame
         return "True or False";
     }
 
-    /** A small card with a green "T" and a red "F" -- reads as "true/false quiz" at wheel-icon
-     * size without needing a real model/image asset. */
     @Override
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
-        int half = size / 2;
-        int a = Math.max(0, Math.min(255, Math.round(alpha * 255)));
+        if (ICON == null) return;
 
-        g.setColor(new Color(CARD_COLOR.getRed(), CARD_COLOR.getGreen(), CARD_COLOR.getBlue(), a));
-        g.fillRoundRect(x - half, y - half, size, size, size / 5, size / 5);
-        g.setColor(new Color(CARD_OUTLINE.getRed(), CARD_OUTLINE.getGreen(), CARD_OUTLINE.getBlue(), a));
-        g.drawRoundRect(x - half, y - half, size, size, size / 5, size / 5);
+        Composite original = g.getComposite();
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, Math.min(1f, alpha))));
+        g.drawImage(ICON, x - size / 2, y - size / 2, size, size, null);
+        g.setComposite(original);
+    }
 
-        Font font = FontManager.getRunescapeBoldFont().deriveFont((float) (size * 0.5));
-        g.setFont(font);
-        FontMetrics fm = g.getFontMetrics();
-
-        int glyphY = y + fm.getAscent() / 2 - 2;
-
-        String t = "T";
-        int tX = x - half + size / 6;
-        g.setColor(new Color(0, 0, 0, a));
-        g.drawString(t, tX + 1, glyphY + 1);
-        g.setColor(new Color(TRUE_COLOR.getRed(), TRUE_COLOR.getGreen(), TRUE_COLOR.getBlue(), a));
-        g.drawString(t, tX, glyphY);
-
-        String f = "F";
-        int fX = x + half - size / 6 - fm.stringWidth(f);
-        g.setColor(new Color(0, 0, 0, a));
-        g.drawString(f, fX + 1, glyphY + 1);
-        g.setColor(new Color(FALSE_COLOR.getRed(), FALSE_COLOR.getGreen(), FALSE_COLOR.getBlue(), a));
-        g.drawString(f, fX, glyphY);
+    private static BufferedImage loadIcon()
+    {
+        try (InputStream is = TrueOrFalseMinigame.class.getResourceAsStream("/gay/runescape/runeparty/minigame_icons/true-or-false.png"))
+        {
+            if (is == null) throw new IOException("true-or-false.png resource not found");
+            return ImageIO.read(is);
+        }
+        catch (IOException e)
+        {
+            log.warn("Failed to load the True or False wheel icon", e);
+            return null;
+        }
     }
 }

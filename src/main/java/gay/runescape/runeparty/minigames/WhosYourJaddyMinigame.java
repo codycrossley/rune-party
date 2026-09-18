@@ -1,17 +1,21 @@
 package gay.runescape.runeparty.minigames;
 
-import java.awt.Color;
+import java.awt.AlphaComposite;
+import java.awt.Composite;
 import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
+import javax.imageio.ImageIO;
+import lombok.extern.slf4j.Slf4j;
 
 /** Two duelling Jads whose zones/recolor/attack animations/duel-resolved banner all render/animate
  * in-world and center-screen (see models/JaddyDuelModel, TileOverlay's per-zone-color bounding box
  * outlines, and AnnouncementOverlay's duel-resolved banner). */
+@Slf4j
 public class WhosYourJaddyMinigame implements Minigame
 {
-    // Matches RunePartyPlugin's own TEAM_A_COLOR/TEAM_B_COLOR so this wheel icon and the two Jads'
-    // own zones/recolors always agree.
-    private static final Color TEAM_A_PINK = new Color(0xE6, 0x1E, 0x96);
-    private static final Color TEAM_B_TEAL = new Color(0x00, 0xAA, 0xAA);
+    private static final BufferedImage ICON = loadIcon();
 
     @Override
     public String getKey()
@@ -25,33 +29,28 @@ public class WhosYourJaddyMinigame implements Minigame
         return "Who's Your Jaddy?";
     }
 
-    /** Two facing triangles ("Jads") in the two team colors -- reads as "two duelling sides" at
-     * wheel-icon size, distinct from every other mini-game's own grid-shaped icon. */
     @Override
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
-        int a = Math.max(0, Math.min(255, Math.round(alpha * 255)));
-        int half = size / 2;
+        if (ICON == null) return;
 
-        Color pink = new Color(TEAM_A_PINK.getRed(), TEAM_A_PINK.getGreen(), TEAM_A_PINK.getBlue(), a);
-        Color teal = new Color(TEAM_B_TEAL.getRed(), TEAM_B_TEAL.getGreen(), TEAM_B_TEAL.getBlue(), a);
+        Composite original = g.getComposite();
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, Math.min(1f, alpha))));
+        g.drawImage(ICON, x - size / 2, y - size / 2, size, size, null);
+        g.setComposite(original);
+    }
 
-        int gap = Math.max(2, size / 8);
-        int triWidth = (size - gap) / 2;
-
-        g.setColor(pink);
-        g.fillPolygon(
-            new int[] { x - half, x - half, x - gap / 2 },
-            new int[] { y - half, y + half, y },
-            3);
-
-        g.setColor(teal);
-        g.fillPolygon(
-            new int[] { x + half, x + half, x + gap / 2 },
-            new int[] { y - half, y + half, y },
-            3);
-
-        g.setColor(new Color(0, 0, 0, a));
-        g.drawRect(x - half, y - half, size, size);
+    private static BufferedImage loadIcon()
+    {
+        try (InputStream is = WhosYourJaddyMinigame.class.getResourceAsStream("/gay/runescape/runeparty/minigame_icons/whos-your-jaddy.png"))
+        {
+            if (is == null) throw new IOException("whos-your-jaddy.png resource not found");
+            return ImageIO.read(is);
+        }
+        catch (IOException e)
+        {
+            log.warn("Failed to load the Who's Your Jaddy? wheel icon", e);
+            return null;
+        }
     }
 }
