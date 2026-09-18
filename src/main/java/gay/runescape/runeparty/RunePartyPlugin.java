@@ -265,10 +265,10 @@ public class RunePartyPlugin extends Plugin
     /** Client-side key for the Arena ("Flame Field") mini-game -- must match the server's own
      * registration, same role COIN_RUSH_KEY/TRUE_OR_FALSE_KEY play for their own mini-games. Used by
      * AnnouncementOverlay to swap the generic "3...2...1...BEGIN!" countdown for Arena's own "All
-     * players must stand within the arena!" gather message. Deliberately NOT in
-     * MINIGAMES_NEEDING_CONTINUOUS_POSITION/_PRE_ROUND_POSITION -- see ArenaPresentation, which
-     * reports arrival/elimination as one-shot, position-free self-reports instead of a continuous
-     * position heartbeat, the same event-driven shape BRUTUS_ATTACK_KEY already uses. */
+     * players must stand within the arena!" gather message. See ArenaPresentation, which reports
+     * arrival/elimination as one-shot, position-free self-reports instead of a continuous position
+     * heartbeat -- the same event-driven shape every board-swapping mini-game now uses (see
+     * DECISIONS.md's project-wide call behind that). */
     public static final String ARENA_KEY = "arena";
 
     /** Client-side key for the Fishing Contest mini-game -- must match the server's own
@@ -308,7 +308,7 @@ public class RunePartyPlugin extends Plugin
     /** How long a whole Turf Wars round lasts -- must match the server's own round length.
      * Measured from MINIGAME_ROUND_BEGIN, same "stamped instant + fixed duration" shape
      * COIN_RUSH_DURATION_MS already uses. */
-    public static final long TURF_WARS_ROUND_MS = 60000;
+    public static final long TURF_WARS_ROUND_MS = 30000;
 
     /** Turf Wars' two fixed team colors, used for an even seated-PLAYER count's round (an odd
      * count instead gives every player their own individual, existing RunePartyColor seat color)
@@ -390,17 +390,16 @@ public class RunePartyPlugin extends Plugin
      * registration, same role every other {@code *_KEY} plays for its own mini-game. Used by
      * AnnouncementOverlay to swap the generic "3...2...1...BEGIN!" countdown for the same
      * arrival-gated gather message Arena/Turf Wars/Sandwich Rush/Jaddy/Hot Potato/Dance, Dance,
-     * RuneScape already use, and by {@link #MINIGAMES_NEEDING_PRE_ROUND_POSITION}. */
+     * RuneScape already use. */
     public static final String REPEAT_AFTER_ME_KEY = "repeat-after-me";
 
     /** Client-side key for the Crab Rave mini-game -- must match the server's own registration,
      * same role every other {@code *_KEY} plays for its own mini-game. Unlike every arena-based
      * mini-game above, this one never gates its own start on an arrival check (see
      * minigames/crab_rave.py's own doc) -- players are meant to drop in and out of the dance floor
-     * freely while DANCE_DURATION_MS's own countdown runs, so it's never added to
-     * {@link #MINIGAMES_NEEDING_PRE_ROUND_POSITION}/{@link #MINIGAMES_NEEDING_CONTINUOUS_POSITION}
-     * either -- counting is entirely client-local, same "zero server visibility into position"
-     * category as Coin Rush/Click, Click, Click. */
+     * freely while DANCE_DURATION_MS's own countdown runs, so it never needed a position feed of
+     * any kind either -- counting is entirely client-local, same "zero server visibility into
+     * position" category as Coin Rush/Click, Click, Click. */
     public static final String CRAB_RAVE_KEY = "crab-rave";
 
     /** How long Crab Rave's own dance-off runs for, once MINIGAME_ROUND_BEGIN fires -- matched
@@ -428,10 +427,9 @@ public class RunePartyPlugin extends Plugin
      * NPC model rendered on a real Player, via PlayerComposition#setTransformedNpcId (see
      * overlays/PlayerTransformOverlay, the only consumer) -- for the whole round; everyone else has
      * to reach the far end of a 12x3 arena before Brutus can dash across and crash into them (see
-     * brutus_attack.py's own doc). Deliberately NOT added to {@link #MINIGAMES_NEEDING_CONTINUOUS_POSITION}/
-     * {@link #MINIGAMES_NEEDING_PRE_ROUND_POSITION} -- unlike Arena/Turf Wars/Jaddy, this
-     * mini-game needs no live position feed from the server's own poll loop at all; each client
-     * instead watches its own position locally and fires a one-shot confirm-brutus-arrival/
+     * brutus_attack.py's own doc). This mini-game never needed a live position feed from the
+     * server's own poll loop at all; each client instead watches its own position locally and fires
+     * a one-shot confirm-brutus-arrival/
      * confirm-brutus-dash report only at the moment it actually matters (see
      * BrutusAttackPresentation#onTick).
      * <p>
@@ -1078,32 +1076,6 @@ public class RunePartyPlugin extends Plugin
     // see onGameTick's own Home Teleport check, which is independent of pendingRoll (see that
     // field's own doc for why Home Teleport can be pending well outside any roll window).
     private volatile boolean homeTeleportArrivalSubmitted = false;
-    // Guards reportMinigamePosition against piling up requests on the single-threaded executor if
-    // any one round-trip ever takes longer than a game tick -- unlike arrivalSubmitted/
-    // homeTeleportArrivalSubmitted (each cleared only once the specific claim they guard is
-    // resolved one way or another), this one is meant to fire again every single tick, so it's
-    // cleared unconditionally in submitAction's own finallyAction the instant each call resolves,
-    // not selectively on success/failure. See onGameTick's own reportMinigamePosition check.
-    private final AtomicBoolean minigamePositionReportInFlight = new AtomicBoolean(false);
-    // Which mini-games actually read reportMinigamePosition's own server-side cache
-    // (MinigameContext.get_positions), and for how long -- see onGameTick's own position-heartbeat
-    // check, the only reader of these two sets. Coin Rush/Click-Click-Click/True or
-    // False/Fishing Contest never read positions at all; every other mini-game's own server module
-    // was checked directly for every get_positions() call site to build this split, not guessed:
-    //   - MINIGAMES_NEEDING_CONTINUOUS_POSITION: reads positions for the round's entire live
-    //     duration, not just to detect arrival -- Turf Wars evaluates its own live territory claim
-    //     every tick for as long as the round runs, and Who's Your Jaddy captures whoever's standing
-    //     in the winning zone at the exact (unpredictable -- damage-roll-dependent) instant the duel
-    //     resolves, which could be many ticks after round-begin. Arena used to belong here too, but
-    //     no longer does -- see ARENA_KEY's own doc and ArenaPresentation#onTick for the
-    //     event-driven, position-free shape it moved to instead (the same one BRUTUS_ATTACK_KEY
-    //     already uses).
-    //   - MINIGAMES_NEEDING_PRE_ROUND_POSITION: reads positions only inside their own
-    //     _wait_for_everyone_to_arrive gather gate, never again once MINIGAME_ROUND_BEGIN fires --
-    //     Sandwich Rush/Rainbow Rush/Dance Dance RuneScape/Hot Potato all fit this shape.
-    private static final Set<String> MINIGAMES_NEEDING_CONTINUOUS_POSITION = Set.of(TURF_WARS_KEY, JADDY_KEY);
-    private static final Set<String> MINIGAMES_NEEDING_PRE_ROUND_POSITION = Set.of(
-        SANDWICH_RUSH_KEY, RAINBOW_RUSH_KEY, DANCE_DANCE_RUNESCAPE_KEY, HOT_POTATO_KEY, REPEAT_AFTER_ME_KEY);
     // ---- Fishing Contest (entirely client-local until the one final submission -- catches are
     // never reported per-catch). Every completed Headbang emote near the Fish bowl rolls one
     // catch (see onAnimationChanged's
@@ -1704,36 +1676,13 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
-    /** Fires the local player's own current position off to the server -- called every tick a
-     * mini-game is playable (see onGameTick), not once per claim like confirmArrival. No retry
-     * logic on failure: a dropped or failed report is superseded by the next tick's own report
-     * 600ms later, so there's nothing worth resubmitting. minigamePositionReportInFlight is cleared
-     * in finallyAction regardless of outcome, so a failure doesn't leave future ticks permanently
-     * blocked from trying again. */
-    private void reportMinigamePosition(WorldPoint pos)
-    {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null)
-        {
-            minigamePositionReportInFlight.set(false);
-            return;
-        }
-
-        submitAction("Report minigame position",
-            () -> apiClient.reportMinigamePosition(gid, self, token, pos.getX(), pos.getY(), pos.getPlane()),
-            null,
-            () -> minigamePositionReportInFlight.set(false));
-    }
-
     /** Fires the local player's final Fishing Contest tally off to the server -- called exactly
      * once per round, from onGameTick the moment its own local 30-second timer elapses. Snapshots
      * shrimpCount/anchovyCount at call time rather than reading them again inside the lambda, so
      * the submitted numbers stay tied to the exact instant the round ended. No retry on failure --
-     * unlike reportMinigamePosition's own every-tick heartbeat, there's no next tick to supersede a
-     * dropped one-shot submission with, but a missed submission just means this player shows as 0
-     * anchovies, not a hung round. */
+     * this is a one-shot submission, not a per-tick heartbeat, so there's no next tick to supersede
+     * a dropped one with, but a missed submission just means this player shows as 0 anchovies, not
+     * a hung round. */
     private void submitFishingCatch()
     {
         String self = localRsn();
@@ -2371,6 +2320,34 @@ public class RunePartyPlugin extends Plugin
         return points;
     }
 
+    /** Every currently-marked Sandwich Rush arena tile -- see SandwichRushPresentation#checkCollection,
+     * which self-checks the local player's own position against this set to fire its own one-shot
+     * confirm-sandwich-rush-arrival report. Same scanned-on-demand shape findArenaGridTiles above
+     * already follows. */
+    public List<WorldPoint> findSandwichRushArenaTiles()
+    {
+        List<WorldPoint> points = new ArrayList<>();
+        for (TileReducer.TileEntry entry : tileReducer.snapshot())
+        {
+            if ("SANDWICH_RUSH_TILE".equals(entry.tileType)) points.add(entry.point);
+        }
+        return points;
+    }
+
+    /** Every currently-marked Hot Potato arena tile -- see HotPotatoPresentation#onTick, which
+     * self-checks the local player's own position against this set to fire its own one-shot
+     * confirm-hot-potato-arrival report. Same scanned-on-demand shape findArenaGridTiles above
+     * already follows. */
+    public List<WorldPoint> findHotPotatoArenaTiles()
+    {
+        List<WorldPoint> points = new ArrayList<>();
+        for (TileReducer.TileEntry entry : tileReducer.snapshot())
+        {
+            if ("HOT_POTATO_TILE".equals(entry.tileType)) points.add(entry.point);
+        }
+        return points;
+    }
+
     /** Whether the Arena tile at {@code pos} has reached the server's own permanently-dead red --
      * see ArenaPresentation#onTick, the only reader: the local client checks its own position
      * against this every tick to decide when to self-report confirm-arena-elimination. False for
@@ -2479,39 +2456,6 @@ public class RunePartyPlugin extends Plugin
             minigamePresentation.sandwichRush().checkCollection(selfPlayer);
         }
 
-        // Generic (not Coin-Rush/Arena-specific) live position heartbeat -- any mini-game whose
-        // own server-side round wants to know where seated players actually are reads this back.
-        // Scoped to exactly the mini-games/phases that can ever actually consume it (see
-        // MINIGAMES_NEEDING_CONTINUOUS_POSITION/MINIGAMES_NEEDING_PRE_ROUND_POSITION's own doc) --
-        // every other mini-game, and every other phase (selection spinner, ready-check, countdown,
-        // and post-round-begin for the pre-round-only set), never had a server-side reader at all,
-        // so pinging there was pure request volume for nothing. Checked on isMinigameActive() (not
-        // isMinigamePlayable()) for the continuous set specifically -- Arena/Turf Wars/Jaddy's own
-        // round-begin fires the instant everyone's reported position lands inside their own grid,
-        // which can happen well before the generic countdown's own fixed isMinigamePlayable()
-        // moment; gating reporting on that fixed moment would silently put a floor under how fast
-        // those rounds could ever begin. minigamePositionReportInFlight only guards against piling
-        // up requests if a round-trip is unusually slow.
-        // minigamePresentation.getKey() is null whenever no mini-game is active at all (the
-        // overwhelming majority of ticks, during ordinary turn-based play). Set.of(...)'s own
-        // contains(null) throws NullPointerException rather than just returning false (unlike
-        // HashSet) -- this was crashing onGameTick's entire subscriber every single tick any time
-        // no mini-game was running, taking down everything below this point in the method
-        // (confirm-start/confirm-arrival included) along with it. The explicit null check below is
-        // required, not cosmetic -- it must short-circuit before either set's own contains() ever
-        // runs.
-        String activeMinigameKey = minigamePresentation.getKey();
-        boolean needsPositionPing = activeMinigameKey != null && (
-            MINIGAMES_NEEDING_CONTINUOUS_POSITION.contains(activeMinigameKey)
-            || (MINIGAMES_NEEDING_PRE_ROUND_POSITION.contains(activeMinigameKey) && !isMinigameRoundBegun())
-        );
-        if (self != null && selfPlayer != null && isMinigameActive() && needsPositionPing
-            && rosterReducer.getRole(self) == RunePartyRole.PLAYER
-            && minigamePositionReportInFlight.compareAndSet(false, true))
-        {
-            reportMinigamePosition(selfPlayer.getWorldLocation());
-        }
-
         // Also independent of the turn engine below -- the one-time end-of-round submission for
         // the local player's own entirely client-local Fishing Contest tally. Individual catches
         // are rolled from onAnimationChanged instead, one per completed Headbang emote -- this
@@ -2551,6 +2495,16 @@ public class RunePartyPlugin extends Plugin
             minigamePresentation.danceDanceRuneScape().onTick(selfPlayer);
         }
 
+        // Also independent of the turn engine below -- Hot Potato's own one-shot
+        // confirm-hot-potato-arrival report lives inside this one call (see
+        // HotPotatoPresentation#onTick), same "replace the continuous position-ping heartbeat with a
+        // self-check against already-broadcast state" shape Brutus Attack/Arena's own onTick calls
+        // already established.
+        if (isHotPotatoActive())
+        {
+            minigamePresentation.hotPotato().onTick(selfPlayer);
+        }
+
         // Also independent of the turn engine below -- Rainbow Rush's own local visited-tile
         // tracking and one-shot finish report both live inside this one call (see
         // RainbowRushPresentation#onTick), same shape as Dance, Dance, RuneScape's own onTick just
@@ -2581,9 +2535,7 @@ public class RunePartyPlugin extends Plugin
         // Also independent of the turn engine below -- Brutus Attack's own one-shot
         // confirm-brutus-arrival/confirm-brutus-dash reports both live inside this one call (see
         // BrutusAttackPresentation#onTick), replacing what a continuous position-ping mini-game
-        // would otherwise need from onGameTick's own position-heartbeat check above -- this
-        // mini-game is deliberately NOT in MINIGAMES_NEEDING_CONTINUOUS_POSITION/
-        // _PRE_ROUND_POSITION at all (see BRUTUS_ATTACK_KEY's own doc).
+        // would otherwise have needed (see BRUTUS_ATTACK_KEY's own doc).
         if (isBrutusAttackActive())
         {
             minigamePresentation.brutusAttack().onTick(selfPlayer);
@@ -2593,12 +2545,29 @@ public class RunePartyPlugin extends Plugin
         // confirm-arena-arrival/confirm-arena-elimination reports both live inside this one call
         // (see ArenaPresentation#onTick), same "replace the continuous position-ping heartbeat with
         // a self-check against already-broadcast state" shape Brutus Attack's own onTick call just
-        // above already established -- this mini-game is deliberately NOT in
-        // MINIGAMES_NEEDING_CONTINUOUS_POSITION/_PRE_ROUND_POSITION at all (see ARENA_KEY's own
-        // doc).
+        // above already established.
         if (isArenaActive())
         {
             minigamePresentation.arena().onTick(selfPlayer);
+        }
+
+        // Also independent of the turn engine below -- Turf Wars' own one-shot
+        // confirm-turf-wars-arrival report AND its own ongoing, repeatable claim-turf-wars-tile
+        // reports both live inside this one call (see TurfWarsPresentation#onTick) -- the last
+        // mini-game (along with Who's Your Jaddy just below) to move off the old generic
+        // per-tick position heartbeat this codebase used to have (see DECISIONS.md's project-wide
+        // call behind that move).
+        if (isTurfWarsActive())
+        {
+            minigamePresentation.turfWars().onTick(selfPlayer);
+        }
+
+        // Also independent of the turn engine below -- Who's Your Jaddy's own one-shot
+        // report-jaddy-zone reports, fired every time the local player's own zone membership
+        // actually changes, live inside this one call (see WhosYourJaddyPresentation#onTick).
+        if (isJaddyActive())
+        {
+            minigamePresentation.jaddy().onTick(selfPlayer);
         }
 
         // Also independent of the turn engine below -- unlike a rolled destination (pendingRoll,

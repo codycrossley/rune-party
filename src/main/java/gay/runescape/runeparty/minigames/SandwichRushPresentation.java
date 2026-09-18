@@ -31,6 +31,9 @@ public final class SandwichRushPresentation implements MinigamePresentationFeatu
     // role CoinRushPresentation's own collectSubmitted plays.
     private final Set<Integer> collectSubmitted = ConcurrentHashMap.newKeySet();
     private volatile long roundStartAt = 0;
+    // One-shot guard for checkCollection's own pre-round arrival report -- same shape
+    // ArenaPresentation's own arrivalConfirmed uses, reset on onStarted/reset.
+    private volatile boolean arrivalConfirmed = false;
 
     public SandwichRushPresentation(RunePartyPlugin plugin)
     {
@@ -107,6 +110,7 @@ public final class SandwichRushPresentation implements MinigamePresentationFeatu
         count = 0;
         collectSubmitted.clear();
         roundStartAt = 0;
+        arrivalConfirmed = false;
     }
 
     @Override
@@ -130,17 +134,31 @@ public final class SandwichRushPresentation implements MinigamePresentationFeatu
         held.clear();
         count = 0;
         roundStartAt = 0;
+        arrivalConfirmed = false;
     }
 
     /** Checks the local player's current position against every currently-live ingredient spawn
      * (see getSpawns) and reports a claim the instant it matches one -- called every tick while a
      * Sandwich Rush round is playable. Same guard shape CoinRushPresentation#checkCollection uses
      * -- collectSubmitted stops a spawn id from being reported more than once while its first
-     * report is still in flight. */
+     * report is still in flight.
+     * <p>
+     * Also fires, at most once per round, a one-shot confirm-sandwich-rush-arrival report the
+     * instant this client's own position first lands on any SANDWICH_RUSH_TILE -- this runs even
+     * before the round's own spawns exist yet (checkCollection is already called every tick once
+     * the mini-game becomes playable, well before MINIGAME_ROUND_BEGIN), replacing what a
+     * continuous position-ping mini-game would otherwise need from onGameTick's own position
+     * heartbeat. Same event-driven shape ArenaPresentation#onTick already established. */
     public void checkCollection(Player selfPlayer)
     {
         WorldPoint pos = selfPlayer != null ? selfPlayer.getWorldLocation() : null;
         if (pos == null) return;
+
+        if (!arrivalConfirmed && plugin.findSandwichRushArenaTiles().contains(pos))
+        {
+            arrivalConfirmed = true;
+            confirmArrival();
+        }
 
         for (Map.Entry<Integer, SandwichSpawn> entry : spawns.entrySet())
         {
@@ -164,6 +182,20 @@ public final class SandwichRushPresentation implements MinigamePresentationFeatu
 
         plugin.submitAction("Collect Sandwich Rush item", () -> plugin.apiClient.collectSandwichItem(gid, self, token, spawnId, pos.getX(), pos.getY(), pos.getPlane()),
             e -> collectSubmitted.remove(spawnId));
+    }
+
+    /** Reports the local player's own one-shot arrival at the Sandwich Rush arena -- see
+     * checkCollection's own doc. */
+    private void confirmArrival()
+    {
+        String self = plugin.getLocalRsn();
+        final String gid = plugin.gameId;
+        final String token = plugin.playerToken;
+        if (self == null || gid == null || token == null) return;
+
+        plugin.submitAction("Confirm Sandwich Rush arrival",
+            () -> plugin.apiClient.confirmSandwichRushArrival(gid, self, token),
+            e -> plugin.addChatMessage("Failed to confirm you reached the Sandwich Rush arena: " + e.getMessage()));
     }
 
     public Map<Integer, SandwichSpawn> getSpawns() { return spawns; }

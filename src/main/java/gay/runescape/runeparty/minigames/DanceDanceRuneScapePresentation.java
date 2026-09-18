@@ -332,6 +332,9 @@ public final class DanceDanceRuneScapePresentation implements MinigamePresentati
     private volatile Set<Direction> highlighted = Collections.emptySet();
     private volatile int score = 0;
     private volatile boolean submitted = false;
+    // One-shot guard for onTick's own pre-round arrival report -- same shape ArenaPresentation's
+    // own arrivalConfirmed uses, reset on onStarted/reset.
+    private volatile boolean arrivalConfirmed = false;
     // Latch, not a per-tick penalty -- true for as long as the local player is standing anywhere
     // but the anchor or one of the 4 direction tiles (see onTick's own out-of-bounds check below),
     // so wandering off costs exactly 1 point the instant you leave, not one point per tick spent
@@ -372,9 +375,26 @@ public final class DanceDanceRuneScapePresentation implements MinigamePresentati
      * seated player's reported position has satisfied the server's own gather gate (same
      * arrival-gated shape Arena/Turf Wars/Sandwich Rush/Jaddy/Hot Potato already use), so without
      * this guard a player still walking toward the center tile during that gather phase could
-     * accidentally rack up points on a tile lighting up before the round's really started. */
+     * accidentally rack up points on a tile lighting up before the round's really started.
+     * <p>
+     * Before that guard, and regardless of roundStartAt, this also fires (at most once per round) a
+     * one-shot confirm-ddr-arrival report the instant this client's own position first lands on the
+     * board-swapped DDR_CENTER_TILE -- same event-driven shape ArenaPresentation#onTick already
+     * established, replacing what a continuous position-ping mini-game would otherwise need from
+     * onGameTick's own position heartbeat. */
     public void onTick(Player selfPlayer)
     {
+        if (!arrivalConfirmed)
+        {
+            WorldPoint anchor = plugin.findDanceDanceRuneScapeTilePoint();
+            WorldPoint pos = selfPlayer != null ? selfPlayer.getWorldLocation() : null;
+            if (anchor != null && anchor.equals(pos))
+            {
+                arrivalConfirmed = true;
+                confirmArrival();
+            }
+        }
+
         if (roundStartAt == 0 || sequence == null || sequenceTicks == 0) return;
 
         int loopNumber = tickCount / sequenceTicks;
@@ -472,6 +492,20 @@ public final class DanceDanceRuneScapePresentation implements MinigamePresentati
         }
     }
 
+    /** Reports the local player's own one-shot arrival at the Dance, Dance, RuneScape arena -- see
+     * onTick's own doc. */
+    private void confirmArrival()
+    {
+        String self = plugin.getLocalRsn();
+        final String gid = plugin.gameId;
+        final String token = plugin.playerToken;
+        if (self == null || gid == null || token == null) return;
+
+        plugin.submitAction("Confirm Dance, Dance, RuneScape arrival",
+            () -> plugin.apiClient.confirmDdrArrival(gid, self, token),
+            e -> plugin.addChatMessage("Failed to confirm you reached the dance floor: " + e.getMessage()));
+    }
+
     /** Reports the local player's own final tally -- one-shot, no retry, same shape
      * CoinRushPresentation's own collectCoin/SandwichRushPresentation's own collectItem use for
      * their own server calls. */
@@ -508,6 +542,7 @@ public final class DanceDanceRuneScapePresentation implements MinigamePresentati
         submitted = false;
         outOfBounds = false;
         roundStartAt = 0;
+        arrivalConfirmed = false;
     }
 
     @Override
@@ -561,6 +596,7 @@ public final class DanceDanceRuneScapePresentation implements MinigamePresentati
         submitted = false;
         outOfBounds = false;
         roundStartAt = 0;
+        arrivalConfirmed = false;
     }
 
     /** When the current round's own clock runs out -- 0 if no round is active yet or the round

@@ -2,12 +2,16 @@ package gay.runescape.runeparty.minigames;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import gay.runescape.runeparty.TileReducer;
 import gay.runescape.runeparty.net.ApiClient;
 import gay.runescape.runeparty.net.Events;
 import gay.runescape.runeparty.net.Json;
 import gay.runescape.runeparty.RunePartyColor;
 import gay.runescape.runeparty.RunePartyPlugin;
 import gay.runescape.runeparty.TimedBanner;
+
+import net.runelite.api.Player;
+import net.runelite.api.coords.WorldPoint;
 
 import java.awt.Color;
 import java.util.Locale;
@@ -22,13 +26,28 @@ import java.util.concurrent.ConcurrentHashMap;
  * unshared per-player seat color each for an odd one), read by getPlayerColor to know which color
  * a given player was assigned. roundStartAt is the wall-clock moment the round itself began --
  * stamped once off MINIGAME_ROUND_BEGIN, same single-stamp shape CoinRushPresentation's own
- * roundStartAt uses. */
+ * roundStartAt uses.
+ * <p>
+ * {@link #onTick} handles both this mini-game's own one-shot arrival report AND its ongoing,
+ * repeatable tile-claiming -- deliberately event-driven rather than continuously polled, replacing
+ * what used to be a generic per-tick position heartbeat the server polled for both (see
+ * minigames/turf_wars.py's own doc, and DECISIONS.md's project-wide call behind this move). */
 public final class TurfWarsPresentation implements MinigamePresentationFeature
 {
     private final RunePartyPlugin plugin;
 
     private final Map<String, String> teamColors = new ConcurrentHashMap<>(); // lowercase rsn -> "#RRGGBB"
     private volatile long roundStartAt = 0;
+    // One-shot guard for onTick's own arrival report -- same shape ArenaPresentation's own
+    // arrivalConfirmed uses, reset on onStarted/reset.
+    private volatile boolean arrivalConfirmed = false;
+    // Guards a single tile position against firing more than one claim request while its first is
+    // still in flight -- cleared unconditionally once that request resolves (success or failure),
+    // via submitAction's own finallyAction, so a later re-claim need at the exact same coordinate
+    // (the tile changed hands again since) is never blocked by a stale guard from a long-resolved
+    // attempt. Only one claim is ever in flight for the local player at a time, since they can only
+    // stand on one tile at once.
+    private volatile WorldPoint claimInFlightFor = null;
     // ---- Turf Wars' own team-assigned reveal (server-driven). Payload is the local player's own
     // color hex, snapshotted at trigger time -- fires once per round, local-player-only (every
     // other client sees its own color's reveal from its own copy of this same event). ----
@@ -80,6 +99,77 @@ public final class TurfWarsPresentation implements MinigamePresentationFeature
         }
     }
 
+    /** Called once per real game tick from RunePartyPlugin#onGameTick while Turf Wars is active.
+     * Finds the TURF_WARS_TILE entry (if any) the local player's currently standing on directly
+     * from TileReducer's own already-broadcast snapshot -- the same "the reducer is the one source
+     * of truth" shape every other event-driven mini-game's own onTick already follows. Fires, at
+     * most once per round, a one-shot confirm-turf-wars-arrival report the instant that first
+     * happens (same event-driven arrival gate every other board-swapping mini-game now uses) --
+     * this part runs regardless of roundStartAt, since arrival is exactly what the server's own
+     * gather gate is waiting on to fire MINIGAME_ROUND_BEGIN in the first place. Claiming itself,
+     * though, is gated on roundStartAt != 0 (stamped by onRoundBegin) -- without this, the first
+     * player to reach the arena could start claiming tiles solo while everyone else is still
+     * walking over, since nothing else here waits for the round to actually begin. Once the round
+     * has begun, fires a claim-turf-wars-tile report every time the found tile's own current color
+     * isn't already the local player's own assigned color -- guarded by claimInFlightFor so a claim
+     * already in flight for this exact tile isn't re-fired every tick while its response is still
+     * pending. */
+    public void onTick(Player selfPlayer)
+    {
+        WorldPoint pos = selfPlayer != null ? selfPlayer.getWorldLocation() : null;
+        String self = plugin.getLocalRsn();
+        if (pos == null || self == null) return;
+
+        String myColor = teamColors.get(self.toLowerCase(Locale.ROOT));
+        if (myColor == null) return; // MINIGAME_TEAMS_ASSIGNED hasn't landed yet this round
+
+        TileReducer.TileEntry tile = null;
+        for (TileReducer.TileEntry entry : plugin.getTileReducer().snapshot())
+        {
+            if ("TURF_WARS_TILE".equals(entry.tileType) && pos.equals(entry.point)) { tile = entry; break; }
+        }
+        if (tile == null) return; // not standing on the arena at all
+
+        if (!arrivalConfirmed)
+        {
+            arrivalConfirmed = true;
+            confirmArrival(self);
+        }
+
+        if (roundStartAt != 0 && !myColor.equalsIgnoreCase(tile.color) && !pos.equals(claimInFlightFor))
+        {
+            claimInFlightFor = pos;
+            claimTile(self, pos, myColor);
+        }
+    }
+
+    private void confirmArrival(String self)
+    {
+        final String gid = plugin.gameId;
+        final String token = plugin.playerToken;
+        if (gid == null || token == null) return;
+
+        plugin.submitAction("Confirm Turf Wars arrival",
+            () -> plugin.apiClient.confirmTurfWarsArrival(gid, self, token),
+            e -> plugin.addChatMessage("Failed to confirm you reached the Turf Wars arena: " + e.getMessage()));
+    }
+
+    /** Fires one claim-turf-wars-tile request for {@code pos} -- claimInFlightFor is cleared
+     * unconditionally once this resolves (finallyAction), regardless of outcome, so a failure just
+     * lets the very next tick's own onTick check retry it fresh rather than leaving this tile
+     * permanently stuck unclaimed. */
+    private void claimTile(String self, WorldPoint pos, String color)
+    {
+        final String gid = plugin.gameId;
+        final String token = plugin.playerToken;
+        if (gid == null || token == null) { claimInFlightFor = null; return; }
+
+        plugin.submitAction("Claim Turf Wars tile",
+            () -> plugin.apiClient.claimTurfWarsTile(gid, self, token, pos.getX(), pos.getY(), pos.getPlane()),
+            null,
+            () -> claimInFlightFor = null);
+    }
+
     @Override
     public void onStarted(boolean catchingUp)
     {
@@ -87,6 +177,8 @@ public final class TurfWarsPresentation implements MinigamePresentationFeature
         // new round's assignment hasn't been announced yet.
         teamColors.clear();
         roundStartAt = 0;
+        arrivalConfirmed = false;
+        claimInFlightFor = null;
     }
 
     @Override
@@ -145,6 +237,8 @@ public final class TurfWarsPresentation implements MinigamePresentationFeature
         confettiBanner.reset();
         teamColors.clear();
         roundStartAt = 0;
+        arrivalConfirmed = false;
+        claimInFlightFor = null;
     }
 
     /** Arms AnnouncementOverlay's team-assigned reveal -- fired once, right when

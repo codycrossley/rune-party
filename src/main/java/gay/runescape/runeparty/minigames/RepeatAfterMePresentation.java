@@ -46,6 +46,9 @@ public final class RepeatAfterMePresentation implements MinigamePresentationFeat
     // Same idea as HotPotatoPresentation's own awaitingPassFinish -- see RunePartyPlugin#
     // onAnimationChanged, which consults this via the arm/isAwaiting/clear methods below.
     private volatile boolean awaitingSpinFinish = false;
+    // One-shot guard for onTick's own pre-round arrival report -- same shape ArenaPresentation's
+    // own arrivalConfirmed uses, reset on onStarted/reset.
+    private volatile boolean arrivalConfirmed = false;
 
     public RepeatAfterMePresentation(RunePartyPlugin plugin)
     {
@@ -74,9 +77,25 @@ public final class RepeatAfterMePresentation implements MinigamePresentationFeat
      * active. The only thing this does is notice this round's own deadline has passed and fire the
      * one-shot final submission -- unlike DanceDanceRuneScapePresentation's own onTick, there's no
      * per-tick position/scoring check here, since scoring only ever happens in response to an
-     * actual SPIN emote finishing (see onSpinFinished), not every tick. */
+     * actual SPIN emote finishing (see onSpinFinished), not every tick.
+     * <p>
+     * Before that, and regardless of roundStartAt, this also fires (at most once per round) a
+     * one-shot confirm-repeat-after-me-arrival report the instant this client's own position first
+     * lands on any tile of the board-swapped arena -- same event-driven shape
+     * ArenaPresentation#onTick already established, replacing what a continuous position-ping
+     * mini-game would otherwise need from onGameTick's own position heartbeat. */
     public void onTick(Player selfPlayer)
     {
+        if (!arrivalConfirmed)
+        {
+            WorldPoint pos = selfPlayer != null ? selfPlayer.getWorldLocation() : null;
+            if (pos != null && plugin.findRepeatAfterMeTilePoints().contains(pos))
+            {
+                arrivalConfirmed = true;
+                confirmArrival();
+            }
+        }
+
         if (roundStartAt == 0 || submitted) return;
         if (System.currentTimeMillis() >= getEndsAt())
         {
@@ -122,6 +141,20 @@ public final class RepeatAfterMePresentation implements MinigamePresentationFeat
         return dy * GRID_SIZE + dx;
     }
 
+    /** Reports the local player's own one-shot arrival at the Repeat After Me arena -- see
+     * onTick's own doc. */
+    private void confirmArrival()
+    {
+        String self = plugin.getLocalRsn();
+        final String gid = plugin.gameId;
+        final String token = plugin.playerToken;
+        if (self == null || gid == null || token == null) return;
+
+        plugin.submitAction("Confirm Repeat After Me arrival",
+            () -> plugin.apiClient.confirmRepeatAfterMeArrival(gid, self, token),
+            e -> plugin.addChatMessage("Failed to confirm you reached the Repeat After Me arena: " + e.getMessage()));
+    }
+
     /** Reports the local player's own one-shot, unconditional result for this round -- fired once,
      * the instant this round's own local deadline passes, success or not. Same shape
      * DanceDanceRuneScapePresentation#submitResult uses. */
@@ -147,6 +180,7 @@ public final class RepeatAfterMePresentation implements MinigamePresentationFeat
         attemptedIndices.clear();
         roundStartAt = 0;
         submitted = false;
+        arrivalConfirmed = false;
     }
 
     @Override
@@ -158,6 +192,7 @@ public final class RepeatAfterMePresentation implements MinigamePresentationFeat
         attemptedIndices.clear();
         roundStartAt = 0;
         submitted = false;
+        arrivalConfirmed = false;
     }
 
     /** A real, varying per-player round count worth a "FINAL SCORE" recap -- see

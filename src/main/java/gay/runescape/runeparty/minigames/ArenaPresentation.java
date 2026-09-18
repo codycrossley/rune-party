@@ -11,12 +11,13 @@ import java.util.List;
 /** Arena ("Flame Field")'s own client-side state -- see minigames/arena.py's own doc on the server
  * for the full reasoning. Deliberately event-driven rather than continuously polled, same shape
  * {@link BrutusAttackPresentation} already established: instead of every seated player pinging
- * their live position every tick for the server to read back (reportMinigamePosition/
- * MinigameContext.get_positions, still what Turf Wars/Who's Your Jaddy use for their own arrival
- * gates), each client watches the ARENA_TILE grid it already receives via ordinary tile-color
- * broadcasts (see {@link ArenaFireModel#isDead}) and self-checks its OWN current position against
- * it every real game tick (see {@link #onTick}, called from RunePartyPlugin#onGameTick -- a
- * client-thread cache read, no network cost at all):
+ * their live position every tick for the server to read back (the old reportMinigamePosition/
+ * MinigameContext.get_positions mechanism, since removed entirely -- Turf Wars/Who's Your Jaddy
+ * were the last two mini-games still using it, before they too moved off it, see DECISIONS.md's
+ * project-wide call behind that), each client watches the ARENA_TILE grid it already receives via
+ * ordinary tile-color broadcasts (see {@link ArenaFireModel#isDead}) and self-checks its OWN
+ * current position against it every real game tick (see {@link #onTick}, called from
+ * RunePartyPlugin#onGameTick -- a client-thread cache read, no network cost at all):
  * <p>
  * - confirmArrival -- one-shot, position-free "I'm on the grid" report, fired once the instant this
  *   client's own position first lands on any ARENA_TILE this round. Purely records

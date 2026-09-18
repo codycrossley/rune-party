@@ -14,8 +14,8 @@ import java.util.concurrent.TimeUnit;
 
 public class ApiClient
 {
-    // static final String BASE_URL = "http://localhost:8005/runeparty";
-    static final String BASE_URL = "https://runeparty.shrunk.studio/runeparty";
+    static final String BASE_URL = "http://localhost:8005/runeparty";
+    // static final String BASE_URL = "https://runeparty.shrunk.studio/runeparty";
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
@@ -208,29 +208,9 @@ public class ApiClient
         }
     }
 
-    /** Continuous "here's where I am right now" ping, fired every game tick while a mini-game is
-     * playable -- unlike confirmArrival, this is a live heartbeat rather than a one-shot report of
-     * reaching a destination. Generic, shared by any mini-game that needs live positions (e.g. the
-     * Arena's hazard tiles). */
-    public void reportMinigamePosition(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
-    {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-        body.addProperty("x", x);
-        body.addProperty("y", y);
-        body.addProperty("plane", plane);
-
-        try (Response resp = post("/v1/games/" + gameId + "/minigame-position", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Report minigame position failed (" + resp.code() + "): " + raw);
-        }
-    }
-
     /** One-shot, position-free "I'm on the grid" report for Arena -- fired once, the instant the
      * local client detects its own position landing on any ARENA_TILE this round, rather than a
-     * continuous heartbeat like reportMinigamePosition. See ArenaPresentation#onTick, the only
-     * caller. */
+     * continuous per-tick heartbeat. See ArenaPresentation#onTick, the only caller. */
     public void confirmArenaArrival(String gameId, String playerRsn, String playerToken) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -262,8 +242,8 @@ public class ApiClient
 
     /** One-shot, position-free "I've reached my own required zone" ready-check for Brutus Attack
      * -- fired once, the instant the local client detects standing on its own required zone's
-     * colored tile, rather than a continuous heartbeat like reportMinigamePosition. See
-     * BrutusAttackPresentation#onTick, the only caller. */
+     * colored tile, rather than a continuous per-tick heartbeat. See BrutusAttackPresentation#onTick,
+     * the only caller. */
     public void confirmBrutusArrival(String gameId, String playerRsn, String playerToken) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -351,8 +331,7 @@ public class ApiClient
     }
 
     /** Submits the local player's final Fishing Contest catch tally. Fired once per round, when
-     * the local 30-second timer elapses -- a one-shot report, unlike reportMinigamePosition's
-     * per-tick heartbeat. */
+     * the local 30-second timer elapses -- a one-shot report, not a per-tick heartbeat. */
     public void submitFishingCatch(String gameId, String playerRsn, String playerToken, int anchovies, int shrimp) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -414,6 +393,22 @@ public class ApiClient
         }
     }
 
+    /** A player's own one-shot self-report that it just reached the Dance, Dance, RuneScape arena
+     * -- fired the instant this client locally detects standing on any DDR_CENTER_TILE this round.
+     * No position travels with this call: the server's own arrival gate just needs to know who,
+     * not where. See confirmArenaArrival's own doc for the full reasoning behind this shape. */
+    public void confirmDdrArrival(String gameId, String playerRsn, String playerToken) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/confirm-ddr-arrival", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Dance, Dance, RuneScape arrival failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     /** Reports how long this client's own Dance, Dance, RuneScape round will run for -- fired once
      * at round-begin (see DanceDanceRuneScapePresentation#onRoundBegin), so the server can size its
      * own end-of-round wait to match whichever sequence this game actually picked, without the
@@ -449,6 +444,38 @@ public class ApiClient
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Submit Repeat After Me result failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** A player's own one-shot self-report that it just reached the current Repeat After Me round's
+     * own target cell/arena -- fired the instant this client locally detects standing on any
+     * REPEAT_AFTER_ME_TILE. No position travels with this call. See confirmArenaArrival's own doc
+     * for the full reasoning behind this shape. */
+    public void confirmRepeatAfterMeArrival(String gameId, String playerRsn, String playerToken) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/confirm-repeat-after-me-arrival", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Repeat After Me arrival failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** A player's own one-shot self-report that it just reached the course's own real START tile
+     * for Rainbow Rush -- fired the instant this client locally detects standing there. No position
+     * travels with this call. See confirmArenaArrival's own doc for the full reasoning behind this
+     * shape. */
+    public void confirmRainbowRushArrival(String gameId, String playerRsn, String playerToken) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/confirm-rainbow-rush-arrival", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Rainbow Rush arrival failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -636,6 +663,22 @@ public class ApiClient
         }
     }
 
+    /** A player's own one-shot self-report that it just reached the Sandwich Rush arena -- fired
+     * the instant this client locally detects standing on any SANDWICH_RUSH_TILE this round. No
+     * position travels with this call. See confirmArenaArrival's own doc for the full reasoning
+     * behind this shape. */
+    public void confirmSandwichRushArrival(String gameId, String playerRsn, String playerToken) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/confirm-sandwich-rush-arrival", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Sandwich Rush arrival failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     /** Reports the local player's YES ("True")/NO ("False") emote answering the current True or
      * False round. 409s a second attempt for the same round, or if no question is open. Never
      * echoes back correctness -- that's only revealed once the round ends. */
@@ -662,6 +705,79 @@ public class ApiClient
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Pass Hot Potato failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** A player's own one-shot self-report that it just reached the Hot Potato arena -- fired the
+     * instant this client locally detects standing on any HOT_POTATO_TILE this round. No position
+     * travels with this call. See confirmArenaArrival's own doc for the full reasoning behind this
+     * shape. */
+    public void confirmHotPotatoArrival(String gameId, String playerRsn, String playerToken) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/confirm-hot-potato-arrival", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Hot Potato arrival failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** A player's own one-shot self-report that it just reached the Turf Wars arena -- fired the
+     * instant this client locally detects standing on any TURF_WARS_TILE this round. No position
+     * travels with this call. See confirmArenaArrival's own doc for the full reasoning behind this
+     * shape. Distinct from claimTurfWarsTile just below -- this is the one-shot arrival gate, that's
+     * the ongoing, repeatable claiming action. */
+    public void confirmTurfWarsArrival(String gameId, String playerRsn, String playerToken) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/confirm-turf-wars-arrival", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Turf Wars arrival failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** Claims a single Turf Wars tile for the local player's own assigned color -- fired only when
+     * this client locally detects standing on a tile that isn't already that color (see
+     * TurfWarsPresentation#onTick), replacing what used to be a continuous per-tick position
+     * heartbeat the server polled for every claim. (x, y, plane) let the server sanity-check the
+     * report against the board's own current tiles, same reasoning collectSandwichItem's own
+     * (x, y, plane) already has. */
+    public void claimTurfWarsTile(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("x", x);
+        body.addProperty("y", y);
+        body.addProperty("plane", plane);
+
+        try (Response resp = post("/v1/games/" + gameId + "/claim-turf-wars-tile", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Claim Turf Wars tile failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** A player's own one-shot self-report that its live Who's Your Jaddy? zone membership just
+     * changed -- fired only when this client locally detects its current position has moved into a
+     * different zone than the one it last reported (see WhosYourJaddyPresentation#onTick),
+     * replacing what used to be a continuous per-tick position heartbeat the server polled at the
+     * duel's own resolution instant. colorHex is TEAM_A_COLOR, TEAM_B_COLOR, or null for "standing
+     * in neither zone right now". */
+    public void reportJaddyZone(String gameId, String playerRsn, String playerToken, String colorHex) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("colorHex", colorHex);
+
+        try (Response resp = post("/v1/games/" + gameId + "/report-jaddy-zone", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Report Jaddy zone failed (" + resp.code() + "): " + raw);
         }
     }
 

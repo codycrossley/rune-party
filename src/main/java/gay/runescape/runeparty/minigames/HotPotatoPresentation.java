@@ -5,6 +5,9 @@ import gay.runescape.runeparty.net.Events;
 import gay.runescape.runeparty.net.Json;
 import gay.runescape.runeparty.RunePartyPlugin;
 
+import net.runelite.api.Player;
+import net.runelite.api.coords.WorldPoint;
+
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -27,6 +30,9 @@ public final class HotPotatoPresentation implements MinigamePresentationFeature
     // Same idea as JadPresentation's own awaitingBowFinish -- see RunePartyPlugin#
     // onAnimationChanged, which consults this via the arm/isAwaiting/clear methods below.
     private volatile boolean awaitingPassFinish = false;
+    // One-shot guard for onTick's own pre-round arrival report -- same shape ArenaPresentation's
+    // own arrivalConfirmed uses, reset on onStarted/reset.
+    private volatile boolean arrivalConfirmed = false;
 
     public HotPotatoPresentation(RunePartyPlugin plugin)
     {
@@ -76,6 +82,41 @@ public final class HotPotatoPresentation implements MinigamePresentationFeature
         }
     }
 
+    /** Called once per real game tick from RunePartyPlugin#onGameTick while Hot Potato is active.
+     * Fires, at most once per round, a one-shot confirm-hot-potato-arrival report the instant this
+     * client's own position first lands on any HOT_POTATO_TILE -- the server's own
+     * _wait_for_everyone_to_arrive_and_begin (a plain server-internal poll, no client cost) is what
+     * notices once every seated PLAYER has confirmed and fires the round's own initial random
+     * holder assignment + MINIGAME_ROUND_BEGIN together. Same event-driven, position-free shape
+     * ArenaPresentation#onTick already established, replacing what a continuous position-ping
+     * mini-game would otherwise need from onGameTick's own position heartbeat. No-op past the
+     * instant arrival's already been confirmed -- there's nothing further this class needs to check
+     * every tick (holder/elimination are both purely server-driven, folded in apply() above). */
+    public void onTick(Player selfPlayer)
+    {
+        if (arrivalConfirmed) return;
+        WorldPoint pos = selfPlayer != null ? selfPlayer.getWorldLocation() : null;
+        if (pos != null && plugin.findHotPotatoArenaTiles().contains(pos))
+        {
+            arrivalConfirmed = true;
+            confirmArrival();
+        }
+    }
+
+    /** Reports the local player's own one-shot arrival at the Hot Potato arena -- see onTick's own
+     * doc. */
+    private void confirmArrival()
+    {
+        String self = plugin.getLocalRsn();
+        final String gid = plugin.gameId;
+        final String token = plugin.playerToken;
+        if (self == null || gid == null || token == null) return;
+
+        plugin.submitAction("Confirm Hot Potato arrival",
+            () -> plugin.apiClient.confirmHotPotatoArrival(gid, self, token),
+            e -> plugin.addChatMessage("Failed to confirm you reached the Hot Potato arena: " + e.getMessage()));
+    }
+
     @Override
     public void onStarted(boolean catchingUp)
     {
@@ -85,6 +126,7 @@ public final class HotPotatoPresentation implements MinigamePresentationFeature
         holder = null;
         roundStartAt = 0;
         eliminatedRsns.clear();
+        arrivalConfirmed = false;
     }
 
     @Override
@@ -100,6 +142,7 @@ public final class HotPotatoPresentation implements MinigamePresentationFeature
         holder = null;
         roundStartAt = 0;
         eliminatedRsns.clear();
+        arrivalConfirmed = false;
     }
 
     // ---- awaiting-emote flag, consulted by RunePartyPlugin#onAnimationChanged as part of its

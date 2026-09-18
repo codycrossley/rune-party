@@ -6,18 +6,33 @@ import gay.runescape.runeparty.net.Json;
 import gay.runescape.runeparty.RunePartyPlugin;
 import gay.runescape.runeparty.TimedBanner;
 
+import net.runelite.api.Player;
+import net.runelite.api.coords.WorldPoint;
+
 import java.util.Locale;
+import java.util.Objects;
 
 /** Who's Your Jaddy?'s own client-side state (server-driven duel resolution; the attack beats
  * themselves have no state of their own, see RunePartyPlugin's own dedicated JADDY_ATTACK_TRIGGERED
  * case). winningColor is real state, applied catch-up or not -- whichever of TEAM_A_COLOR/
  * TEAM_B_COLOR the surviving Jad's own zone was, or null before the duel resolves. Only the
- * celebratory banner is cosmetic-only. */
+ * celebratory banner is cosmetic-only.
+ * <p>
+ * {@link #onTick} self-reports the local player's own live zone membership -- deliberately
+ * event-driven rather than continuously polled, firing only when it actually changes, replacing
+ * what used to be a generic per-tick position heartbeat the server polled at the duel's own
+ * unpredictable resolution instant (see minigames/whos_your_jaddy.py's own doc, and DECISIONS.md's
+ * project-wide call behind this move). */
 public final class WhosYourJaddyPresentation implements MinigamePresentationFeature
 {
     private final RunePartyPlugin plugin;
 
     private volatile String winningColor = null;
+    // The zone color hex (TEAM_A_COLOR/TEAM_B_COLOR) actually last sent to the server via
+    // report-jaddy-zone, or null for "reported standing in neither zone" -- distinct from a fresh
+    // live board lookup (plugin.getLocalJaddyZoneColorHex()), which onTick compares against this on
+    // every tick to decide whether anything's actually changed since the last report.
+    private volatile String lastReportedZoneColor = null;
     // Payload snapshotted eagerly the instant JADDY_DUEL_RESOLVED lands (see
     // triggerResolvedBanner), not read lazily at fire time the way TurfWarsPresentation's own
     // teamAssignedBanner supplier is -- MINIGAME_ENDED (which clears winningColor via reset())
@@ -47,12 +62,42 @@ public final class WhosYourJaddyPresentation implements MinigamePresentationFeat
         }
     }
 
+    /** Called once per real game tick from RunePartyPlugin#onGameTick while Who's Your Jaddy? is
+     * active. Compares a fresh live board lookup (plugin.getLocalJaddyZoneColorHex(), the exact
+     * same "which color's ground is the local player standing on" check PlayerOverlay already uses
+     * to recolor them) against lastReportedZoneColor, and fires a one-shot report-jaddy-zone request
+     * only when the two actually differ -- never on every tick regardless of movement. Unlike
+     * TurfWarsPresentation's own claim guard, this doesn't wait for the request to resolve before
+     * allowing another: lastReportedZoneColor is updated optimistically the instant the request is
+     * fired, and only rolled back (to whatever it was before, so the next tick retries) if that
+     * request actually fails -- correct even if the local player changes zones again before the
+     * first report's own response comes back, since each report always carries its own fresh
+     * snapshot of the color that was true when it was sent. */
+    public void onTick(Player selfPlayer)
+    {
+        WorldPoint pos = selfPlayer != null ? selfPlayer.getWorldLocation() : null;
+        String currentColor = pos != null ? plugin.getJaddyZoneColorHex(pos) : null;
+        if (Objects.equals(currentColor, lastReportedZoneColor)) return;
+
+        String self = plugin.getLocalRsn();
+        final String gid = plugin.gameId;
+        final String token = plugin.playerToken;
+        if (self == null || gid == null || token == null) return;
+
+        final String previous = lastReportedZoneColor;
+        lastReportedZoneColor = currentColor;
+        plugin.submitAction("Report Jaddy zone",
+            () -> plugin.apiClient.reportJaddyZone(gid, self, token, currentColor),
+            e -> lastReportedZoneColor = previous);
+    }
+
     @Override
     public void onStarted(boolean catchingUp)
     {
         // Same reasoning as every other mini-game's own reset in onStarted -- a fresh Jaddy duel
         // hasn't resolved yet, regardless of catch-up.
         winningColor = null;
+        lastReportedZoneColor = null;
     }
 
     @Override
@@ -60,6 +105,7 @@ public final class WhosYourJaddyPresentation implements MinigamePresentationFeat
     {
         resolvedBanner.reset();
         winningColor = null;
+        lastReportedZoneColor = null;
     }
 
     /** Arms AnnouncementOverlay's Who's Your Jaddy? duel-resolved banner -- fired once, right when

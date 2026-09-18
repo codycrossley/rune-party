@@ -85,6 +85,12 @@ public final class Events
      * own wait for the round's end around however long that specific sequence actually takes to
      * play through, without ever needing to know the sequence data itself. */
     public static final String DDR_ROUND_DURATION_REPORTED = "DDR_ROUND_DURATION_REPORTED";
+    /** Server-only echo of this client's own one-shot confirm-ddr-arrival call -- never dispatched
+     * on here, the server's own arrival gate is what actually reacts to it (see
+     * minigames/dance_dance_runescape.py). Same treatment ARENA_ARRIVAL_CONFIRMED already gets, for
+     * the same reason: each client tracks its own arrival locally, it never needs to hear the
+     * broadcast of anyone else's. */
+    public static final String DDR_ARRIVAL_CONFIRMED = "DDR_ARRIVAL_CONFIRMED";
     public static final String DICE_ROLLED = "DICE_ROLLED";
     /** Echo of the client's own submit-fishing-catch call -- the client already knows its own
      * final tally the instant it sends it, so nothing here needs to react to the echo. */
@@ -101,6 +107,10 @@ public final class Events
     public static final String GOLDEN_GNOME_WON = "GOLDEN_GNOME_WON";
     public static final String HOME_TELEPORT_ARMED = "HOME_TELEPORT_ARMED";
     public static final String HOME_TELEPORT_ARRIVED = "HOME_TELEPORT_ARRIVED";
+    /** Server-only echo of this client's own one-shot confirm-hot-potato-arrival call -- never
+     * dispatched on here, the server's own arrival gate is what actually reacts to it (see
+     * minigames/hot_potato.py). Same treatment ARENA_ARRIVAL_CONFIRMED already gets. */
+    public static final String HOT_POTATO_ARRIVAL_CONFIRMED = "HOT_POTATO_ARRIVAL_CONFIRMED";
     public static final String HOT_POTATO_ASSIGNED = "HOT_POTATO_ASSIGNED";
     public static final String HOT_POTATO_EXPLODED = "HOT_POTATO_EXPLODED";
     public static final String ITEM_CAP_BLOCKED = "ITEM_CAP_BLOCKED";
@@ -116,6 +126,10 @@ public final class Events
     public static final String JAD_SMASH_TRIGGERED = "JAD_SMASH_TRIGGERED";
     public static final String JADDY_ATTACK_TRIGGERED = "JADDY_ATTACK_TRIGGERED";
     public static final String JADDY_DUEL_RESOLVED = "JADDY_DUEL_RESOLVED";
+    /** Server-only echo of this client's own one-shot report-jaddy-zone call -- never dispatched on
+     * here, the server's own arrival gate/duel-resolution read is what actually reacts to it (see
+     * minigames/whos_your_jaddy.py). Same treatment ARENA_ARRIVAL_CONFIRMED already gets. */
+    public static final String JADDY_ZONE_CHANGED = "JADDY_ZONE_CHANGED";
     /** Server-only bookkeeping fired alongside the TILES_UNMARKED/TILES_MARKED pair a board swap
      * actually renders as, so the server can restore the real course later. Never dispatched on by
      * any handler here. */
@@ -134,11 +148,23 @@ public final class Events
     public static final String PLAYER_MOVED = "PLAYER_MOVED";
     public static final String PLAYER_READY = "PLAYER_READY";
     public static final String PLAYER_TRANSFORMED = "PLAYER_TRANSFORMED";
+    /** Server-only echo of this client's own one-shot confirm-rainbow-rush-arrival call -- never
+     * dispatched on here, the server's own arrival gate is what actually reacts to it (see
+     * minigames/rainbow_rush.py). Same treatment ARENA_ARRIVAL_CONFIRMED already gets. */
+    public static final String RAINBOW_RUSH_ARRIVAL_CONFIRMED = "RAINBOW_RUSH_ARRIVAL_CONFIRMED";
     public static final String RAINBOW_RUSH_FINISHER_FOUND = "RAINBOW_RUSH_FINISHER_FOUND";
+    /** Server-only echo of this client's own one-shot confirm-repeat-after-me-arrival call -- never
+     * dispatched on here, the server's own arrival gate is what actually reacts to it (see
+     * minigames/repeat_after_me.py). Same treatment ARENA_ARRIVAL_CONFIRMED already gets. */
+    public static final String REPEAT_AFTER_ME_ARRIVAL_CONFIRMED = "REPEAT_AFTER_ME_ARRIVAL_CONFIRMED";
     public static final String REPEAT_AFTER_ME_RESULT_SUBMITTED = "REPEAT_AFTER_ME_RESULT_SUBMITTED";
     public static final String REPEAT_AFTER_ME_ROUND_STARTED = "REPEAT_AFTER_ME_ROUND_STARTED";
     public static final String ROLE_ASSIGNED = "ROLE_ASSIGNED";
     public static final String ROLL_BONUS_GRANTED = "ROLL_BONUS_GRANTED";
+    /** Server-only echo of this client's own one-shot confirm-sandwich-rush-arrival call -- never
+     * dispatched on here, the server's own arrival gate is what actually reacts to it (see
+     * minigames/sandwich_rush.py). Same treatment ARENA_ARRIVAL_CONFIRMED already gets. */
+    public static final String SANDWICH_RUSH_ARRIVAL_CONFIRMED = "SANDWICH_RUSH_ARRIVAL_CONFIRMED";
     public static final String SANDWICH_RUSH_ITEM_COLLECTED = "SANDWICH_RUSH_ITEM_COLLECTED";
     public static final String SANDWICH_RUSH_ITEM_SPAWNED = "SANDWICH_RUSH_ITEM_SPAWNED";
     public static final String STANDARD_COURSE_LOCKED = "STANDARD_COURSE_LOCKED";
@@ -152,6 +178,10 @@ public final class Events
     public static final String TRUE_OR_FALSE_ANSWERED = "TRUE_OR_FALSE_ANSWERED";
     public static final String TRUE_OR_FALSE_ROUND_ENDED = "TRUE_OR_FALSE_ROUND_ENDED";
     public static final String TRUE_OR_FALSE_ROUND_STARTED = "TRUE_OR_FALSE_ROUND_STARTED";
+    /** Server-only echo of this client's own one-shot confirm-turf-wars-arrival call -- never
+     * dispatched on here, the server's own arrival gate is what actually reacts to it (see
+     * minigames/turf_wars.py). Same treatment ARENA_ARRIVAL_CONFIRMED already gets. */
+    public static final String TURF_WARS_ARRIVAL_CONFIRMED = "TURF_WARS_ARRIVAL_CONFIRMED";
     public static final String TURN_SKIPPED = "TURN_SKIPPED";
     public static final String TURN_STARTED = "TURN_STARTED";
     /** Closes the Wise Old Man encounter, whichever way it went -- outcome is "stole_coins",
