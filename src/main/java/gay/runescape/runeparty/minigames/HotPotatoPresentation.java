@@ -30,13 +30,14 @@ public final class HotPotatoPresentation implements MinigamePresentationFeature
     // Same idea as JadPresentation's own awaitingBowFinish -- see RunePartyPlugin#
     // onAnimationChanged, which consults this via the arm/isAwaiting/clear methods below.
     private volatile boolean awaitingPassFinish = false;
-    // One-shot guard for onTick's own pre-round arrival report -- same shape ArenaPresentation's
-    // own arrivalConfirmed uses, reset on onStarted/reset.
-    private volatile boolean arrivalConfirmed = false;
+    // Reset on onStarted/reset -- see ArrivalGate's own doc.
+    private final ArrivalGate arrivalGate;
 
     public HotPotatoPresentation(RunePartyPlugin plugin)
     {
         this.plugin = plugin;
+        this.arrivalGate = new ArrivalGate(plugin, "Hot Potato", "the Hot Potato arena",
+            (self, gid, token) -> plugin.apiClient.confirmHotPotatoArrival(gid, self, token));
     }
 
     @Override
@@ -94,27 +95,8 @@ public final class HotPotatoPresentation implements MinigamePresentationFeature
      * every tick (holder/elimination are both purely server-driven, folded in apply() above). */
     public void onTick(Player selfPlayer)
     {
-        if (arrivalConfirmed) return;
         WorldPoint pos = selfPlayer != null ? selfPlayer.getWorldLocation() : null;
-        if (pos != null && plugin.findHotPotatoArenaTiles().contains(pos))
-        {
-            arrivalConfirmed = true;
-            confirmArrival();
-        }
-    }
-
-    /** Reports the local player's own one-shot arrival at the Hot Potato arena -- see onTick's own
-     * doc. */
-    private void confirmArrival()
-    {
-        String self = plugin.getLocalRsn();
-        final String gid = plugin.gameId;
-        final String token = plugin.playerToken;
-        if (self == null || gid == null || token == null) return;
-
-        plugin.submitAction("Confirm Hot Potato arrival",
-            () -> plugin.apiClient.confirmHotPotatoArrival(gid, self, token),
-            e -> plugin.addChatMessage("Failed to confirm you reached the Hot Potato arena: " + e.getMessage()));
+        arrivalGate.confirmIfMatched(pos != null && plugin.findHotPotatoArenaTiles().contains(pos));
     }
 
     @Override
@@ -126,7 +108,7 @@ public final class HotPotatoPresentation implements MinigamePresentationFeature
         holder = null;
         roundStartAt = 0;
         eliminatedRsns.clear();
-        arrivalConfirmed = false;
+        arrivalGate.reset();
     }
 
     @Override
@@ -142,7 +124,7 @@ public final class HotPotatoPresentation implements MinigamePresentationFeature
         holder = null;
         roundStartAt = 0;
         eliminatedRsns.clear();
-        arrivalConfirmed = false;
+        arrivalGate.reset();
     }
 
     // ---- awaiting-emote flag, consulted by RunePartyPlugin#onAnimationChanged as part of its

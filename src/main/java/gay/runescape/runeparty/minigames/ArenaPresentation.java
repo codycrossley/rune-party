@@ -40,14 +40,15 @@ public final class ArenaPresentation implements MinigamePresentationFeature
 {
     private final RunePartyPlugin plugin;
 
-    // One-shot guards for onTick's own arrival/elimination reports -- reset on onStarted/reset,
-    // same shape BrutusAttackPresentation's own per-round guards use.
-    private volatile boolean arrivalConfirmed = false;
+    // Reset on onStarted/reset, same shape BrutusAttackPresentation's own per-round guards use.
+    private final ArrivalGate arrivalGate;
     private volatile boolean eliminationReported = false;
 
     public ArenaPresentation(RunePartyPlugin plugin)
     {
         this.plugin = plugin;
+        this.arrivalGate = new ArrivalGate(plugin, "Arena", "the flame field",
+            (self, gid, token) -> plugin.apiClient.confirmArenaArrival(gid, self, token));
     }
 
     /** Called once per real game tick from RunePartyPlugin#onGameTick while Arena is active. Fires
@@ -66,36 +67,21 @@ public final class ArenaPresentation implements MinigamePresentationFeature
 
         List<WorldPoint> grid = plugin.findArenaGridTiles();
         boolean onGrid = grid.contains(pos);
+        arrivalGate.confirmIfMatched(onGrid);
 
         if (onGrid)
         {
-            if (!arrivalConfirmed)
-            {
-                arrivalConfirmed = true;
-                confirmArrival(self);
-            }
             if (plugin.isArenaTileDead(pos))
             {
                 eliminationReported = true;
                 confirmElimination(self);
             }
         }
-        else if (arrivalConfirmed)
+        else if (arrivalGate.isConfirmed())
         {
             eliminationReported = true;
             confirmElimination(self);
         }
-    }
-
-    private void confirmArrival(String self)
-    {
-        final String gid = plugin.gameId;
-        final String token = plugin.playerToken;
-        if (gid == null || token == null) return;
-
-        plugin.submitAction("Confirm Arena arrival",
-            () -> plugin.apiClient.confirmArenaArrival(gid, self, token),
-            e -> plugin.addChatMessage("Failed to confirm you reached the flame field: " + e.getMessage()));
     }
 
     private void confirmElimination(String self)
@@ -112,14 +98,14 @@ public final class ArenaPresentation implements MinigamePresentationFeature
     @Override
     public void onStarted(boolean catchingUp)
     {
-        arrivalConfirmed = false;
+        arrivalGate.reset();
         eliminationReported = false;
     }
 
     @Override
     public void reset()
     {
-        arrivalConfirmed = false;
+        arrivalGate.reset();
         eliminationReported = false;
     }
 }

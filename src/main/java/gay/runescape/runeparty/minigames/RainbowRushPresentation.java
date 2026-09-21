@@ -38,13 +38,14 @@ public final class RainbowRushPresentation implements MinigamePresentationFeatur
     private final Set<Integer> visitedPathIndices = ConcurrentHashMap.newKeySet();
     private volatile long roundStartAt = 0;
     private volatile boolean submitted = false;
-    // One-shot guard for onTick's own pre-round arrival report -- same shape ArenaPresentation's
-    // own arrivalConfirmed uses, reset on onStarted/reset.
-    private volatile boolean arrivalConfirmed = false;
+    // Reset on onStarted/reset -- see ArrivalGate's own doc.
+    private final ArrivalGate arrivalGate;
 
     public RainbowRushPresentation(RunePartyPlugin plugin)
     {
         this.plugin = plugin;
+        this.arrivalGate = new ArrivalGate(plugin, "Rainbow Rush", "the Rainbow Rush start",
+            (self, gid, token) -> plugin.apiClient.confirmRainbowRushArrival(gid, self, token));
     }
 
     /** RAINBOW_RUSH_FINISHER_FOUND is the only event type this feature needs to react to beyond
@@ -92,16 +93,9 @@ public final class RainbowRushPresentation implements MinigamePresentationFeatur
      * position-ping mini-game would otherwise need from onGameTick's own position heartbeat. */
     public void onTick(Player selfPlayer)
     {
-        if (!arrivalConfirmed)
-        {
-            WorldPoint pos = selfPlayer != null ? selfPlayer.getWorldLocation() : null;
-            TileReducer.TileEntry start = plugin.getTileReducer().tileAtIndex(0);
-            if (pos != null && start != null && pos.equals(start.point))
-            {
-                arrivalConfirmed = true;
-                confirmArrival();
-            }
-        }
+        WorldPoint arrivalPos = selfPlayer != null ? selfPlayer.getWorldLocation() : null;
+        TileReducer.TileEntry start = plugin.getTileReducer().tileAtIndex(0);
+        arrivalGate.confirmIfMatched(arrivalPos != null && start != null && arrivalPos.equals(start.point));
 
         if (roundStartAt == 0 || submitted) return;
         if (System.currentTimeMillis() - roundStartAt < RunePartyPlugin.RAINBOW_RUSH_TRAFFIC_LIGHT_MS) return;
@@ -127,20 +121,6 @@ public final class RainbowRushPresentation implements MinigamePresentationFeatur
         }
     }
 
-    /** Reports the local player's own one-shot arrival at the course's own real START tile -- see
-     * onTick's own doc. */
-    private void confirmArrival()
-    {
-        String self = plugin.getLocalRsn();
-        final String gid = plugin.gameId;
-        final String token = plugin.playerToken;
-        if (self == null || gid == null || token == null) return;
-
-        plugin.submitAction("Confirm Rainbow Rush arrival",
-            () -> plugin.apiClient.confirmRainbowRushArrival(gid, self, token),
-            e -> plugin.addChatMessage("Failed to confirm you reached the Rainbow Rush start: " + e.getMessage()));
-    }
-
     @Override
     public void onStarted(boolean catchingUp)
     {
@@ -149,7 +129,7 @@ public final class RainbowRushPresentation implements MinigamePresentationFeatur
         visitedPathIndices.clear();
         roundStartAt = 0;
         submitted = false;
-        arrivalConfirmed = false;
+        arrivalGate.reset();
     }
 
     @Override
@@ -167,7 +147,7 @@ public final class RainbowRushPresentation implements MinigamePresentationFeatur
         visitedPathIndices.clear();
         roundStartAt = 0;
         submitted = false;
-        arrivalConfirmed = false;
+        arrivalGate.reset();
     }
 
     /** Whether the local player has personally stood on the course tile at {@code pathIndex} yet

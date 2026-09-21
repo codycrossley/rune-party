@@ -31,13 +31,14 @@ public final class SandwichRushPresentation implements MinigamePresentationFeatu
     // role CoinRushPresentation's own collectSubmitted plays.
     private final Set<Integer> collectSubmitted = ConcurrentHashMap.newKeySet();
     private volatile long roundStartAt = 0;
-    // One-shot guard for checkCollection's own pre-round arrival report -- same shape
-    // ArenaPresentation's own arrivalConfirmed uses, reset on onStarted/reset.
-    private volatile boolean arrivalConfirmed = false;
+    // Reset on onStarted/reset -- see ArrivalGate's own doc.
+    private final ArrivalGate arrivalGate;
 
     public SandwichRushPresentation(RunePartyPlugin plugin)
     {
         this.plugin = plugin;
+        this.arrivalGate = new ArrivalGate(plugin, "Sandwich Rush", "the Sandwich Rush arena",
+            (self, gid, token) -> plugin.apiClient.confirmSandwichRushArrival(gid, self, token));
     }
 
     @Override
@@ -110,7 +111,7 @@ public final class SandwichRushPresentation implements MinigamePresentationFeatu
         count = 0;
         collectSubmitted.clear();
         roundStartAt = 0;
-        arrivalConfirmed = false;
+        arrivalGate.reset();
     }
 
     @Override
@@ -134,7 +135,7 @@ public final class SandwichRushPresentation implements MinigamePresentationFeatu
         held.clear();
         count = 0;
         roundStartAt = 0;
-        arrivalConfirmed = false;
+        arrivalGate.reset();
     }
 
     /** Checks the local player's current position against every currently-live ingredient spawn
@@ -154,11 +155,7 @@ public final class SandwichRushPresentation implements MinigamePresentationFeatu
         WorldPoint pos = selfPlayer != null ? selfPlayer.getWorldLocation() : null;
         if (pos == null) return;
 
-        if (!arrivalConfirmed && plugin.findSandwichRushArenaTiles().contains(pos))
-        {
-            arrivalConfirmed = true;
-            confirmArrival();
-        }
+        arrivalGate.confirmIfMatched(plugin.findSandwichRushArenaTiles().contains(pos));
 
         for (Map.Entry<Integer, SandwichSpawn> entry : spawns.entrySet())
         {
@@ -182,20 +179,6 @@ public final class SandwichRushPresentation implements MinigamePresentationFeatu
 
         plugin.submitAction("Collect Sandwich Rush item", () -> plugin.apiClient.collectSandwichItem(gid, self, token, spawnId, pos.getX(), pos.getY(), pos.getPlane()),
             e -> collectSubmitted.remove(spawnId));
-    }
-
-    /** Reports the local player's own one-shot arrival at the Sandwich Rush arena -- see
-     * checkCollection's own doc. */
-    private void confirmArrival()
-    {
-        String self = plugin.getLocalRsn();
-        final String gid = plugin.gameId;
-        final String token = plugin.playerToken;
-        if (self == null || gid == null || token == null) return;
-
-        plugin.submitAction("Confirm Sandwich Rush arrival",
-            () -> plugin.apiClient.confirmSandwichRushArrival(gid, self, token),
-            e -> plugin.addChatMessage("Failed to confirm you reached the Sandwich Rush arena: " + e.getMessage()));
     }
 
     public Map<Integer, SandwichSpawn> getSpawns() { return spawns; }

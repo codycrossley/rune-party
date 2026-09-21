@@ -38,9 +38,8 @@ public final class TurfWarsPresentation implements MinigamePresentationFeature
 
     private final Map<String, String> teamColors = new ConcurrentHashMap<>(); // lowercase rsn -> "#RRGGBB"
     private volatile long roundStartAt = 0;
-    // One-shot guard for onTick's own arrival report -- same shape ArenaPresentation's own
-    // arrivalConfirmed uses, reset on onStarted/reset.
-    private volatile boolean arrivalConfirmed = false;
+    // Reset on onStarted/reset -- see ArrivalGate's own doc.
+    private final ArrivalGate arrivalGate;
     // Guards a single tile position against firing more than one claim request while its first is
     // still in flight -- cleared unconditionally once that request resolves (success or failure),
     // via submitAction's own finallyAction, so a later re-claim need at the exact same coordinate
@@ -61,6 +60,8 @@ public final class TurfWarsPresentation implements MinigamePresentationFeature
     public TurfWarsPresentation(RunePartyPlugin plugin)
     {
         this.plugin = plugin;
+        this.arrivalGate = new ArrivalGate(plugin, "Turf Wars", "the Turf Wars arena",
+            (self, gid, token) -> plugin.apiClient.confirmTurfWarsArrival(gid, self, token));
     }
 
     @Override
@@ -126,28 +127,13 @@ public final class TurfWarsPresentation implements MinigamePresentationFeature
         TileReducer.TileEntry tile = plugin.findTileEntryAt(pos, "TURF_WARS_TILE");
         if (tile == null) return; // not standing on the arena at all
 
-        if (!arrivalConfirmed)
-        {
-            arrivalConfirmed = true;
-            confirmArrival(self);
-        }
+        arrivalGate.confirmIfMatched(true);
 
         if (roundStartAt != 0 && !myColor.equalsIgnoreCase(tile.color) && !pos.equals(claimInFlightFor))
         {
             claimInFlightFor = pos;
             claimTile(self, pos, myColor);
         }
-    }
-
-    private void confirmArrival(String self)
-    {
-        final String gid = plugin.gameId;
-        final String token = plugin.playerToken;
-        if (gid == null || token == null) return;
-
-        plugin.submitAction("Confirm Turf Wars arrival",
-            () -> plugin.apiClient.confirmTurfWarsArrival(gid, self, token),
-            e -> plugin.addChatMessage("Failed to confirm you reached the Turf Wars arena: " + e.getMessage()));
     }
 
     /** Fires one claim-turf-wars-tile request for {@code pos} -- claimInFlightFor is cleared
@@ -173,7 +159,7 @@ public final class TurfWarsPresentation implements MinigamePresentationFeature
         // new round's assignment hasn't been announced yet.
         teamColors.clear();
         roundStartAt = 0;
-        arrivalConfirmed = false;
+        arrivalGate.reset();
         claimInFlightFor = null;
     }
 
@@ -233,7 +219,7 @@ public final class TurfWarsPresentation implements MinigamePresentationFeature
         confettiBanner.reset();
         teamColors.clear();
         roundStartAt = 0;
-        arrivalConfirmed = false;
+        arrivalGate.reset();
         claimInFlightFor = null;
     }
 
