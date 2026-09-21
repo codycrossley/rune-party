@@ -30,6 +30,7 @@ public final class Minigames
         REGISTRY.register(new RepeatAfterMeMinigame());
         REGISTRY.register(new CrabRaveMinigame());
         REGISTRY.register(new BrutusAttackMinigame());
+        REGISTRY.register(new RuneMatchMinigame());
     }
 
     public static Minigame get(String key)

@@ -402,6 +402,14 @@ public class ApiClient
         postPlayerAction("/v1/games/" + gameId + "/confirm-rainbow-rush-arrival", playerRsn, playerToken, "Confirm Rainbow Rush arrival");
     }
 
+    /** A player's own one-shot self-report that it just reached the Rune Match arena -- fired the
+     * instant this client locally detects standing on any RUNE_MATCH_TILE. No position travels
+     * with this call. See confirmArenaArrival's own doc for the full reasoning behind this shape. */
+    public void confirmRuneMatchArrival(String gameId, String playerRsn, String playerToken) throws IOException
+    {
+        postPlayerAction("/v1/games/" + gameId + "/confirm-rune-match-arrival", playerRsn, playerToken, "Confirm Rune Match arrival");
+    }
+
     /** Buys the Golden Gnome standing at (x, y, plane). A free side-action during the local
      * player's pending roll, triggered by a right-click menu entry rather than an emote -- doesn't
      * touch pendingRoll or advance the turn, so confirmArrival is still a separate call afterward.

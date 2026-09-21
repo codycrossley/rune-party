@@ -21,6 +21,7 @@ means adding a row here in the same change.**
 | Hot Potato             | `hot-potato` | A potato appears above one player's head — SPIN to pass it before it explodes on whoever's holding it. |
 | Rainbow Rush           | `rainbow-rush` | A race along the live main course itself — every tile you step on turns into a rainbow; first to visit every tile wins. |
 | Repeat After Me        | `repeat-after-me` | Memorize which tiles light up, then stand on each one and SPIN before time runs out — 3 rounds, each harder than the last. |
+| Rune Match             | `rune-match` | Gather in the arena, then SPIN on tiles to flip them — find all 8 matching rune pairs before anyone else. Everyone's board looks the same, but your own progress is private. |
 | Sandwich Rush          | `sandwich-rush` | Grab a tomato, cheese, cabbage, and bread floating around the arena to assemble sandwiches; most sandwiches wins. |
 | True or False          | `true-or-false` | 5 True/False questions — YES/NO emote to answer, coins per correct answer plus a bonus for a perfect run. |
 | Turf Wars              | `turf-wars` | Split into two teams (or free-for-all with an odd count) and claim arena tiles by standing on them; most tiles wins. |

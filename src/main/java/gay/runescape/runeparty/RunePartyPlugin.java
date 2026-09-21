@@ -24,6 +24,7 @@ import gay.runescape.runeparty.net.Json;
 import gay.runescape.runeparty.session.SessionManager;
 
 import gay.runescape.runeparty.minigames.DanceDanceRuneScapePresentation;
+import gay.runescape.runeparty.minigames.RuneMatchPresentation;
 
 import com.google.gson.Gson;
 import com.google.inject.Provides;
@@ -39,6 +40,7 @@ import gay.runescape.runeparty.overlays.CrabRaveNpcOverlay;
 import gay.runescape.runeparty.overlays.DanceDanceRuneScapeHudOverlay;
 import gay.runescape.runeparty.overlays.DanceDanceRuneScapeOverlay;
 import gay.runescape.runeparty.overlays.FishingCatchOverlay;
+import gay.runescape.runeparty.overlays.RuneMatchOverlay;
 import gay.runescape.runeparty.overlays.HardcodedCourseLauncherOverlay;
 import gay.runescape.runeparty.overlays.HotPotatoOverlay;
 import gay.runescape.runeparty.overlays.ItemShopDialogueOverlay;
@@ -443,6 +445,20 @@ public class RunePartyPlugin extends Plugin
     public static final String BRUTUS_ZONE_COLOR_HEX = "#E61E96";
     public static final String BRUTUS_TARGET_ZONE_COLOR_HEX = "#00AAAA";
 
+    /** Client-side key for the Rune Match mini-game -- must match the server's own registration
+     * (minigames/rune_match.py). A private memory-matching race: every seated PLAYER gets the
+     * identical seeded 8-pair layout across a 7x7 arena (see RuneMatchPresentation), but each
+     * player's own flip/match progress is entirely client-local, first to match every pair wins.
+     * Arrival-gated like Arena/Hot Potato/etc -- see ARRIVAL_GATHER_KEYS below. */
+    public static final String RUNE_MATCH_KEY = "rune-match";
+
+    /** Backup ceiling on a Rune Match round if this client hasn't personally finished by then --
+     * not a normal win condition, same "failsafe, not the real end condition" shape
+     * RAINBOW_RUSH_MAX_DURATION_MS's own doc already gives. Must stay in lockstep with the
+     * server's own MAX_DURATION_SECONDS (minigames/rune_match.py), since that's what actually
+     * decides when the round as a whole gives up on everyone finishing. */
+    public static final long RUNE_MATCH_MAX_DURATION_MS = 180_000;
+
     /** Brutus's own transformed model renders noticeably larger than the single real tile his
      * underlying Player object actually occupies (PlayerComposition#setTransformedNpcId only swaps
      * what model draws at his own true WorldLocation, see PlayerTransformOverlay's own doc) --
@@ -550,18 +566,38 @@ public class RunePartyPlugin extends Plugin
     public static final long ARRIVAL_ROUND_BEGIN_BANNER_DURATION_MS = 3000;
 
     /** Mini-games whose MINIGAME_ROUND_BEGIN gets ARRIVAL_ROUND_BEGIN_BANNER_DURATION_MS's own
-     * "BEGIN!" flash -- exactly the keys AnnouncementOverlay routes to renderArrivalGatherMessage
-     * (see that call site's own `||` chain) MINUS Rainbow Rush, which already gets an equivalent
-     * moment from its own dedicated renderRainbowRushTrafficLight (the traffic light's own green
-     * light comes with a "Begin!" pop built in) -- arming this flash for Rainbow Rush too would
-     * just stack a second, redundant "BEGIN!" on top of that. Brutus Attack is ALSO excluded despite
-     * using its own bespoke renderBrutusAttackGatherMessage instead of the generic one: that one
-     * repeats fresh before each of its own 3 rounds off a different lifecycle than
+     * "BEGIN!" flash -- exactly GATHER_MESSAGE_KEYS below MINUS Rainbow Rush, which already gets an
+     * equivalent moment from its own dedicated renderRainbowRushTrafficLight (the traffic light's
+     * own green light comes with a "Begin!" pop built in) -- arming this flash for Rainbow Rush too
+     * would just stack a second, redundant "BEGIN!" on top of that. Brutus Attack is ALSO excluded
+     * despite using its own bespoke renderBrutusAttackGatherMessage instead of the generic one: that
+     * one repeats fresh before each of its own 3 rounds off a different lifecycle than
      * isMinigameRoundBegun()'s single one-shot latch (see that method's own doc), so it isn't a
      * fit for this same "fire once, when the round begins" flash without its own separate handling
      * -- left out of scope here rather than half-wired. */
     public static final Set<String> ARRIVAL_GATHER_KEYS = Set.of(
-        ARENA_KEY, TURF_WARS_KEY, SANDWICH_RUSH_KEY, JADDY_KEY, HOT_POTATO_KEY, DANCE_DANCE_RUNESCAPE_KEY, REPEAT_AFTER_ME_KEY);
+        ARENA_KEY, TURF_WARS_KEY, SANDWICH_RUSH_KEY, JADDY_KEY, HOT_POTATO_KEY, DANCE_DANCE_RUNESCAPE_KEY, REPEAT_AFTER_ME_KEY, RUNE_MATCH_KEY);
+
+    /** Mini-games whose own round doesn't start on the generic "3...2...1...BEGIN!" countdown --
+     * AnnouncementOverlay's own render loop routes each of these to renderArrivalGatherMessage
+     * instead (a persistent "get to the arena" message, since a countdown ticking down to a fixed
+     * instant makes no sense when the real start depends on how fast everyone actually walks
+     * there) -- see that call site, the only consumer. Exactly ARRIVAL_GATHER_KEYS plus Rainbow
+     * Rush, which needs the same gather message despite being excluded from that set above (it
+     * doesn't get the generic "BEGIN!" flash, since its own traffic light already provides one).
+     * Deliberately a derived set, not its own hand-copied key list -- ARRIVAL_GATHER_KEYS silently
+     * missing a newly-added mini-game here once already (Rune Match, caught only by two "BEGIN!"
+     * banners showing back to back in a real playtest) is exactly the class of bug this avoids by
+     * construction: adding a key to ARRIVAL_GATHER_KEYS now automatically fixes both call sites,
+     * not just one of them. Brutus Attack isn't included -- it renders its own bespoke gather
+     * message via a dedicated key check instead, see AnnouncementOverlay's own doc. */
+    public static final Set<String> GATHER_MESSAGE_KEYS;
+    static
+    {
+        Set<String> keys = new HashSet<>(ARRIVAL_GATHER_KEYS);
+        keys.add(RAINBOW_RUSH_KEY);
+        GATHER_MESSAGE_KEYS = Collections.unmodifiableSet(keys);
+    }
 
     /** Every mini-game that actually board-swaps in a dedicated arena (see each one's own
      * prepare()/app.py's MinigameContext.arena_center) -- the only ones a host-placed spawn point
@@ -571,7 +607,7 @@ public class RunePartyPlugin extends Plugin
      * for one would be dead configuration with nothing to ever read it. */
     public static final Set<String> BOARD_SWAPPING_MINIGAME_KEYS = Set.of(
         ARENA_KEY, TURF_WARS_KEY, SANDWICH_RUSH_KEY, JADDY_KEY, HOT_POTATO_KEY, DANCE_DANCE_RUNESCAPE_KEY,
-        REPEAT_AFTER_ME_KEY, CRAB_RAVE_KEY, BRUTUS_ATTACK_KEY, FISHING_CONTEST_KEY);
+        REPEAT_AFTER_ME_KEY, CRAB_RAVE_KEY, BRUTUS_ATTACK_KEY, FISHING_CONTEST_KEY, RUNE_MATCH_KEY);
 
     /** How long AnnouncementOverlay's mini-game final-score recap ("how did everyone do") stays up
      * -- triggered on MINIGAME_ENDED (see triggerMinigameScoreBanner), shown *after* the "MINIGAME
@@ -943,6 +979,7 @@ public class RunePartyPlugin extends Plugin
     private ItemShopDialogueOverlay itemShopDialogueOverlay;
     private PlayerTransformOverlay playerTransformOverlay;
     private FishingCatchOverlay fishingCatchOverlay;
+    private RuneMatchOverlay runeMatchOverlay;
     private ClickClickClickOverlay clickClickClickOverlay;
     private HotPotatoOverlay hotPotatoOverlay;
     private HotPotatoExplosionModel hotPotatoExplosionModel;
@@ -1378,6 +1415,9 @@ public class RunePartyPlugin extends Plugin
         fishingCatchOverlay = new FishingCatchOverlay(this);
         overlayManager.add(fishingCatchOverlay);
 
+        runeMatchOverlay = new RuneMatchOverlay(this);
+        overlayManager.add(runeMatchOverlay);
+
         clickClickClickOverlay = new ClickClickClickOverlay(this);
         overlayManager.add(clickClickClickOverlay);
 
@@ -1446,6 +1486,7 @@ public class RunePartyPlugin extends Plugin
         if (crabRaveHudOverlay != null) overlayManager.remove(crabRaveHudOverlay);
         if (playerTransformOverlay != null) { playerTransformOverlay.clear(); overlayManager.remove(playerTransformOverlay); }
         if (fishingCatchOverlay != null) overlayManager.remove(fishingCatchOverlay);
+        if (runeMatchOverlay != null) overlayManager.remove(runeMatchOverlay);
         if (clickClickClickOverlay != null) overlayManager.remove(clickClickClickOverlay);
         if (hotPotatoOverlay != null) overlayManager.remove(hotPotatoOverlay);
         if (hotPotatoExplosionModel != null) hotPotatoExplosionModel.clear();
@@ -2321,6 +2362,14 @@ public class RunePartyPlugin extends Plugin
         return findTilesByType("HOT_POTATO_TILE");
     }
 
+    /** Every currently-marked Rune Match arena tile (the full 7x7, floor and card tiles alike) --
+     * see RuneMatchPresentation#onTick (arrival) and its own buildBoardFromServerTiles (sorting
+     * these into the round's own 16 card positions), the two readers. */
+    public List<WorldPoint> findRuneMatchArenaTiles()
+    {
+        return findTilesByType("RUNE_MATCH_TILE");
+    }
+
     /** Whether the Arena tile at {@code pos} has reached the server's own permanently-dead red --
      * see ArenaPresentation#onTick, the only reader: the local client checks its own position
      * against this every tick to decide when to self-report confirm-arena-elimination. False for
@@ -2525,6 +2574,16 @@ public class RunePartyPlugin extends Plugin
             minigamePresentation.arena().onTick(selfPlayer);
         }
 
+        // Also independent of the turn engine below -- Rune Match's own one-shot
+        // confirm-rune-match-arrival report, lazy board-building once the server's own seed lands,
+        // and unmatched-pair reveal timer all live inside this one call (see
+        // RuneMatchPresentation#onTick); the actual per-flip scoring happens separately, from
+        // onAnimationChanged's own EMOTE_DANCE_SPIN case, not from this per-tick call.
+        if (isRuneMatchActive())
+        {
+            minigamePresentation.runeMatch().onTick(selfPlayer);
+        }
+
         // Also independent of the turn engine below -- Turf Wars' own one-shot
         // confirm-turf-wars-arrival report AND its own ongoing, repeatable claim-turf-wars-tile
         // reports both live inside this one call (see TurfWarsPresentation#onTick) -- the last
@@ -2693,6 +2752,11 @@ public class RunePartyPlugin extends Plugin
                 minigamePresentation.repeatAfterMe().armAwaitingSpinFinish();
                 return;
             }
+            if (isLocalPlayerRuneMatchFlipEligible())
+            {
+                minigamePresentation.runeMatch().armAwaitingFlipFinish();
+                return;
+            }
             return;
         }
 
@@ -2783,6 +2847,11 @@ public class RunePartyPlugin extends Plugin
         {
             minigamePresentation.crabRave().clearAwaitingDanceFinish();
             minigamePresentation.crabRave().onDanceFinished(localPlayer.getWorldLocation());
+        }
+        else if (minigamePresentation.runeMatch().isAwaitingFlipFinish())
+        {
+            minigamePresentation.runeMatch().clearAwaitingFlipFinish();
+            minigamePresentation.runeMatch().onFlipFinished(localPlayer.getWorldLocation());
         }
     }
 
@@ -2957,6 +3026,22 @@ public class RunePartyPlugin extends Plugin
     {
         if (!CRAB_RAVE_KEY.equals(minigamePresentation.getKey()) || !isMinigamePlayable()) return false;
         return minigamePresentation.crabRave().isDanceEligible();
+    }
+
+    /** Whether a Spin emote right now could actually flip a Rune Match card -- requires
+     * isMinigamePlayable() (same "the ready-check has to actually finish first" gate every other
+     * in-round action here respects), standing on one of this round's own 16 card tiles that isn't
+     * already solved or the one card already face-up, and fewer than 2 cards currently flipped. See
+     * onAnimationChanged's own EMOTE_DANCE_SPIN case, the only caller. */
+    public boolean isLocalPlayerRuneMatchFlipEligible()
+    {
+        if (!RUNE_MATCH_KEY.equals(minigamePresentation.getKey()) || !isMinigamePlayable()) return false;
+        Player self = client.getLocalPlayer();
+        WorldPoint pos = self != null ? self.getWorldLocation() : null;
+        if (pos == null) return false;
+        RuneMatchPresentation runeMatch = minigamePresentation.runeMatch();
+        Integer index = runeMatch.getRuneIndex(pos);
+        return index != null && !runeMatch.isRevealed(index);
     }
 
     /** Whether a Headbang emote right now would actually roll a Fishing Contest catch -- requires
@@ -3872,6 +3957,8 @@ public class RunePartyPlugin extends Plugin
             case Events.HOT_POTATO_ASSIGNED:
             case Events.REPEAT_AFTER_ME_ROUND_STARTED:
             case Events.RAINBOW_RUSH_FINISHER_FOUND:
+            case Events.RUNE_MATCH_BOARD_SEEDED:
+            case Events.RUNE_MATCH_FINISHER_FOUND:
             case Events.PLAYER_TRANSFORMED:
             case Events.BRUTUS_ROUND_STARTED:
             case Events.BRUTUS_ARRIVAL_PENDING:
@@ -4262,6 +4349,19 @@ public class RunePartyPlugin extends Plugin
 
     public boolean isBrutusAttackActive() { return minigamePresentation.isKeyActive(BRUTUS_ATTACK_KEY); }
     public boolean isArenaActive() { return minigamePresentation.isKeyActive(ARENA_KEY); }
+    public boolean isRuneMatchActive() { return minigamePresentation.isKeyActive(RUNE_MATCH_KEY); }
+    /** This round's own still-hidden Rune Match card tiles -- see TileOverlay's own per-tile
+     * rendering, the only consumer. */
+    public List<WorldPoint> getRuneMatchHiddenCardTiles() { return minigamePresentation.runeMatch().getHiddenCardTiles(); }
+    /** This round's own permanently-solved Rune Match card tiles -- see TileOverlay's own per-tile
+     * rendering, the only consumer. */
+    public List<WorldPoint> getRuneMatchSolvedCardTiles() { return minigamePresentation.runeMatch().getSolvedCardTiles(); }
+    /** This round's own currently-revealed Rune Match cards, keyed by card index -- see
+     * TileOverlay#updateRuneMatchModels, the only consumer. */
+    public Map<Integer, RuneMatchSpawn> getRuneMatchRevealedSpawns() { return minigamePresentation.runeMatch().getRevealedSpawns(); }
+    /** The local player's own running count of pairs matched so far this round -- see
+     * RuneMatchOverlay, the only consumer. */
+    public int getRuneMatchSolvedPairCount() { return minigamePresentation.runeMatch().getSolvedPairCount(); }
     /** The rsn currently transformed into Brutus for this round -- null before PLAYER_TRANSFORMED
      * lands. See overlays/PlayerTransformOverlay, the only consumer. */
     public String getBrutusAttackBrutusRsn() { return minigamePresentation.brutusAttack().getBrutusRsn(); }

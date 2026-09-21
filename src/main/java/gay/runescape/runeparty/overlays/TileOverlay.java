@@ -14,6 +14,7 @@ import gay.runescape.runeparty.models.CoinRushModel;
 import gay.runescape.runeparty.models.CoinTrapModel;
 import gay.runescape.runeparty.models.GoldenGnomeModel;
 import gay.runescape.runeparty.models.PondModel;
+import gay.runescape.runeparty.models.RuneMatchRuneModel;
 import gay.runescape.runeparty.models.SandwichItemModel;
 import gay.runescape.runeparty.models.TableModel;
 import gay.runescape.runeparty.minigames.Minigames;
@@ -122,6 +123,14 @@ public class TileOverlay extends Overlay
     // Repeat After Me's own arena outline -- a purple, matching RepeatAfterMeTile's own served
     // color_hex (#8E44AD), so the arena floor's outline and the tile-type legend agree.
     private static final Color REPEAT_AFTER_ME_ARENA_OUTLINE_COLOR = new Color(142, 68, 173, 190);
+    // Rune Match's own arena outline -- a distinct orange, matching RuneMatchTile's own served
+    // color_hex (#E67E22), so the arena floor's outline and the tile-type legend agree, same
+    // reasoning REPEAT_AFTER_ME_ARENA_OUTLINE_COLOR above already gives. Orange rather than the
+    // purple this originally shipped with -- purple was hard to make out against the course.
+    private static final Color RUNE_MATCH_ARENA_OUTLINE_COLOR = new Color(230, 126, 34, 190);
+    // A permanently-matched Rune Match pair's own fill, once solved -- same green ArenaMinigame's
+    // own wheel-icon safe tiles use, reused here for the same "you got it right" association.
+    private static final Color RUNE_MATCH_SOLVED_COLOR = new Color(46, 204, 64, 200);
     // A bright gold fill for whichever cells the current round's own sneak peek is revealing (see
     // RunePartyPlugin#isRepeatAfterMePeekActive/getRepeatAfterMeTargetIndices) -- deliberately
     // eye-catching, since the whole point of the peek is to be easy to memorize at a glance.
@@ -184,6 +193,7 @@ public class TileOverlay extends Overlay
     private final PondModel pondModel;
     private final TableModel tableModel;
     private final SandwichItemModel sandwichItemModel;
+    private final RuneMatchRuneModel runeMatchRuneModel;
 
     public TileOverlay(Client client, RunePartyConfig config, RunePartyPlugin plugin, TileReducer tileReducer)
     {
@@ -199,6 +209,7 @@ public class TileOverlay extends Overlay
         this.pondModel = new PondModel(client);
         this.tableModel = new TableModel(client);
         this.sandwichItemModel = new SandwichItemModel(client);
+        this.runeMatchRuneModel = new RuneMatchRuneModel(client);
 
         setPosition(OverlayPosition.DYNAMIC);
         setLayer(OverlayLayer.ABOVE_SCENE);
@@ -216,6 +227,7 @@ public class TileOverlay extends Overlay
             clearPondModels();
             clearTableModels();
             clearSandwichItemModels();
+            clearRuneMatchModels();
             return null;
         }
         GamePhase phase = plugin.getPhase();
@@ -228,6 +240,7 @@ public class TileOverlay extends Overlay
             clearPondModels();
             clearTableModels();
             clearSandwichItemModels();
+            clearRuneMatchModels();
             return null;
         }
 
@@ -236,6 +249,7 @@ public class TileOverlay extends Overlay
         renderCommittedCourse(g);
         coinRushModel.update();
         sandwichItemModel.update(plugin.getSandwichRushSpawns());
+        runeMatchRuneModel.update(plugin.isRuneMatchActive() ? plugin.getRuneMatchRevealedSpawns() : Collections.emptyMap());
 
         if (plugin.isCoursePlacementMode())
         {
@@ -268,6 +282,12 @@ public class TileOverlay extends Overlay
             ? plugin.findCrabRaveTilePoints() : Collections.emptyList();
         Map<Integer, Color> crabRaveLitColors = crabRaveTiles.isEmpty()
             ? Collections.emptyMap() : computeCrabRaveLitColors();
+        // Same "compute once per frame" reasoning as repeatAfterMeTiles/crabRaveTiles above -- see
+        // renderRuneMatchTile, the only reader. Empty unless the arena's actually swapped in.
+        List<WorldPoint> runeMatchHiddenCardTiles = plugin.isRuneMatchActive()
+            ? plugin.getRuneMatchHiddenCardTiles() : Collections.emptyList();
+        List<WorldPoint> runeMatchSolvedCardTiles = plugin.isRuneMatchActive()
+            ? plugin.getRuneMatchSolvedCardTiles() : Collections.emptyList();
 
         for (TileReducer.TileEntry entry : entries)
         {
@@ -283,6 +303,7 @@ public class TileOverlay extends Overlay
             if ("JADDY_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline per color instead, see renderColorGroupedOutlines below -- a Jad's own zone is a fixed-color area a huge model stands on top of, not a walked path, so a per-tile fill/outline would just be noise under it
             if ("BRUTUS_ATTACK_TILE".equals(entry.tileType)) continue; // Brutus's own zone, the targets' own zone, and the neutral corridor between them each render as one merged outline instead, see renderColorGroupedOutlines below -- same reasoning JADDY_TILE's own two zones already get. Every one of this type is server-colored now (see minigames/brutus_attack.py's own CORRIDOR_COLOR), so this always skips, unlike JADDY_TILE's own no-color-at-all fallback.
             if ("TURF_WARS_TILE".equals(entry.tileType)) { renderTurfWarsTile(g, entry); continue; } // fill only, no per-tile outline, see renderTurfWarsTile
+            if ("RUNE_MATCH_TILE".equals(entry.tileType)) { renderRuneMatchTile(g, entry, runeMatchHiddenCardTiles, runeMatchSolvedCardTiles); continue; } // fill only, no per-tile outline -- see renderRuneMatchTile
             // Also gated on isMinigameSelectionRevealed() -- isRainbowRushActive() alone flips true
             // the instant MINIGAME_STARTED lands, well before the client's own selection wheel has
             // actually spun to a stop, so recoloring the whole course on that signal alone would
@@ -300,6 +321,7 @@ public class TileOverlay extends Overlay
         renderArenaOutline(g, entries, "HOT_POTATO_TILE", HOT_POTATO_ARENA_OUTLINE_COLOR);
         renderArenaOutline(g, entries, "REPEAT_AFTER_ME_TILE", REPEAT_AFTER_ME_ARENA_OUTLINE_COLOR);
         renderArenaOutline(g, entries, "CRAB_RAVE_TILE", CRAB_RAVE_ARENA_OUTLINE_COLOR);
+        renderArenaOutline(g, entries, "RUNE_MATCH_TILE", RUNE_MATCH_ARENA_OUTLINE_COLOR);
         renderColorGroupedOutlines(g, entries, "JADDY_TILE");
         renderColorGroupedOutlines(g, entries, "BRUTUS_ATTACK_TILE");
         renderBrutusAttackCrashZone(g);
@@ -501,6 +523,12 @@ public class TileOverlay extends Overlay
     public void clearSandwichItemModels()
     {
         sandwichItemModel.clear();
+    }
+
+    /** Despawns and forgets every Rune Match rune RuneLiteObject. */
+    public void clearRuneMatchModels()
+    {
+        runeMatchRuneModel.clear();
     }
 
     /** Despawns and forgets every Arena Fire RuneLiteObject. */
@@ -879,6 +907,25 @@ public class TileOverlay extends Overlay
             g.setStroke(stroke);
             g.draw(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
         }
+    }
+
+    /** Fills a permanently-solved Rune Match pair's own tiles in RUNE_MATCH_SOLVED_COLOR (still-
+     * hidden card tiles get RuneMatchTile's own served color instead, see below); a plain floor
+     * tile, or a card that's only momentarily face-up (flipped but not yet resolved), gets neither
+     * -- the floor gets only the merged RUNE_MATCH_ARENA_OUTLINE_COLOR boundary below, and a
+     * revealed-but-unsolved card renders as a real 3D rune model instead (see
+     * models/RuneMatchRuneModel) with no fill under it. See RuneMatchPresentation#
+     * getSolvedCardTiles/getHiddenCardTiles, the two lists this checks. */
+    private void renderRuneMatchTile(Graphics2D g, TileReducer.TileEntry entry, List<WorldPoint> hiddenCardTiles, List<WorldPoint> solvedCardTiles)
+    {
+        if (solvedCardTiles.contains(entry.point))
+        {
+            renderOutlinedTile(g, entry.point, RUNE_MATCH_SOLVED_COLOR, SOLID_STROKE);
+            return;
+        }
+        if (!hiddenCardTiles.contains(entry.point)) return;
+        Color base = resolveColor(entry.color, entry.tileType);
+        renderOutlinedTile(g, entry.point, base, SOLID_STROKE);
     }
 
     /** Draws one Turf Wars tile as a fill only -- no per-tile outline (see this class's own doc

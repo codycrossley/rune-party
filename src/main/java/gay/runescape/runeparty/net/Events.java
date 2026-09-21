@@ -161,6 +161,18 @@ public final class Events
     public static final String REPEAT_AFTER_ME_ROUND_STARTED = "REPEAT_AFTER_ME_ROUND_STARTED";
     public static final String ROLE_ASSIGNED = "ROLE_ASSIGNED";
     public static final String ROLL_BONUS_GRANTED = "ROLL_BONUS_GRANTED";
+    /** Server-only echo of this client's own one-shot confirm-rune-match-arrival call -- never
+     * dispatched on here, the server's own arrival gate is what actually reacts to it (see
+     * minigames/rune_match.py). Same treatment ARENA_ARRIVAL_CONFIRMED already gets. */
+    public static final String RUNE_MATCH_ARRIVAL_CONFIRMED = "RUNE_MATCH_ARRIVAL_CONFIRMED";
+    /** The one random number every seated client derives its own identical rune-to-tile shuffle
+     * from -- see RuneMatchPresentation#apply, the only reader. */
+    public static final String RUNE_MATCH_BOARD_SEEDED = "RUNE_MATCH_BOARD_SEEDED";
+    /** Fired the instant any player's own submitted pair count first reaches Rune Match's
+     * PAIR_COUNT -- see RuneMatchPresentation#apply, the only reader: every other still-racing
+     * client submits its own current pair count immediately instead of waiting for its own local
+     * RUNE_MATCH_MAX_DURATION_MS timer. Same treatment RAINBOW_RUSH_FINISHER_FOUND already gets. */
+    public static final String RUNE_MATCH_FINISHER_FOUND = "RUNE_MATCH_FINISHER_FOUND";
     /** Server-only echo of this client's own one-shot confirm-sandwich-rush-arrival call -- never
      * dispatched on here, the server's own arrival gate is what actually reacts to it (see
      * minigames/sandwich_rush.py). Same treatment ARENA_ARRIVAL_CONFIRMED already gets. */
