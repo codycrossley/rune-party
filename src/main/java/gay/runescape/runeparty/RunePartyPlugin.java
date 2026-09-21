@@ -76,6 +76,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
@@ -2161,117 +2162,116 @@ public class RunePartyPlugin extends Plugin
             .onClick(me -> createGameFromHardcodedCourse(course));
     }
 
-    /** The Golden Gnome's own current tile, if one is currently marked -- see
-     * addGoldenGnomePurchaseMenuEntry and TileOverlay's own arrow, the only two readers. Scans
-     * tileReducer's live snapshot directly rather than caching, same "the reducer is the one
-     * source of truth" reasoning models/GoldenGnomeModel's own update() already follows. */
-    public WorldPoint findGoldenGnomeTilePoint()
+    /** Every currently-marked tile matching {@code predicate}, in scan order -- the one shared scan
+     * every find*TilePoints/find*Tiles method below now delegates to (see ARCHITECTURE_REVIEW.md's
+     * C3), so the "the reducer is the one source of truth," scanned-on-demand-rather-than-cached
+     * loop itself only exists once, not once per mini-game. Package-visible rather than private so
+     * findTileEntryAt (below) and future finders can reuse it directly. */
+    List<WorldPoint> findTiles(Predicate<TileReducer.TileEntry> predicate)
+    {
+        List<WorldPoint> points = new ArrayList<>();
+        for (TileReducer.TileEntry entry : tileReducer.snapshot())
+        {
+            if (predicate.test(entry)) points.add(entry.point);
+        }
+        return points;
+    }
+
+    /** Every currently-marked tile of exactly {@code tileType}, regardless of color -- see
+     * findTiles' own doc for the shared scan this delegates to. The plain, no-color-filter case
+     * every mini-game-specific find*TilePoints/find*Tiles wrapper below reduces to. */
+    public List<WorldPoint> findTilesByType(String tileType)
+    {
+        return findTiles(entry -> tileType.equals(entry.tileType));
+    }
+
+    /** The first currently-marked tile of exactly {@code tileType}, or null if none -- same scan
+     * findTilesByType uses, just stopping at the first match, for the handful of mini-games/features
+     * that only ever expect at most one tile of their own type to exist at a time (Golden Gnome,
+     * the Pond, Dance, Dance, RuneScape's own anchor). */
+    public WorldPoint findFirstTileByType(String tileType)
     {
         for (TileReducer.TileEntry entry : tileReducer.snapshot())
         {
-            if ("GOLDEN_GNOME_TILE".equals(entry.tileType)) return entry.point;
+            if (tileType.equals(entry.tileType)) return entry.point;
         }
         return null;
     }
 
-    /** The Pond's own current tile, if one is currently marked -- see performFishingCatchRoll, the
-     * only reader. Scans tileReducer's live snapshot directly rather than caching, same "the
-     * reducer is the one source of truth" reasoning findGoldenGnomeTilePoint already follows. */
-    WorldPoint findPondTilePoint()
+    /** The full tile entry (type, point, color, ...) currently marked at exactly {@code pos} with
+     * tile type {@code tileType}, or null if no such tile is marked there right now -- for the rare
+     * caller that needs a tile's own color at one specific point rather than just "which points of
+     * this type exist" (see findTilesByType for that). See TurfWarsPresentation#onTick, the only
+     * caller: it needs the found tile's own current color to decide whether to fire a claim. */
+    public TileReducer.TileEntry findTileEntryAt(WorldPoint pos, String tileType)
     {
         for (TileReducer.TileEntry entry : tileReducer.snapshot())
         {
-            if ("POND_TILE".equals(entry.tileType)) return entry.point;
+            if (tileType.equals(entry.tileType) && pos.equals(entry.point)) return entry;
         }
         return null;
+    }
+
+    /** The Golden Gnome's own current tile, if one is currently marked -- see
+     * addGoldenGnomePurchaseMenuEntry and TileOverlay's own arrow, the only two readers. */
+    public WorldPoint findGoldenGnomeTilePoint()
+    {
+        return findFirstTileByType("GOLDEN_GNOME_TILE");
+    }
+
+    /** The Pond's own current tile, if one is currently marked -- see performFishingCatchRoll, the
+     * only reader. */
+    WorldPoint findPondTilePoint()
+    {
+        return findFirstTileByType("POND_TILE");
     }
 
     /** Dance, Dance, RuneScape's own anchor tile, if one is currently marked -- see
      * DanceDanceRuneScapePresentation, the only reader, which derives the four highlightable
      * tiles adjacent to this one purely by point arithmetic. Board-swapped by the server once the
      * round starts (see that class's own doc), not host-placed -- but the lookup itself is
-     * identical either way, same "the reducer is the one source of truth" reasoning
-     * findGoldenGnomeTilePoint/findPondTilePoint already follow. */
+     * identical either way. */
     public WorldPoint findDanceDanceRuneScapeTilePoint()
     {
-        for (TileReducer.TileEntry entry : tileReducer.snapshot())
-        {
-            if ("DDR_CENTER_TILE".equals(entry.tileType)) return entry.point;
-        }
-        return null;
+        return findFirstTileByType("DDR_CENTER_TILE");
     }
 
     /** Every currently-marked Repeat After Me arena tile, if the board's actually swapped to it --
      * see RepeatAfterMePresentation, the only reader, which derives each tile's own 0-15 grid index
-     * purely from these real coordinates (no index ever travels over the wire). Same "the reducer
-     * is the one source of truth," scanned-on-demand-rather-than-cached shape
-     * findDanceDanceRuneScapeTilePoint/findPondTilePoint already follow. */
+     * purely from these real coordinates (no index ever travels over the wire). */
     public List<WorldPoint> findRepeatAfterMeTilePoints()
     {
-        List<WorldPoint> points = new ArrayList<>();
-        for (TileReducer.TileEntry entry : tileReducer.snapshot())
-        {
-            if ("REPEAT_AFTER_ME_TILE".equals(entry.tileType)) points.add(entry.point);
-        }
-        return points;
+        return findTilesByType("REPEAT_AFTER_ME_TILE");
     }
 
     /** Every currently-marked Wise Old Man tile -- see WiseOldManNpcOverlay, the only reader: a
      * real, host-placed course stop (unlike GoldenGnomeTile/CoinTrapTile), so unlike those two
-     * there could be more than one on the same board. Same "the reducer is the one source of
-     * truth," scanned-on-demand shape findRepeatAfterMeTilePoints already follows. */
+     * there could be more than one on the same board. */
     public List<WorldPoint> findWiseOldManTilePoints()
     {
-        List<WorldPoint> points = new ArrayList<>();
-        for (TileReducer.TileEntry entry : tileReducer.snapshot())
-        {
-            if ("WISE_OLD_MAN_TILE".equals(entry.tileType)) points.add(entry.point);
-        }
-        return points;
+        return findTilesByType("WISE_OLD_MAN_TILE");
     }
 
-    /** Every currently-marked Item Shop tile -- see ItemShopNpcOverlay, the only caller. Same
-     * "the reducer is the one source of truth," scanned-on-demand shape findWiseOldManTilePoints
-     * above already follows. */
+    /** Every currently-marked Item Shop tile -- see ItemShopNpcOverlay, the only caller. */
     public List<WorldPoint> findItemShopTilePoints()
     {
-        List<WorldPoint> points = new ArrayList<>();
-        for (TileReducer.TileEntry entry : tileReducer.snapshot())
-        {
-            if ("ITEM_SHOP_TILE".equals(entry.tileType)) points.add(entry.point);
-        }
-        return points;
+        return findTilesByType("ITEM_SHOP_TILE");
     }
 
     /** Every currently-marked Crab Rave arena tile, if the board's actually swapped to it -- see
      * CrabRavePresentation#onDanceFinished (bounding-box "am I in the zone" check) and
-     * CrabRaveNpcOverlay (crab spawn-point placement), the only readers. Same "the reducer is the
-     * one source of truth," scanned-on-demand-rather-than-cached shape
-     * findRepeatAfterMeTilePoints/findDanceDanceRuneScapeTilePoint already follow. */
+     * CrabRaveNpcOverlay (crab spawn-point placement), the only readers. */
     public List<WorldPoint> findCrabRaveTilePoints()
     {
-        List<WorldPoint> points = new ArrayList<>();
-        for (TileReducer.TileEntry entry : tileReducer.snapshot())
-        {
-            if ("CRAB_RAVE_TILE".equals(entry.tileType)) points.add(entry.point);
-        }
-        return points;
+        return findTilesByType("CRAB_RAVE_TILE");
     }
 
     /** Every currently-marked Brutus Attack tile colored as Brutus's own zone (red) -- see
      * BrutusAttackPresentation#onTick, the only reader: the local client checks its own position
-     * against this list to decide when to fire its own one-shot confirm-brutus-arrival report.
-     * Same "the reducer is the one source of truth," scanned-on-demand shape
-     * findCrabRaveTilePoints/findRepeatAfterMeTilePoints already follow -- just filtered by color
-     * on top of tileType, since every Brutus Attack tile shares one type but differs by zone. */
+     * against this list to decide when to fire its own one-shot confirm-brutus-arrival report. */
     public List<WorldPoint> findBrutusZoneTiles()
     {
-        List<WorldPoint> points = new ArrayList<>();
-        for (TileReducer.TileEntry entry : tileReducer.snapshot())
-        {
-            if ("BRUTUS_ATTACK_TILE".equals(entry.tileType) && BRUTUS_ZONE_COLOR_HEX.equalsIgnoreCase(entry.color)) points.add(entry.point);
-        }
-        return points;
+        return findTiles(entry -> "BRUTUS_ATTACK_TILE".equals(entry.tileType) && BRUTUS_ZONE_COLOR_HEX.equalsIgnoreCase(entry.color));
     }
 
     /** Every currently-marked Brutus Attack tile colored as the targets' own zone (blue) -- see
@@ -2280,12 +2280,7 @@ public class RunePartyPlugin extends Plugin
      * landing). */
     public List<WorldPoint> findBrutusTargetZoneTiles()
     {
-        List<WorldPoint> points = new ArrayList<>();
-        for (TileReducer.TileEntry entry : tileReducer.snapshot())
-        {
-            if ("BRUTUS_ATTACK_TILE".equals(entry.tileType) && BRUTUS_TARGET_ZONE_COLOR_HEX.equalsIgnoreCase(entry.color)) points.add(entry.point);
-        }
-        return points;
+        return findTiles(entry -> "BRUTUS_ATTACK_TILE".equals(entry.tileType) && BRUTUS_TARGET_ZONE_COLOR_HEX.equalsIgnoreCase(entry.color));
     }
 
     /** Every currently-marked Brutus Attack tile regardless of zone color -- Brutus's own red zone,
@@ -2295,57 +2290,33 @@ public class RunePartyPlugin extends Plugin
      * confirmBrutusOutOfBounds the instant he's standing on none of them. */
     public List<WorldPoint> findBrutusAttackArenaTiles()
     {
-        List<WorldPoint> points = new ArrayList<>();
-        for (TileReducer.TileEntry entry : tileReducer.snapshot())
-        {
-            if ("BRUTUS_ATTACK_TILE".equals(entry.tileType)) points.add(entry.point);
-        }
-        return points;
+        return findTilesByType("BRUTUS_ATTACK_TILE");
     }
 
     /** Every currently-marked Arena tile, regardless of its own current heat-gradient color -- see
      * ArenaPresentation#onTick, the only reader: the local client checks its own position against
      * this set every tick to decide when to fire its own one-shot confirm-arena-arrival report (the
      * instant it's standing on any of these) and, past that, its own confirm-arena-elimination
-     * report (the instant it's standing on none of them, having already arrived). Same "the reducer
-     * is the one source of truth," scanned-on-demand shape findBrutusAttackArenaTiles above already
-     * follows. */
+     * report (the instant it's standing on none of them, having already arrived). */
     public List<WorldPoint> findArenaGridTiles()
     {
-        List<WorldPoint> points = new ArrayList<>();
-        for (TileReducer.TileEntry entry : tileReducer.snapshot())
-        {
-            if ("ARENA_TILE".equals(entry.tileType)) points.add(entry.point);
-        }
-        return points;
+        return findTilesByType("ARENA_TILE");
     }
 
     /** Every currently-marked Sandwich Rush arena tile -- see SandwichRushPresentation#checkCollection,
      * which self-checks the local player's own position against this set to fire its own one-shot
-     * confirm-sandwich-rush-arrival report. Same scanned-on-demand shape findArenaGridTiles above
-     * already follows. */
+     * confirm-sandwich-rush-arrival report. */
     public List<WorldPoint> findSandwichRushArenaTiles()
     {
-        List<WorldPoint> points = new ArrayList<>();
-        for (TileReducer.TileEntry entry : tileReducer.snapshot())
-        {
-            if ("SANDWICH_RUSH_TILE".equals(entry.tileType)) points.add(entry.point);
-        }
-        return points;
+        return findTilesByType("SANDWICH_RUSH_TILE");
     }
 
     /** Every currently-marked Hot Potato arena tile -- see HotPotatoPresentation#onTick, which
      * self-checks the local player's own position against this set to fire its own one-shot
-     * confirm-hot-potato-arrival report. Same scanned-on-demand shape findArenaGridTiles above
-     * already follows. */
+     * confirm-hot-potato-arrival report. */
     public List<WorldPoint> findHotPotatoArenaTiles()
     {
-        List<WorldPoint> points = new ArrayList<>();
-        for (TileReducer.TileEntry entry : tileReducer.snapshot())
-        {
-            if ("HOT_POTATO_TILE".equals(entry.tileType)) points.add(entry.point);
-        }
-        return points;
+        return findTilesByType("HOT_POTATO_TILE");
     }
 
     /** Whether the Arena tile at {@code pos} has reached the server's own permanently-dead red --

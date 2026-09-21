@@ -14,8 +14,8 @@ import java.util.concurrent.TimeUnit;
 
 public class ApiClient
 {
-    // static final String BASE_URL = "http://localhost:8005/runeparty";
-    static final String BASE_URL = "https://runeparty.shrunk.studio/runeparty";
+    static final String BASE_URL = "http://localhost:8005/runeparty";
+    // static final String BASE_URL = "https://runeparty.shrunk.studio/runeparty";
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
@@ -108,14 +108,7 @@ public class ApiClient
 
     public void leaveGame(String gameId, String playerRsn, String playerToken) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-
-        try (Response resp = post("/v1/games/" + gameId + "/leave", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Leave failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerAction("/v1/games/" + gameId + "/leave", playerRsn, playerToken, "Leave");
     }
 
     /** Host-only kick -- same PLAYER_LEFT outcome as leaveGame, just authorized via the host's own
@@ -161,14 +154,7 @@ public class ApiClient
      * truth for the value, only confirmation the request was accepted. */
     public void rollDice(String gameId, String playerRsn, String playerToken) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-
-        try (Response resp = post("/v1/games/" + gameId + "/roll-dice", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Roll dice failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerAction("/v1/games/" + gameId + "/roll-dice", playerRsn, playerToken, "Roll dice");
     }
 
     /** Reports that the local player has finished walking to the tile their roll resolved to. The
@@ -213,14 +199,7 @@ public class ApiClient
      * continuous per-tick heartbeat. See ArenaPresentation#onTick, the only caller. */
     public void confirmArenaArrival(String gameId, String playerRsn, String playerToken) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-
-        try (Response resp = post("/v1/games/" + gameId + "/confirm-arena-arrival", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Arena arrival failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerAction("/v1/games/" + gameId + "/confirm-arena-arrival", playerRsn, playerToken, "Confirm Arena arrival");
     }
 
     /** A player's own one-shot self-report that it was just caught by the flame field -- fired only
@@ -230,14 +209,7 @@ public class ApiClient
      * ArenaPresentation's own doc for why no position needs to travel with this call at all. */
     public void confirmArenaElimination(String gameId, String playerRsn, String playerToken) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-
-        try (Response resp = post("/v1/games/" + gameId + "/confirm-arena-elimination", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Arena elimination failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerAction("/v1/games/" + gameId + "/confirm-arena-elimination", playerRsn, playerToken, "Confirm Arena elimination");
     }
 
     /** One-shot, position-free "I've reached my own required zone" ready-check for Brutus Attack
@@ -246,14 +218,7 @@ public class ApiClient
      * the only caller. */
     public void confirmBrutusArrival(String gameId, String playerRsn, String playerToken) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-
-        try (Response resp = post("/v1/games/" + gameId + "/confirm-brutus-arrival", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Brutus arrival failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerAction("/v1/games/" + gameId + "/confirm-brutus-arrival", playerRsn, playerToken, "Confirm Brutus arrival");
     }
 
     /** One-shot "I just entered the target zone" report for Brutus Attack -- fired once, only by
@@ -282,14 +247,7 @@ public class ApiClient
      * confirmBrutusDash's own broadcasted report) found a match against its own real position. */
     public void confirmBrutusElimination(String gameId, String playerRsn, String playerToken) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-
-        try (Response resp = post("/v1/games/" + gameId + "/confirm-brutus-elimination", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Brutus elimination failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerAction("/v1/games/" + gameId + "/confirm-brutus-elimination", playerRsn, playerToken, "Confirm Brutus elimination");
     }
 
     /** A target's own one-shot self-report that it walked off its required zone's tiles after
@@ -301,14 +259,7 @@ public class ApiClient
      * just carries on silently unless this emptied out every remaining target. */
     public void confirmBrutusTargetLeftZone(String gameId, String playerRsn, String playerToken) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-
-        try (Response resp = post("/v1/games/" + gameId + "/confirm-brutus-target-left-zone", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Brutus target left zone failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerAction("/v1/games/" + gameId + "/confirm-brutus-target-left-zone", playerRsn, playerToken, "Confirm Brutus target left zone");
     }
 
     /** Brutus's own one-shot self-report that he's stepped completely off the arena (any of his
@@ -320,14 +271,7 @@ public class ApiClient
      * a bespoke event of its own -- see brutus_out_of_bounds's own doc on the server. */
     public void confirmBrutusOutOfBounds(String gameId, String playerRsn, String playerToken) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-
-        try (Response resp = post("/v1/games/" + gameId + "/confirm-brutus-out-of-bounds", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Brutus out-of-bounds failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerAction("/v1/games/" + gameId + "/confirm-brutus-out-of-bounds", playerRsn, playerToken, "Confirm Brutus out-of-bounds");
     }
 
     /** Submits the local player's final Fishing Contest catch tally. Fired once per round, when
@@ -399,14 +343,7 @@ public class ApiClient
      * not where. See confirmArenaArrival's own doc for the full reasoning behind this shape. */
     public void confirmDdrArrival(String gameId, String playerRsn, String playerToken) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-
-        try (Response resp = post("/v1/games/" + gameId + "/confirm-ddr-arrival", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Dance, Dance, RuneScape arrival failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerAction("/v1/games/" + gameId + "/confirm-ddr-arrival", playerRsn, playerToken, "Confirm Dance, Dance, RuneScape arrival");
     }
 
     /** Reports how long this client's own Dance, Dance, RuneScape round will run for -- fired once
@@ -453,14 +390,7 @@ public class ApiClient
      * for the full reasoning behind this shape. */
     public void confirmRepeatAfterMeArrival(String gameId, String playerRsn, String playerToken) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-
-        try (Response resp = post("/v1/games/" + gameId + "/confirm-repeat-after-me-arrival", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Repeat After Me arrival failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerAction("/v1/games/" + gameId + "/confirm-repeat-after-me-arrival", playerRsn, playerToken, "Confirm Repeat After Me arrival");
     }
 
     /** A player's own one-shot self-report that it just reached the course's own real START tile
@@ -469,14 +399,7 @@ public class ApiClient
      * shape. */
     public void confirmRainbowRushArrival(String gameId, String playerRsn, String playerToken) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-
-        try (Response resp = post("/v1/games/" + gameId + "/confirm-rainbow-rush-arrival", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Rainbow Rush arrival failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerAction("/v1/games/" + gameId + "/confirm-rainbow-rush-arrival", playerRsn, playerToken, "Confirm Rainbow Rush arrival");
     }
 
     /** Buys the Golden Gnome standing at (x, y, plane). A free side-action during the local
@@ -503,14 +426,7 @@ public class ApiClient
      * isn't pending for this player, or if it already smashed (the bow window expired first). */
     public void bowToJad(String gameId, String playerRsn, String playerToken) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-
-        try (Response resp = post("/v1/games/" + gameId + "/jad-bow", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Bow to Jad failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerAction("/v1/games/" + gameId + "/jad-bow", playerRsn, playerToken, "Bow to Jad");
     }
 
     /** Resolves a pending Wise Old Man encounter -- action is "steal_coins", "steal_golden_gnome",
@@ -600,14 +516,7 @@ public class ApiClient
      * MINIGAME_COUNTDOWN_STARTED once every seated PLAYER's made this same call. */
     public void confirmMinigameReady(String gameId, String playerRsn, String playerToken) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-
-        try (Response resp = post("/v1/games/" + gameId + "/minigame-ready", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Confirm mini-game ready failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerAction("/v1/games/" + gameId + "/minigame-ready", playerRsn, playerToken, "Confirm mini-game ready");
     }
 
     /** Submits this player's raw result for the currently-active mini-game. The server determines
@@ -669,14 +578,7 @@ public class ApiClient
      * behind this shape. */
     public void confirmSandwichRushArrival(String gameId, String playerRsn, String playerToken) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-
-        try (Response resp = post("/v1/games/" + gameId + "/confirm-sandwich-rush-arrival", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Sandwich Rush arrival failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerAction("/v1/games/" + gameId + "/confirm-sandwich-rush-arrival", playerRsn, playerToken, "Confirm Sandwich Rush arrival");
     }
 
     /** Reports the local player's YES ("True")/NO ("False") emote answering the current True or
@@ -698,14 +600,7 @@ public class ApiClient
     /** Passes the Hot Potato -- only succeeds if the caller is the current holder. */
     public void passHotPotato(String gameId, String playerRsn, String playerToken) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-
-        try (Response resp = post("/v1/games/" + gameId + "/hot-potato-pass", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Pass Hot Potato failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerAction("/v1/games/" + gameId + "/hot-potato-pass", playerRsn, playerToken, "Pass Hot Potato");
     }
 
     /** A player's own one-shot self-report that it just reached the Hot Potato arena -- fired the
@@ -714,14 +609,7 @@ public class ApiClient
      * shape. */
     public void confirmHotPotatoArrival(String gameId, String playerRsn, String playerToken) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-
-        try (Response resp = post("/v1/games/" + gameId + "/confirm-hot-potato-arrival", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Hot Potato arrival failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerAction("/v1/games/" + gameId + "/confirm-hot-potato-arrival", playerRsn, playerToken, "Confirm Hot Potato arrival");
     }
 
     /** A player's own one-shot self-report that it just reached the Turf Wars arena -- fired the
@@ -731,14 +619,7 @@ public class ApiClient
      * the ongoing, repeatable claiming action. */
     public void confirmTurfWarsArrival(String gameId, String playerRsn, String playerToken) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-
-        try (Response resp = post("/v1/games/" + gameId + "/confirm-turf-wars-arrival", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Turf Wars arrival failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerAction("/v1/games/" + gameId + "/confirm-turf-wars-arrival", playerRsn, playerToken, "Confirm Turf Wars arrival");
     }
 
     /** Claims a single Turf Wars tile for the local player's own assigned color -- fired only when
@@ -987,6 +868,26 @@ public class ApiClient
             builder.header("Authorization", "Bearer " + writeKey);
         }
         return http.newCall(builder.build()).execute();
+    }
+
+    /** Shared body for the ~17 one-shot "here's who I am" reports below (arrival/elimination
+     * confirmations, ready-checks, and similar) -- each one used to hand-roll the identical
+     * {@code {"player": playerRsn}} POST + throw-on-failure shape (see
+     * ARCHITECTURE_REVIEW.md's C1). Every caller now gets ApiHttpException uniformly, including the
+     * five (leaveGame/rollDice/bowToJad/confirmMinigameReady/passHotPotato) that used to throw plain
+     * IOException instead -- a caller catching IOException is unaffected either way, since
+     * ApiHttpException already extends it (see that class's own doc, and ARCHITECTURE_REVIEW.md's
+     * C2 for why the old split was worth closing). */
+    private void postPlayerAction(String path, String playerRsn, String playerToken, String errorLabel) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+
+        try (Response resp = post(path, body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), errorLabel + " failed (" + resp.code() + "): " + raw);
+        }
     }
 
     private static String bodyString(Response resp) throws IOException

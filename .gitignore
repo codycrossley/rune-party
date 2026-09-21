@@ -17,7 +17,10 @@ out/
 local-dev.gradle
 
 # Local-reference-only docs -- not meant to be committed (SECURITY.md tracks unpatched gaps by
-# design; ARCHITECTURE_REVIEW.md/DECISIONS.md are working notes, not shipped documentation)
+# design; ARCHITECTURE_REVIEW.md/DECISIONS.md are working notes, not shipped documentation).
+# Dated ARCHITECTURE_REVIEW_*.md snapshots (e.g. ARCHITECTURE_REVIEW_2026-09-18.md) are historical
+# partial-reconstruction copies, same "not meant to be committed" treatment as the live one.
 docs/ARCHITECTURE_REVIEW.md
+docs/ARCHITECTURE_REVIEW_*.md
 docs/DECISIONS.md
 docs/SECURITY.md

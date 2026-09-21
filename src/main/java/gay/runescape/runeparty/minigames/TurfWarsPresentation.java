@@ -100,9 +100,9 @@ public final class TurfWarsPresentation implements MinigamePresentationFeature
     }
 
     /** Called once per real game tick from RunePartyPlugin#onGameTick while Turf Wars is active.
-     * Finds the TURF_WARS_TILE entry (if any) the local player's currently standing on directly
-     * from TileReducer's own already-broadcast snapshot -- the same "the reducer is the one source
-     * of truth" shape every other event-driven mini-game's own onTick already follows. Fires, at
+     * Finds the TURF_WARS_TILE entry (if any) the local player's currently standing on via
+     * RunePartyPlugin#findTileEntryAt -- the one call site that needs a tile's own color, not just
+     * its point (see that method's own doc). Fires, at
      * most once per round, a one-shot confirm-turf-wars-arrival report the instant that first
      * happens (same event-driven arrival gate every other board-swapping mini-game now uses) --
      * this part runs regardless of roundStartAt, since arrival is exactly what the server's own
@@ -123,11 +123,7 @@ public final class TurfWarsPresentation implements MinigamePresentationFeature
         String myColor = teamColors.get(self.toLowerCase(Locale.ROOT));
         if (myColor == null) return; // MINIGAME_TEAMS_ASSIGNED hasn't landed yet this round
 
-        TileReducer.TileEntry tile = null;
-        for (TileReducer.TileEntry entry : plugin.getTileReducer().snapshot())
-        {
-            if ("TURF_WARS_TILE".equals(entry.tileType) && pos.equals(entry.point)) { tile = entry; break; }
-        }
+        TileReducer.TileEntry tile = plugin.findTileEntryAt(pos, "TURF_WARS_TILE");
         if (tile == null) return; // not standing on the arena at all
 
         if (!arrivalConfirmed)
