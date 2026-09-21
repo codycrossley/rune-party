@@ -1059,8 +1059,10 @@ public class RunePartyPlugin extends Plugin
     // False answer is only possible once that round's actually playable
     // (isLocalPlayerAwaitingTrueOrFalseAnswer requires isMinigamePlayable(), which itself requires
     // the countdown to have both started and finished), and a Headbang catch roll is only possible
-    // while Fishing Contest is the active mini-game (isFishingContestActive) -- since exactly one
-    // mini-game (or none) is ever active at a time, no two of these can ever overlap.
+    // once Fishing Contest is both the active mini-game and actually playable
+    // (isLocalPlayerFishingContestEligible, same isMinigamePlayable() requirement as the True or
+    // False answer above) -- since exactly one mini-game (or none) is ever active at a time, no two
+    // of these can ever overlap.
     // Candidate destination tiles for the current roll -- more than one when the roll's path
     // crosses a fork (see TileOverlay#renderTargetArrow, which draws one arrow per candidate).
     // Never null, only ever empty.
@@ -2340,14 +2342,15 @@ public class RunePartyPlugin extends Plugin
 
     /** Rolls one Fishing Contest catch -- called from onAnimationChanged the moment the local
      * player's own Headbang emote finishes (see awaitingHeadbangFinish). Re-checks
-     * isFishingContestActive()/fishingCatchSubmitted here on top of onAnimationChanged's own gate
-     * before arming -- the round could have ended mid-emote. Requires the local player to be
-     * within one tile of the Pond (Chebyshev distance <= 1) and on the same plane, otherwise a
-     * player could stand anywhere on the board and Headbang for free catches. No cooldown beyond
-     * the emote's own animation length, since each catch costs one full Headbang. */
+     * isLocalPlayerFishingContestEligible() here on top of onAnimationChanged's own gate before
+     * arming -- the round could have ended (or, since that check also requires
+     * isMinigamePlayable(), the ready-check/countdown could still be running) mid-emote. Requires
+     * the local player to be within one tile of the Pond (Chebyshev distance <= 1) and on the same
+     * plane, otherwise a player could stand anywhere on the board and Headbang for free catches. No
+     * cooldown beyond the emote's own animation length, since each catch costs one full Headbang. */
     private void performFishingCatchRoll()
     {
-        if (!isFishingContestActive() || fishingCatchSubmitted) return;
+        if (!isLocalPlayerFishingContestEligible()) return;
 
         Player selfPlayer = client.getLocalPlayer();
         WorldPoint pos = selfPlayer == null ? null : selfPlayer.getWorldLocation();
@@ -2724,7 +2727,7 @@ public class RunePartyPlugin extends Plugin
 
         if (anim == AnimationID.EMOTE_DANCE_HEADBANG)
         {
-            if (!isFishingContestActive() || fishingCatchSubmitted) return;
+            if (!isLocalPlayerFishingContestEligible()) return;
             awaitingHeadbangFinish = true;
             return;
         }
@@ -2954,6 +2957,19 @@ public class RunePartyPlugin extends Plugin
     {
         if (!CRAB_RAVE_KEY.equals(minigamePresentation.getKey()) || !isMinigamePlayable()) return false;
         return minigamePresentation.crabRave().isDanceEligible();
+    }
+
+    /** Whether a Headbang emote right now would actually roll a Fishing Contest catch -- requires
+     * isMinigamePlayable() (not just isFishingContestActive()), same "the ready-check has to
+     * actually finish first" gate every other in-round action here respects (see
+     * isLocalPlayerCrabRaveDanceEligible/isLocalPlayerHoldingHotPotato's own doc). This was the one
+     * action in the file that had been checking isFishingContestActive() alone, letting a catch
+     * count during the ready-check screen or the "3...2...1..." countdown, before BEGIN! ever
+     * showed. See onAnimationChanged's own EMOTE_DANCE_HEADBANG case and performFishingCatchRoll,
+     * its two callers. */
+    public boolean isLocalPlayerFishingContestEligible()
+    {
+        return isFishingContestActive() && isMinigamePlayable() && !fishingCatchSubmitted;
     }
 
     /** Whether {@code localPlayer} is standing on {@code rsn}'s tracked board position -- see
