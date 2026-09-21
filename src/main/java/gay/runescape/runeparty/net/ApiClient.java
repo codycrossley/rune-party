@@ -44,7 +44,7 @@ public class ApiClient
         try (Response resp = post("/v1/games", body, null))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Create game failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Create game failed (" + resp.code() + "): " + raw);
             CreateGameResponse parsed = gson.fromJson(raw, CreateGameResponse.class);
             return new CreateGameResult(parsed.gameId, parsed.joinCode, parsed.writeKey, parsed.playerToken);
         }
@@ -75,7 +75,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/start", body, writeKey))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Start game failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Start game failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -93,7 +93,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/confirm-start", body, playerToken))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Confirm start failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm start failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -102,7 +102,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/end", new JsonObject(), writeKey))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("End game failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "End game failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -121,7 +121,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/remove-player", body, writeKey))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Remove player failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Remove player failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -139,7 +139,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/assign-role", body, writeKey))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Assign role failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Assign role failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -418,7 +418,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/purchase-golden-gnome", body, playerToken))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Purchase Golden Gnome failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Purchase Golden Gnome failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -444,7 +444,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/wise-old-man-choose", body, playerToken))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Wise Old Man choice failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Wise Old Man choice failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -458,7 +458,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/item-shop-choose", body, playerToken))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Item Shop choice failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Item Shop choice failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -473,7 +473,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/use-item", body, playerToken))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Use item failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Use item failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -490,7 +490,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/use-item-on-player", body, playerToken))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Use item on player failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Use item on player failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -508,7 +508,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/place-coin-trap", body, playerToken))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Place Coin Trap failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Place Coin Trap failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -531,7 +531,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/submit-minigame-result", body, playerToken))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Submit minigame result failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Submit minigame result failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -552,7 +552,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/collect-coin-rush-coin", body, playerToken))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Collect Coin Rush coin failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Collect Coin Rush coin failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -568,7 +568,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/collect-sandwich-item", body, playerToken))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Collect Sandwich Rush item failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Collect Sandwich Rush item failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -694,7 +694,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/mark-tiles", body, writeKey))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Mark tiles failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Mark tiles failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -716,7 +716,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/unmark-tiles", body, writeKey))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Unmark tiles failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Unmark tiles failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -731,7 +731,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/lock-standard-course", body, writeKey))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Lock standard course failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Lock standard course failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -749,7 +749,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/set-minigame-spawn-point", body, writeKey))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Set mini-game spawn point failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Set mini-game spawn point failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -763,7 +763,7 @@ public class ApiClient
         try (Response resp = post("/v1/games/" + gameId + "/clear-minigame-spawn-point", body, writeKey))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Clear mini-game spawn point failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Clear mini-game spawn point failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -781,7 +781,7 @@ public class ApiClient
         try (Response resp = http.newCall(req).execute())
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Read events failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Read events failed (" + resp.code() + "): " + raw);
             ReadEventsResponse parsed = gson.fromJson(raw, ReadEventsResponse.class);
             if (parsed == null) throw new IOException("Empty response from events endpoint");
             if (parsed.events == null) parsed.events = Collections.emptyList();
@@ -801,7 +801,7 @@ public class ApiClient
         try (Response resp = http.newCall(req).execute())
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Fetch tile types failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Fetch tile types failed (" + resp.code() + "): " + raw);
             TileTypesResponse parsed = gson.fromJson(raw, TileTypesResponse.class);
             if (parsed == null) throw new IOException("Empty response from tile-types endpoint");
             if (parsed.tileTypes == null) parsed.tileTypes = Collections.emptyList();
@@ -819,7 +819,7 @@ public class ApiClient
         try (Response resp = http.newCall(req).execute())
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new IOException("Fetch roster failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Fetch roster failed (" + resp.code() + "): " + raw);
             RosterSnapshot parsed = gson.fromJson(raw, RosterSnapshot.class);
             if (parsed == null) throw new IOException("Empty response from roster endpoint");
             if (parsed.players == null) parsed.players = Collections.emptyList();
@@ -897,7 +897,10 @@ public class ApiClient
 
     /** Thrown when the server responded, but with a non-2xx status -- carries the HTTP status code
      * so a caller can distinguish a definitive rejection (4xx) from something worth retrying (a
-     * network-level IOException, or a 5xx). Not yet thrown by every endpoint here. */
+     * network-level IOException, or a 5xx). Thrown uniformly by every non-2xx check in this class
+     * now (see ARCHITECTURE_REVIEW.md's C2) -- the only remaining plain IOExceptions left are the
+     * handful of "server said 200 but the body was empty/malformed" cases (readEvents/
+     * fetchTileTypes/fetchRoster/checkHostSession), which have no real HTTP status to attach. */
     public static final class ApiHttpException extends IOException
     {
         public final int code;
