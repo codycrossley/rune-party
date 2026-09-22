@@ -255,9 +255,24 @@ public class TileOverlay extends Overlay
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
         renderCommittedCourse(g);
-        coinRushModel.update();
-        sandwichItemModel.update(plugin.getSandwichRushSpawns());
-        runeMatchRuneModel.update(plugin.isRuneMatchActive() ? plugin.getRuneMatchRevealedSpawns() : Collections.emptyMap());
+        // These three models source their own spawn positions directly off real, server-pushed
+        // state (plugin.getCoinRushSpawns/getSandwichRushSpawns/getRuneMatchRevealedSpawns), none
+        // of which is routed through TileReducer's own tile snapshot at all, so
+        // renderCommittedCourse's own tile filter alone never touched them -- they'd otherwise keep
+        // popping onto the course the instant the server reveals them, regardless of whether the
+        // wheel has settled. See isMinigameSelectionPending's own doc.
+        if (isMinigameSelectionPending())
+        {
+            coinRushModel.clear();
+            sandwichItemModel.update(Collections.emptyMap());
+            runeMatchRuneModel.update(Collections.emptyMap());
+        }
+        else
+        {
+            coinRushModel.update();
+            sandwichItemModel.update(plugin.getSandwichRushSpawns());
+            runeMatchRuneModel.update(plugin.isRuneMatchActive() ? plugin.getRuneMatchRevealedSpawns() : Collections.emptyMap());
+        }
 
         if (plugin.isCoursePlacementMode())
         {
@@ -276,27 +291,35 @@ public class TileOverlay extends Overlay
         return null;
     }
 
+    /** Whether a real mini-game has been picked but the client's own selection wheel hasn't
+     * actually settled on it yet. The server's own board swap (and, for Coin Rush/Sandwich Rush/
+     * Rune Match, spawn reveal) is real state that lands on a fixed per-mini-game timer
+     * (BOARD_SWAP_DELAY_SECONDS, 11.3s for every board-swapping mini-game today) started the
+     * instant MINIGAME_STARTED fires server-side -- independent of how long the client's own
+     * "MINIGAME!" banner + spinner sequence actually takes to play out, which varies with whatever
+     * was already queued on the shared turnEffectGate at that exact moment (a previous turn's own
+     * still-settling roll/coin/item effects). Under normal conditions the fixed delay comfortably
+     * outlasts that sequence, but an unusually long queue can let the new arena (or its spawns)
+     * appear on screen before the wheel's own reveal, spoiling which mini-game got picked -- exactly
+     * the race isMinigameSelectionRevealed()'s own doc already describes for Rainbow Rush's course
+     * recolor, generalized here to every board-swapping mini-game's own arena/spawns instead of
+     * leaving each one to rely on its fixed delay alone to usually win the race. Every caller in
+     * this class checks this once and suppresses everything mini-game-specific it owns while it's
+     * true -- see render()'s own model-update calls and renderCommittedCourse's own tile filter. */
+    private boolean isMinigameSelectionPending()
+    {
+        return plugin.getMinigameKey() != null && !plugin.isMinigameSelectionRevealed();
+    }
+
     private void renderCommittedCourse(Graphics2D g)
     {
         List<TileReducer.TileEntry> entries = tileReducer.snapshot();
 
-        // While a real mini-game has been picked but the client's own selection wheel hasn't
-        // actually settled on it yet, suppress every mini-game-only tile type outright. The
-        // server's own board swap is real state that lands on a fixed per-mini-game timer
-        // (BOARD_SWAP_DELAY_SECONDS, 11.3s for every board-swapping mini-game today) started the
-        // instant MINIGAME_STARTED fires server-side -- independent of how long the client's own
-        // "MINIGAME!" banner + spinner sequence actually takes to play out, which varies with
-        // whatever was already queued on the shared turnEffectGate at that exact moment (a
-        // previous turn's own still-settling roll/coin/item effects). Under normal conditions the
-        // fixed delay comfortably outlasts that sequence, but an unusually long queue can let the
-        // new arena appear on screen before the wheel's own reveal, spoiling which mini-game got
-        // picked -- exactly the race isMinigameSelectionRevealed()'s own doc already describes for
-        // Rainbow Rush's course recolor, generalized here to every board-swapping mini-game's own
-        // arena instead of leaving each one to rely on its fixed delay alone to usually win the
-        // race. isMinigameTile (served by /v1/tile-types, already used by RunePartyMapOverlay/
-        // CourseBuilder for the identical "exclude every mini-game-only type" purpose) is what
-        // lets this be one general check instead of a per-tile-type name list.
-        if (plugin.getMinigameKey() != null && !plugin.isMinigameSelectionRevealed())
+        // isMinigameTile (served by /v1/tile-types, already used by RunePartyMapOverlay/
+        // CourseBuilder for the identical "exclude every mini-game-only type" purpose) is what lets
+        // this be one general check instead of a per-tile-type name list -- see
+        // isMinigameSelectionPending's own doc for why this filter exists at all.
+        if (isMinigameSelectionPending())
         {
             entries = filterOutMinigameOnlyTiles(entries);
         }

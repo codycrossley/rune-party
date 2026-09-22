@@ -57,7 +57,14 @@ public class DanceDanceRuneScapeOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (!plugin.isDanceDanceRuneScapeActive()) return null;
+        // isMinigameSelectionRevealed() (not isMinigamePlayable(), which wouldn't clear until the
+        // ready-check countdown finishes) -- the anchor tile is this mini-game's own arena, meant
+        // to be visible from the moment the wheel settles same as every other board-swapping
+        // mini-game's own arena (see MinigameContext#prepare's own doc), just not before then --
+        // this reads directly off findDanceDanceRuneScapeTilePoint() rather than through
+        // TileOverlay's own tile snapshot (see this class's own doc), so TileOverlay's own
+        // isMinigameSelectionPending() filter never covered it.
+        if (!plugin.isDanceDanceRuneScapeActive() || !plugin.isMinigameSelectionRevealed()) return null;
 
         WorldPoint anchor = plugin.findDanceDanceRuneScapeTilePoint();
         if (anchor == null) return null;

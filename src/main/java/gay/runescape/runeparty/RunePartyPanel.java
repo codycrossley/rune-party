@@ -83,6 +83,24 @@ public class RunePartyPanel extends PluginPanel
     private final JButton placeMinigameSpawnBtn = new JButton("Place");
     private final JButton clearMinigameSpawnBtn = new JButton("Clear");
 
+    /** A stand-in Minigame just so the Golden Gnome Awards ceremony can share
+     * minigameSpawnDropdown's own JComboBox&lt;Minigame&gt; typing -- see this class's own
+     * constructor for why it's added there. drawIcon is never actually called: this entry is
+     * never registered in Minigames, so AnnouncementOverlay's real selection wheel (the only
+     * other place a WheelEntry's icon is ever drawn) never sees it -- this dropdown's own renderer
+     * shows getDisplayName() only. */
+    private static final Minigame CEREMONY_ENTRY = new Minigame()
+    {
+        @Override
+        public String getKey() { return RunePartyPlugin.CEREMONY_KEY; }
+
+        @Override
+        public String getDisplayName() { return "Ceremony (Golden Gnome Awards)"; }
+
+        @Override
+        public void drawIcon(Graphics2D g, int x, int y, int size, float alpha) { }
+    };
+
     // Host game settings (LOBBY only) -- turns-per-player, sent along with Start Game
     private static final int DEFAULT_MAX_ROUNDS = 5;
     private final JSpinner maxRoundsSpinner = new JSpinner(new SpinnerNumberModel(DEFAULT_MAX_ROUNDS, 2, 50, 1));
@@ -129,6 +147,14 @@ public class RunePartyPanel extends PluginPanel
         {
             if (RunePartyPlugin.BOARD_SWAPPING_MINIGAME_KEYS.contains(m.getKey())) boardSwappingMinigames.add(m);
         }
+        // The Golden Gnome Awards ceremony (see server-side ceremony.py) isn't a registered
+        // Minigame -- it has no ready-check/countdown/wheel-pick of its own, see that file's own
+        // doc -- but it board-swaps an arena the exact same way (ceremony.py's own
+        // _ceremony_arena_center reads the identical minigameSpawnPoints/arena_offset keyed by
+        // RunePartyPlugin.CEREMONY_KEY), so it belongs in this dropdown too. CEREMONY_ENTRY is
+        // added directly here rather than registered in Minigames, so it can never turn up on
+        // AnnouncementOverlay's real selection wheel.
+        boardSwappingMinigames.add(CEREMONY_ENTRY);
         boardSwappingMinigames.sort(java.util.Comparator.comparing(Minigame::getDisplayName));
         for (Minigame m : boardSwappingMinigames) minigameSpawnDropdown.addItem(m);
         minigameSpawnDropdown.setRenderer((list, value, index, isSelected, cellHasFocus) ->

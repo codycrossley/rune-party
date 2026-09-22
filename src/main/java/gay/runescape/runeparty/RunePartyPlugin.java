@@ -610,6 +610,13 @@ public class RunePartyPlugin extends Plugin
         ARENA_KEY, TURF_WARS_KEY, SANDWICH_RUSH_KEY, JADDY_KEY, HOT_POTATO_KEY, DANCE_DANCE_RUNESCAPE_KEY,
         REPEAT_AFTER_ME_KEY, CRAB_RAVE_KEY, BRUTUS_ATTACK_KEY, FISHING_CONTEST_KEY, RUNE_MATCH_KEY);
 
+    /** Matches the server's own ceremony.py CEREMONY_KEY exactly -- used only for the
+     * minigameSpawnPoints/arena_offset override lookups the Golden Gnome Awards ceremony shares
+     * with every real board-swapping mini-game above (see RunePartyPanel's own CEREMONY_ENTRY).
+     * Not a real mini-game key: there's no ceremony entry in Minigames, and it's deliberately kept
+     * out of BOARD_SWAPPING_MINIGAME_KEYS too, since that set means "the wheel can pick this." */
+    public static final String CEREMONY_KEY = "ceremony";
+
     /** How long AnnouncementOverlay's mini-game final-score recap ("how did everyone do") stays up
      * -- triggered on MINIGAME_ENDED (see triggerMinigameScoreBanner), shown *after* the "MINIGAME
      * OVER!" banner above and *before* the rewards recap below: chained via the same armBanner/
