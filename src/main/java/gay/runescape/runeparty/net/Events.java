@@ -68,6 +68,29 @@ public final class Events
      * actually do anything, so this is silent unless it happened to be the last target standing
      * (see the server's own brutus_target_left_zone doc). */
     public static final String BRUTUS_TARGET_LEFT_ZONE = "BRUTUS_TARGET_LEFT_ZONE";
+    /** Server-only echo of this client's own one-shot confirm-ceremony-arrival call -- never
+     * dispatched on here, ceremony.py's own arrival gate is what actually reacts to it. Same
+     * treatment ARENA_ARRIVAL_CONFIRMED already gets. */
+    public static final String CEREMONY_ARRIVAL_CONFIRMED = "CEREMONY_ARRIVAL_CONFIRMED";
+    /** Announces one bonus Golden Gnome round's own objective -- see CeremonyPresentation, the
+     * only reader. */
+    public static final String CEREMONY_BONUS_OBJECTIVE_ANNOUNCED = "CEREMONY_BONUS_OBJECTIVE_ANNOUNCED";
+    /** Names whoever just won the bonus Golden Gnome round the matching CEREMONY_BONUS_OBJECTIVE_
+     * ANNOUNCED introduced -- see CeremonyPresentation, the only reader. More than one name means a
+     * tie -- everyone tied gets a gnome, not one arbitrarily-chosen winner. */
+    public static final String CEREMONY_BONUS_WINNER_REVEALED = "CEREMONY_BONUS_WINNER_REVEALED";
+    /** One line of the Gnome's own scripted Golden Gnome Awards dialogue -- see
+     * CeremonyPresentation, the only reader. Server-paced (a real sleep between each on that side),
+     * so every seated client renders the same line at the same moment with no click/advance
+     * needed. */
+    public static final String CEREMONY_GNOME_LINE = "CEREMONY_GNOME_LINE";
+    /** Kicks off the Golden Gnome Awards ceremony -- see CeremonyPresentation, the only reader.
+     * Fired in place of GAME_ENDED immediately ending the game, so the whole ceremony plays out
+     * before GAME_ENDED itself finally lands. */
+    public static final String CEREMONY_STARTED = "CEREMONY_STARTED";
+    /** The Golden Gnome Awards' own hand-off to the existing standings-reveal/winner-banner
+     * sequence -- see CeremonyPresentation, the only reader. */
+    public static final String CEREMONY_TRANSITION_TO_WINNER = "CEREMONY_TRANSITION_TO_WINNER";
     public static final String CHANCE_SPACE_TRIGGERED = "CHANCE_SPACE_TRIGGERED";
     /** Echo of the client's own submit-click-click-click-result call -- same "already knows its
      * own final tally" reasoning as FISHING_CATCH_SUBMITTED's own doc just below. */

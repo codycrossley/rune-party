@@ -39,7 +39,7 @@ import java.util.Map;
 public final class RuneMatchRuneModel
 {
     private static final int SCALE = 250;
-    private static final int HOVER_HEAD_CLEARANCE = 20;
+    private static final int HOVER_HEAD_CLEARANCE = 40;
     private static final int DEFAULT_HOVER_HEIGHT = 190;
     private static final int HOVER_BOB_AMPLITUDE = 15;
     private static final double HOVER_BOB_PERIOD_MS = 1400.0;

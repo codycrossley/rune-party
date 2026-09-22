@@ -119,12 +119,16 @@ public final class GoldenGnomePresentation
 
             case Events.GOLDEN_GNOME_WON:
             {
-                // Chance Tile is this event's only cause today -- always deferred (see
-                // GOLDEN_GNOME_LOST's own doc just above), so this case never actually shows
-                // anything itself; kept as a real reason-gated branch (not just dropped) in case a
-                // future non-chance_space cause ever reuses this event.
+                // Chance Tile and the end-game ceremony's own bonus rounds are this event's two
+                // causes today -- both always deferred (see GOLDEN_GNOME_LOST's own doc just above
+                // for chance_space; ceremony_bonus is deferred by CeremonyPresentation's own
+                // handleBonusWinnerRevealed, which shows this exact popup once its flanking Golden
+                // Gnome prop's own vanish animation actually finishes, not the instant this event
+                // lands), so this case never actually shows anything itself for either reason;
+                // kept as a real reason-gated branch (not just dropped) in case a future
+                // undeferred cause ever reuses this event.
                 String reason = Json.safeStr(e.payload, "reason");
-                if (!catchingUp && !"chance_space".equals(reason))
+                if (!catchingUp && !"chance_space".equals(reason) && !"ceremony_bonus".equals(reason))
                 {
                     String rsn = Json.requiredStr(e.payload, type, "player");
                     Integer total = Json.requiredInt(e.payload, type, "goldenGnomeCount");

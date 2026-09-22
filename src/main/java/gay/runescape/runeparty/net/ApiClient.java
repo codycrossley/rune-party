@@ -410,6 +410,15 @@ public class ApiClient
         postPlayerAction("/v1/games/" + gameId + "/confirm-rune-match-arrival", playerRsn, playerToken, "Confirm Rune Match arrival");
     }
 
+    /** A player's own one-shot self-report that it just reached the Golden Gnome Awards ceremony
+     * arena -- fired the instant this client locally detects standing on any CEREMONY_TILE. No
+     * position travels with this call. See confirmArenaArrival's own doc for the full reasoning
+     * behind this shape. */
+    public void confirmCeremonyArrival(String gameId, String playerRsn, String playerToken) throws IOException
+    {
+        postPlayerAction("/v1/games/" + gameId + "/confirm-ceremony-arrival", playerRsn, playerToken, "Confirm ceremony arrival");
+    }
+
     /** Buys the Golden Gnome standing at (x, y, plane). A free side-action during the local
      * player's pending roll, triggered by a right-click menu entry rather than an emote -- doesn't
      * touch pendingRoll or advance the turn, so confirmArrival is still a separate call afterward.

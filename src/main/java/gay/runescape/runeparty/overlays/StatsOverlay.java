@@ -29,8 +29,10 @@ import net.runelite.client.ui.overlay.components.TitleComponent;
  * e.g. CoinRushScoreboardOverlay, TurfWarsScoreOverlay, HotPotatoOverlay, SandwichRushHudOverlay),
  * rather than this persistent HUD being repurposed/hijacked the way it briefly was for Coin Rush.
  * Also hidden outright while the full-screen board map is up (RunePartyPlugin#isMapShowing) --
- * same reasoning AnnouncementOverlay's own map gate gives, just applied here too. Purely a
- * renderer over RosterReducer/RunePartyPlugin -- all the totals it reads are server-mutated, this
+ * same reasoning AnnouncementOverlay's own map gate gives, just applied here too -- and for the
+ * entire end-game ceremony (RunePartyPlugin#isCeremonyStarted), so its own always-current coin/
+ * Golden Gnome totals don't spoil the ceremony's own one-beat-at-a-time bonus/standings reveal.
+ * Purely a renderer over RosterReducer/RunePartyPlugin -- all the totals it reads are server-mutated, this
  * class never computes or guesses one itself. */
 public class StatsOverlay extends Overlay
 {
@@ -74,6 +76,12 @@ public class StatsOverlay extends Overlay
         // Hidden outright for as long as any mini-game is active -- see this class's own doc for
         // why (a mini-game's own dedicated overlay shows whatever it needs to instead).
         if (plugin.isMinigameActive()) return null;
+
+        // Hidden outright for the whole end-game ceremony -- the ceremony's own bonus/final
+        // standings are meant to be revealed one beat at a time (see CeremonyPresentation's own
+        // doc); this HUD's own always-current coin/Golden Gnome totals would spoil that reveal by
+        // just sitting there showing the real numbers the whole time.
+        if (plugin.isCeremonyStarted()) return null;
 
         // seatedPlayers() excludes both spectators and a host-added PLAYER who hasn't run the join
         // flow themselves yet, keeping this HUD to players actually in the game right now.

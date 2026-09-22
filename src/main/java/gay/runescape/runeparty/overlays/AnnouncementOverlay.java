@@ -315,6 +315,12 @@ public class AnnouncementOverlay extends Overlay
         renderMinigameRewardsBanner(g);
         renderRoundCompleteBanner(g);
         renderDiceRoll(g);
+        renderCeremonyTitleBanner(g);
+        renderCeremonyGatherMessage(g);
+        renderGnomeLine(g);
+        renderBonusObjectiveBanner(g);
+        renderBonusSuspenseBanner(g);
+        renderBonusWinnerBanner(g);
         renderGameOverBanner(g);
         renderWinnerIntroBanner(g);
         renderPlaceReveal(g);
@@ -1908,7 +1914,110 @@ public class AnnouncementOverlay extends Overlay
             centerX, y + 66, ROUND_COMPLETE_LINE_HEIGHT, alpha);
     }
 
-    /** First beat of the end-game awards ceremony -- "GAME OVER!". */
+    /** The rainbow "GOLDEN GNOME AWARDS!" title -- the true first beat of the end-game ceremony
+     * now, gated behind whatever the final mini-game's own round-complete/rewards recap was still
+     * reserving (see CeremonyPresentation#handleCeremonyStarted). Same treatment
+     * renderMinigameBanner's own "MINIGAME!" already gets. */
+    private void renderCeremonyTitleBanner(Graphics2D g)
+    {
+        Float alpha = BannerAnim.fadeAlpha(plugin.getCeremonyTitleBannerUntil(), GAME_OVER_TITLE_FADE_MS);
+        if (alpha == null) return;
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 2 - 20;
+
+        g.setFont(MARIO_PARTY_FONT.deriveFont(GAME_OVER_TITLE_SIZE));
+        drawCenteredRainbowText(g, "GOLDEN GNOME AWARDS!", RAINBOW_LETTER_COLORS, centerX, y, alpha);
+    }
+
+    /** Persistent "gather in the arena" message for the Golden Gnome Awards -- same
+     * pulsing-alpha, no-fixed-duration treatment renderArrivalGatherMessage already uses for every
+     * arrival-gated mini-game, just gated on the ceremony's own isCeremonyIntroRevealed() instead
+     * of a minigame key -- NOT the immediate isCeremonyStarted(), so this doesn't stomp over the
+     * final mini-game's own still-playing rewards/round-complete recap (see CeremonyPresentation's
+     * own doc). Hides the instant the Gnome's own first line lands (getGnomeLine() != null). */
+    private void renderCeremonyGatherMessage(Graphics2D g)
+    {
+        if (!plugin.isCeremonyIntroRevealed()) return;
+        if (plugin.getGnomeLine() != null) return;
+
+        long now = System.currentTimeMillis();
+        float alpha = MINIGAME_READY_CHECK_MIN_ALPHA + (1f - MINIGAME_READY_CHECK_MIN_ALPHA) * BannerAnim.pulse(now, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 2;
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE));
+        drawCenteredText(g, "Everyone must gather in the arena!", centerX, y, Color.WHITE, alpha);
+    }
+
+    /** One of the Gnome's own scripted lines, center-screen -- same plain white text-banner
+     * treatment renderWinnerIntroBanner already uses. */
+    private void renderGnomeLine(Graphics2D g)
+    {
+        Float alpha = BannerAnim.fadeAlpha(plugin.getGnomeLineUntil(), WINNER_INTRO_FADE_MS);
+        if (alpha == null) return;
+        String line = plugin.getGnomeLine();
+        if (line == null) return;
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 2;
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE));
+        drawCenteredText(g, line, centerX, y, Color.WHITE, alpha);
+    }
+
+    /** "The &lt;Nth&gt; Golden Gnome is awarded to the player who &lt;description&gt;..." -- one
+     * bonus Golden Gnome round's own objective, see CeremonyPresentation#handleBonusObjectiveAnnounced. */
+    private void renderBonusObjectiveBanner(Graphics2D g)
+    {
+        Float alpha = BannerAnim.fadeAlpha(plugin.getBonusObjectiveBannerUntil(), WINNER_INTRO_FADE_MS);
+        if (alpha == null) return;
+        String description = plugin.getBonusObjectiveDescription();
+        if (description == null) return;
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 2;
+
+        String ordinal = plugin.getBonusObjectiveRoundIndex() == 1 ? "first" : plugin.getBonusObjectiveRoundIndex() == 2 ? "second" : (plugin.getBonusObjectiveRoundIndex() + "th");
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE));
+        drawCenteredText(g, "The " + ordinal + " Golden Gnome is awarded to the player who " + description + "...", centerX, y, Color.WHITE, alpha);
+    }
+
+    /** "The Golden Gnome is awarded to..." -- the suspense beat CeremonyPresentation#
+     * handleBonusWinnerRevealed now inserts before the actual reveal below, same plain
+     * white/no-name-yet cliffhanger treatment renderWinnerSuspenseBanner's own "And the winner
+     * is..." beat already uses for the main end-game reveal. */
+    private void renderBonusSuspenseBanner(Graphics2D g)
+    {
+        Float alpha = BannerAnim.fadeAlpha(plugin.getBonusSuspenseBannerUntil(), WINNER_INTRO_FADE_MS);
+        if (alpha == null) return;
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 2;
+
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE));
+        drawCenteredText(g, "The Golden Gnome is awarded to...", centerX, y, Color.WHITE, alpha);
+    }
+
+    /** "That player is... &lt;name(s)&gt;!" -- the reveal half of a bonus Golden Gnome round, see
+     * CeremonyPresentation#handleBonusWinnerRevealed. More than one name means a tie -- everyone
+     * tied got their own gnome. */
+    private void renderBonusWinnerBanner(Graphics2D g)
+    {
+        Float alpha = BannerAnim.fadeAlpha(plugin.getBonusWinnerBannerUntil(), WINNER_INTRO_FADE_MS);
+        if (alpha == null) return;
+        List<String> winners = plugin.getBonusWinners();
+        if (winners.isEmpty()) return;
+
+        int centerX = client.getCanvasWidth() / 2;
+        int y = client.getCanvasHeight() / 2;
+
+        String names = String.join(" and ", winners);
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE));
+        drawCenteredText(g, names + "!", centerX, y, Color.WHITE, alpha);
+    }
+
     private void renderGameOverBanner(Graphics2D g)
     {
         Float alpha = BannerAnim.fadeAlpha(plugin.getGameOverBannerUntil(), GAME_OVER_TITLE_FADE_MS);

@@ -55,6 +55,7 @@ import gay.runescape.runeparty.overlays.StatsOverlay;
 import gay.runescape.runeparty.overlays.TileOverlay;
 import gay.runescape.runeparty.overlays.TurfWarsScoreOverlay;
 import gay.runescape.runeparty.overlays.WiseOldManDialogueOverlay;
+import gay.runescape.runeparty.overlays.GnomeNpcOverlay;
 import gay.runescape.runeparty.overlays.WiseOldManNpcOverlay;
 import java.awt.Color;
 import java.util.ArrayList;
@@ -690,6 +691,11 @@ public class RunePartyPlugin extends Plugin
     // standing beside his own tile (WiseOldManNpcOverlay, the only reader of either).
     public static final int WISE_OLD_MAN_NPC_ID = 2108;
     public static final int WISE_OLD_MAN_IDLE_ANIMATION_ID = 813;
+
+    // The Golden Gnome Awards' own Gnome (RuneMonk npc id 4233), and the animation he idles on at
+    // the ceremony arena's own center (GnomeNpcOverlay, the only reader of either).
+    public static final int GNOME_NPC_ID = 4233;
+    public static final int GNOME_IDLE_ANIMATION_ID = 2331;
     // Loosely paired with the server's own WISE_OLD_MAN_GNOME_STEAL_COST (app.py), not protocol-
     // coupled -- see WiseOldManDialogueOverlay, the only reader: purely so the dialogue doesn't
     // even offer the "steal a Golden Gnome" option when the local player can't afford it, same
@@ -796,14 +802,61 @@ public class RunePartyPlugin extends Plugin
     public static final long CHANCE_SPACE_ICON_STAGE_DURATION_MS =
         CHANCE_SPACE_TEXT_START_OFFSET_MS + CHANCE_SPACE_TEXT_FADE_MS + CHANCE_SPACE_TEXT_HOLD_MS;
 
-    /** How long AnnouncementOverlay's "GAME OVER!" title card stays up -- the first step of the
-     * end-game ceremony (see triggerGameOverSequence), gated behind scheduleAfterTurnEffects so it
-     * waits out whatever round-complete/rewards recap the final MINIGAME_ENDED just queued --
-     * GAME_ENDED can land in the very same event batch when the last round hits maxRounds -- rather
-     * than stomping over it. */
+    /** How long AnnouncementOverlay's rainbow "GOLDEN GNOME AWARDS!" title stays up -- the true
+     * first step of the end-game ceremony now (see CeremonyPresentation#handleCeremonyStarted),
+     * gated behind scheduleAfterTurnEffects so it waits out whatever round-complete/rewards recap
+     * the final MINIGAME_ENDED just queued -- CEREMONY_STARTED can land shortly after, in
+     * practice, since the server deliberately waits a beat before firing it -- rather than
+     * stomping over that recap. Must stay in lockstep with the server's own
+     * ceremony.py#TITLE_DURATION_SECONDS. */
+    public static final long CEREMONY_TITLE_BANNER_DURATION_MS = 4000;
+
+    /** How long each of the Gnome's own scripted CEREMONY_GNOME_LINE lines stays up -- purely
+     * server-paced from here on (see CeremonyPresentation's own doc), no turnEffectGate chaining
+     * needed. Must stay in lockstep with the server's own ceremony.py#GNOME_LINE_SECONDS. */
+    public static final long CEREMONY_GNOME_LINE_DURATION_MS = 4000;
+
+    /** How long a bonus Golden Gnome round's own objective announcement stays up before the
+     * winner reveal lands -- must stay in lockstep with the server's own
+     * ceremony.py#BONUS_ANNOUNCE_PAUSE_SECONDS. */
+    public static final long CEREMONY_BONUS_ANNOUNCE_DURATION_MS = 5000;
+
+    /** How many bonus Golden Gnome rounds a ceremony can ever run -- matches the server's own
+     * ceremony.py#BONUS_ROUND_COUNT. Used purely to size/index the two flanking Golden Gnome
+     * props (see CeremonyPresentation#flankingGnomeVanishAt/GnomeNpcOverlay's own flankingProps),
+     * one per possible round. */
+    public static final int CEREMONY_MAX_BONUS_ROUNDS = 2;
+
+    /** The purely client-local "The Golden Gnome is awarded to..." suspense beat inserted right
+     * before a bonus round's own winner reveal -- see CeremonyPresentation#handleBonusWinnerRevealed.
+     * Mirrors WINNER_SUSPENSE_DURATION_MS's own "And the winner is..." beat in shape (same "sit on
+     * the answer for a beat before saying it" idea), longer in practice since playtesting found the
+     * bonus rounds needed more room to breathe. No server counterpart needed: exactly like that
+     * existing beat, this is purely a client-side delay inserted after the server's own
+     * CEREMONY_BONUS_WINNER_REVEALED already landed (the client already knows the winner(s), it's
+     * just deliberately not saying so yet). ceremony.py's own BONUS_REVEAL_HOLD_SECONDS must stay
+     * generous enough to cover this plus CEREMONY_BONUS_REVEAL_DURATION_MS plus
+     * GOLDEN_GNOME_MOVE_VANISH_DELAY_MS -- see that constant's own doc. */
+    public static final long CEREMONY_BONUS_SUSPENSE_DURATION_MS = 4000;
+
+    /** How long a bonus Golden Gnome round's own winner reveal stays up, once it actually appears
+     * (see CEREMONY_BONUS_SUSPENSE_DURATION_MS's own doc for the beat that now precedes it). No
+     * longer needs to match the server's own ceremony.py#BONUS_REVEAL_HOLD_SECONDS 1:1 the way it
+     * used to -- that sleep now just needs to be generous enough to cover this whole client-local
+     * chain (suspense + this + the flanking gnome's own GOLDEN_GNOME_MOVE_VANISH_DELAY_MS) before
+     * advancing to the next beat, same "generous real duration" reasoning WINNER_SEQUENCE_SECONDS
+     * already uses server-side. */
+    public static final long CEREMONY_BONUS_REVEAL_DURATION_MS = 4500;
+
+    /** How long AnnouncementOverlay's "GAME OVER!" title card stays up -- now the ceremony's own
+     * true LAST step (see CeremonyPresentation#scheduleGameOverFinale), scheduled behind the
+     * winner reveal/confetti's own reservation instead of preceding everything else the way it
+     * used to. */
     public static final long GAME_OVER_TITLE_DURATION_MS = 3000;
 
-    /** How long "Now it's time to see the winner..." holds before the reveal countdown begins. */
+    /** How long "Now it's time to see the winner..." holds before the reveal countdown begins --
+     * the first step of the *existing* standings/winner-reveal sequence, now triggered by
+     * CEREMONY_TRANSITION_TO_WINNER instead of GAME_ENDED directly. */
     public static final long WINNER_INTRO_DURATION_MS = 3000;
 
     /** How long each "In Nth place..." reveal holds before advancing to the next -- see
@@ -815,9 +868,9 @@ public class RunePartyPlugin extends Plugin
     /** How long "And the winner is..." holds before the winner's own name actually appears. */
     public static final long WINNER_SUSPENSE_DURATION_MS = 2500;
 
-    /** How long the winner's name (plus ConfettiOverlay's burst) stays on screen -- the last step
-     * of the ceremony, so this is also how long it lingers before the table just sits on
-     * GamePhase.ENDED with nothing further scheduled. */
+    /** How long the winner's name (plus ConfettiOverlay's burst) stays on screen, right before
+     * "GAME OVER!" finally appears -- see GAME_OVER_TITLE_DURATION_MS's own doc for why that's no
+     * longer this sequence's first beat. */
     public static final long WINNER_REVEAL_DURATION_MS = 9000;
 
     /** How long ConfettiOverlay's burst actually rains for, kicked off the instant the winner
@@ -875,6 +928,22 @@ public class RunePartyPlugin extends Plugin
      * already uses for the identical "you're out" moment. Played via Actor#createSpotAnim (see
      * triggerSpotAnimOnPlayer), same as TELE_BLOCK_IMPACT_SPOTANIM_ID above. */
     public static final int ARENA_ELIMINATION_SPOTANIM_ID = SpotanimID.FX_VOIDWAKER_IMPACT;
+
+    /** Spotanim played on the game's own overall winner the instant their name is revealed (see
+     * CeremonyPresentation#scheduleWinnerReveal) -- the real "reached level 99" fireworks display,
+     * not a generic placeholder, played via Actor#createSpotAnim (see triggerSpotAnimOnPlayer) so
+     * it follows them the way TELE_BLOCK_IMPACT_SPOTANIM_ID's own impact graphic does.
+     * SpotanimID.LEVELUP_MAX (the even bigger "reached max total level" version of this same
+     * fireworks display) is the natural escalation if this ever reads as too small for the whole
+     * game's own final moment. */
+    public static final int WINNER_FIREWORKS_SPOTANIM_ID = SpotanimID.LEVELUP_MAX;
+
+    /** Height offset (same units Actor#createSpotAnim itself takes) for
+     * WINNER_FIREWORKS_SPOTANIM_ID -- tall enough to burst above the winner's own head rather than
+     * at their feet, matching where the real level-99 fireworks display sits in normal gameplay.
+     * Not measured against the real effect in-client, same caveat every other un-measured
+     * animation-hold/effect constant in this codebase already carries. */
+    public static final int WINNER_FIREWORKS_SPOTANIM_HEIGHT = 150;
 
     /** How long after the "vanish" spotanim starts before the model actually disappears from its
      * old spot -- see TileOverlay#updateGoldenGnomeModels, which force-persists the old point past
@@ -974,6 +1043,7 @@ public class RunePartyPlugin extends Plugin
     private CrabRaveNpcOverlay crabRaveNpcOverlay;
     private CrabRaveHudOverlay crabRaveHudOverlay;
     private WiseOldManNpcOverlay wiseOldManNpcOverlay;
+    private GnomeNpcOverlay gnomeNpcOverlay;
     private WiseOldManDialogueOverlay wiseOldManDialogueOverlay;
     private ItemShopNpcOverlay itemShopNpcOverlay;
     private ItemShopDialogueOverlay itemShopDialogueOverlay;
@@ -1398,6 +1468,9 @@ public class RunePartyPlugin extends Plugin
         wiseOldManNpcOverlay = new WiseOldManNpcOverlay(client, this);
         overlayManager.add(wiseOldManNpcOverlay);
 
+        gnomeNpcOverlay = new GnomeNpcOverlay(client, this);
+        overlayManager.add(gnomeNpcOverlay);
+
         wiseOldManDialogueOverlay = new WiseOldManDialogueOverlay(client, this, mouseManager, spriteManager, rosterReducer);
         overlayManager.add(wiseOldManDialogueOverlay);
         wiseOldManDialogueOverlay.register();
@@ -1480,6 +1553,7 @@ public class RunePartyPlugin extends Plugin
         if (jaddyDuelModel != null) { jaddyDuelModel.clear(); overlayManager.remove(jaddyDuelModel); }
         if (crabRaveNpcOverlay != null) { crabRaveNpcOverlay.clear(); overlayManager.remove(crabRaveNpcOverlay); }
         if (wiseOldManNpcOverlay != null) { wiseOldManNpcOverlay.clear(); overlayManager.remove(wiseOldManNpcOverlay); }
+        if (gnomeNpcOverlay != null) { gnomeNpcOverlay.clear(); overlayManager.remove(gnomeNpcOverlay); }
         if (wiseOldManDialogueOverlay != null) { wiseOldManDialogueOverlay.unregister(); overlayManager.remove(wiseOldManDialogueOverlay); }
         if (itemShopNpcOverlay != null) { itemShopNpcOverlay.clear(); overlayManager.remove(itemShopNpcOverlay); }
         if (itemShopDialogueOverlay != null) { itemShopDialogueOverlay.unregister(); overlayManager.remove(itemShopDialogueOverlay); }
@@ -2370,6 +2444,14 @@ public class RunePartyPlugin extends Plugin
         return findTilesByType("RUNE_MATCH_TILE");
     }
 
+    /** Every currently-marked Golden Gnome Awards ceremony arena tile -- see
+     * CeremonyPresentation#onTick, the only reader: the local client checks its own position
+     * against this set to decide when to fire its own one-shot confirm-ceremony-arrival report. */
+    public List<WorldPoint> findCeremonyArenaTiles()
+    {
+        return findTilesByType("CEREMONY_TILE");
+    }
+
     /** Whether the Arena tile at {@code pos} has reached the server's own permanently-dead red --
      * see ArenaPresentation#onTick, the only reader: the local client checks its own position
      * against this every tick to decide when to self-report confirm-arena-elimination. False for
@@ -2583,6 +2665,11 @@ public class RunePartyPlugin extends Plugin
         {
             minigamePresentation.runeMatch().onTick(selfPlayer);
         }
+
+        // Also independent of the turn engine below -- unlike every check above, this isn't gated
+        // on any isXActive() (there's no minigame key for the ceremony, see CeremonyPresentation's
+        // own doc) -- its own onTick no-ops internally until CEREMONY_STARTED has actually landed.
+        ceremonyPresentation.onTick(selfPlayer);
 
         // Also independent of the turn engine below -- Turf Wars' own one-shot
         // confirm-turf-wars-arrival report AND its own ongoing, repeatable claim-turf-wars-tile
@@ -2857,19 +2944,23 @@ public class RunePartyPlugin extends Plugin
 
     /** Whether the local player could actually roll the dice right now by performing the Spin
      * emote: it's genuinely their turn, no roll is already pending or in flight, no mini-game is
-     * running, they're standing on their own tracked board position (see
-     * isStandingOnTrackedPosition), and their own "<player>'s Turn"/"Your Turn!" banner has
-     * actually had its chance to appear. currentTurnRsn itself is real state, set the instant
-     * TURN_STARTED lands -- but the banner announcing it is cosmetic, deliberately delayed behind
-     * turnEffectGateUntil so it doesn't stomp over e.g. the previous mini-game's rewards/round
-     * recap still showing. Single source of truth for "can I roll right now" -- onAnimationChanged
-     * gates the real roll on this, AnnouncementOverlay#renderSpinHint gates the reminder on the
-     * exact same thing. Reads standingOnTrackedPositionCached rather than resolving the local
-     * player's position live, since this is also called from RunePartyPanel (Swing EDT), and a
-     * direct Player#getWorldLocation() call here would crash off the client thread. */
+     * running, the end-game ceremony hasn't started, they're standing on their own tracked board
+     * position (see isStandingOnTrackedPosition), and their own "<player>'s Turn"/"Your Turn!"
+     * banner has actually had its chance to appear. currentTurnRsn itself is real state, set the
+     * instant TURN_STARTED lands -- but the banner announcing it is cosmetic, deliberately delayed
+     * behind turnEffectGateUntil so it doesn't stomp over e.g. the previous mini-game's rewards/
+     * round recap still showing. isCeremonyStarted() is checked here because currentTurnRsn is
+     * never cleared once the ceremony takes over at the end of the game (GamePhase.ACTIVE
+     * deliberately stays true throughout it, see CeremonyPresentation's own doc) -- without this,
+     * a stale "roll the dice" reminder for whoever had the last real turn would keep reappearing
+     * for the whole ceremony. Single source of truth for "can I roll right now" --
+     * onAnimationChanged gates the real roll on this, AnnouncementOverlay#renderSpinHint gates the
+     * reminder on the exact same thing. Reads standingOnTrackedPositionCached rather than resolving
+     * the local player's position live, since this is also called from RunePartyPanel (Swing EDT),
+     * and a direct Player#getWorldLocation() call here would crash off the client thread. */
     public boolean isLocalPlayerReadyToRoll()
     {
-        if (phase != GamePhase.ACTIVE || pendingRoll || rollRequestSubmitted || minigamePresentation.isActive()) return false;
+        if (phase != GamePhase.ACTIVE || pendingRoll || rollRequestSubmitted || minigamePresentation.isActive() || isCeremonyStarted()) return false;
         if (System.currentTimeMillis() < turnEffectGateUntil) return false;
 
         String self = localRsn();
@@ -2880,8 +2971,9 @@ public class RunePartyPlugin extends Plugin
 
     /** Whether the local player could actually use/place/target an item right now -- the real
      * "ready to act" window the server's own _require_ready_to_act enforces for use-item/
-     * use-item-on-player (app.py): their own turn, no roll pending, no mini-game running, and no
-     * Jad/Wise Old Man encounter open. Deliberately NOT isLocalPlayerReadyToRoll() itself, even
+     * use-item-on-player (app.py): their own turn, no roll pending, no mini-game running, the
+     * end-game ceremony hasn't started (see isLocalPlayerReadyToRoll's own doc on why that's
+     * checked), and no Jad/Wise Old Man encounter open. Deliberately NOT isLocalPlayerReadyToRoll() itself, even
      * though RunePartyPanel's own item buttons used to be gated on that: standingOnTrackedPosition
      * is a real requirement for physically performing the Spin emote to roll, but items have no
      * such requirement server-side at all -- a player who's simply walked a few tiles away from
@@ -2894,7 +2986,7 @@ public class RunePartyPlugin extends Plugin
      * drops that check entirely, the encounter gate has to be explicit instead. */
     public boolean isLocalPlayerReadyToUseItem()
     {
-        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive()) return false;
+        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || isCeremonyStarted()) return false;
         if (jadPresentation.getEncounterRsn() != null || wiseOldManPresentation.getEncounterRsn() != null
             || itemShopPresentation.getEncounterRsn() != null) return false;
         if (System.currentTimeMillis() < turnEffectGateUntil) return false;
@@ -2904,7 +2996,8 @@ public class RunePartyPlugin extends Plugin
     }
 
     /** Whether the local player needs to walk back to their own tracked board position before they
-     * can roll again -- it's their turn, no roll is pending, no mini-game is running, and they're
+     * can roll again -- it's their turn, no roll is pending, no mini-game is running, the end-game
+     * ceremony hasn't started (see isLocalPlayerReadyToRoll's own doc), and they're
      * not currently standing where TURN_STARTED left them (e.g. they wandered off toward the
      * Golden Gnome, or just walked off after landing last round). Mirrors TileOverlay#
      * renderReturnToPositionArrow's own gating (the in-world "Return Here!" arrow) for
@@ -2914,7 +3007,7 @@ public class RunePartyPlugin extends Plugin
      * in edge cases, same tolerance every other cached-vs-live check in this file already accepts. */
     public boolean isLocalPlayerAwaitingReturnToPosition()
     {
-        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive()) return false;
+        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || isCeremonyStarted()) return false;
         String self = localRsn();
         if (self == null || !self.equalsIgnoreCase(currentTurnRsn)) return false;
         return !standingOnTrackedPositionCached;
@@ -2929,7 +3022,7 @@ public class RunePartyPlugin extends Plugin
      * and nobody's rolled" is the whole story either way. */
     public boolean isAwaitingSomeonesRoll()
     {
-        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive()) return false;
+        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || isCeremonyStarted()) return false;
         if (System.currentTimeMillis() < turnEffectGateUntil) return false;
         return currentTurnRsn != null;
     }
@@ -3422,11 +3515,33 @@ public class RunePartyPlugin extends Plugin
                 break;
 
             case Events.GAME_ENDED:
+                // Just the real status flip now -- the whole Golden Gnome Awards ceremony (and the
+                // standings/winner reveal it hands off to) has already played out by the time this
+                // lands, driven by its own earlier CEREMONY_STARTED/CEREMONY_TRANSITION_TO_WINNER
+                // events (see CeremonyPresentation's own doc for why GAME_ENDED itself no longer
+                // triggers anything).
                 phase = GamePhase.ENDED;
-                if (!catchingUp)
-                {
-                    ceremonyPresentation.triggerGameOverSequence();
-                }
+                break;
+
+            case Events.CEREMONY_STARTED:
+                ceremonyPresentation.handleCeremonyStarted(catchingUp);
+                break;
+
+            case Events.CEREMONY_GNOME_LINE:
+                ceremonyPresentation.handleGnomeLine(Json.requiredStr(e.payload, type, "line"), catchingUp);
+                break;
+
+            case Events.CEREMONY_BONUS_OBJECTIVE_ANNOUNCED:
+                ceremonyPresentation.handleBonusObjectiveAnnounced(
+                    Json.requiredStr(e.payload, type, "displayName"), Json.requiredStr(e.payload, type, "description"), catchingUp);
+                break;
+
+            case Events.CEREMONY_BONUS_WINNER_REVEALED:
+                ceremonyPresentation.handleBonusWinnerRevealed(Json.safeStrList(e.payload, "winners"), catchingUp);
+                break;
+
+            case Events.CEREMONY_TRANSITION_TO_WINNER:
+                ceremonyPresentation.handleCeremonyTransitionToWinner(catchingUp);
                 break;
 
             case Events.PLAYER_READY:
@@ -4596,6 +4711,19 @@ public class RunePartyPlugin extends Plugin
     public String getJaddyResolvedLocalZoneColor() { return minigamePresentation.jaddy().getResolvedLocalZoneColor(); }
     // Delegating facade -- CeremonyPresentation owns the actual state. Every name/signature below
     // is unchanged, so no external caller (AnnouncementOverlay, ConfettiOverlay) needs to change.
+    public boolean isCeremonyStarted() { return ceremonyPresentation.isCeremonyStarted(); }
+    public boolean isCeremonyIntroRevealed() { return ceremonyPresentation.isCeremonyIntroRevealed(); }
+    public boolean isCeremonyFlankingGnomeVisible(int index) { return ceremonyPresentation.isFlankingGnomeVisible(index); }
+    public long getCeremonyTitleBannerUntil() { return ceremonyPresentation.getCeremonyTitleBannerUntil(); }
+    public long getGnomeLineUntil() { return ceremonyPresentation.getGnomeLineUntil(); }
+    public String getGnomeLine() { return ceremonyPresentation.getGnomeLine(); }
+    public long getBonusObjectiveBannerUntil() { return ceremonyPresentation.getBonusObjectiveBannerUntil(); }
+    public long getBonusSuspenseBannerUntil() { return ceremonyPresentation.getBonusSuspenseBannerUntil(); }
+    public int getBonusObjectiveRoundIndex() { return ceremonyPresentation.getBonusObjectiveRoundIndex(); }
+    public String getBonusObjectiveDisplayName() { return ceremonyPresentation.getBonusObjectiveDisplayName(); }
+    public String getBonusObjectiveDescription() { return ceremonyPresentation.getBonusObjectiveDescription(); }
+    public long getBonusWinnerBannerUntil() { return ceremonyPresentation.getBonusWinnerBannerUntil(); }
+    public List<String> getBonusWinners() { return ceremonyPresentation.getBonusWinners(); }
     public List<RosterReducer.RosterEntry> getGameOverStandings() { return ceremonyPresentation.getGameOverStandings(); }
     public long getGameOverBannerUntil() { return ceremonyPresentation.getGameOverBannerUntil(); }
     public long getWinnerIntroBannerUntil() { return ceremonyPresentation.getWinnerIntroBannerUntil(); }

@@ -274,10 +274,11 @@ public final class MinigamePresentation
 
     /** The non-completedRounds half of MINIGAME_ENDED -- RunePartyPlugin's hybrid case increments
      * completedRounds itself (core whole-game progress) before calling this for the rest: clearing
-     * every mini-game field, the rewards recap, and (skipped on the game's final round, since
-     * triggerGameOverSequence reveals the same standings itself right after) the round-complete
-     * recap. {@code maxRounds}/{@code completedRoundsAfterIncrement} are passed in rather than read
-     * off the plugin directly since they're core fields this presenter doesn't otherwise touch. */
+     * every mini-game field, the rewards recap, and (skipped on the game's final round, since the
+     * Golden Gnome Awards ceremony -- CeremonyPresentation#triggerWinnerRevealSequence -- reveals
+     * the same standings itself later, once that whole ceremony finishes) the round-complete recap.
+     * {@code maxRounds}/{@code completedRoundsAfterIncrement} are passed in rather than read off
+     * the plugin directly since they're core fields this presenter doesn't otherwise touch. */
     public void handleMinigameEnded(JsonObject payload, boolean catchingUp, int maxRounds, int completedRoundsAfterIncrement)
     {
         // Reads minigameKey before anything below touches it -- see MinigamePresentationFeature#
@@ -311,10 +312,10 @@ public final class MinigamePresentation
                 triggerMinigameScoreBanner(payload);
             }
             triggerMinigameRewardsBanner(payload);
-            // Skipped on the game's last round -- GAME_ENDED fires right behind this same
-            // MINIGAME_ENDED and triggerGameOverSequence reveals the very same standings itself,
-            // dramatically, one place at a time. Showing the plain "Current Standings" recap first
-            // would spoil that reveal.
+            // Skipped on the game's last round -- the Golden Gnome Awards ceremony (kicked off
+            // server-side once this round's own MINIGAME_ENDED lands, see CEREMONY_STARTED) ends
+            // in that same dramatic, one-place-at-a-time standings reveal itself, later. Showing
+            // the plain "Current Standings" recap first would spoil that reveal.
             if (maxRounds <= 0 || completedRoundsAfterIncrement < maxRounds)
             {
                 scheduleRoundCompleteBanner();
@@ -425,8 +426,8 @@ public final class MinigamePresentation
      * not the one that just finished (completedRounds is already incremented by the time this
      * runs, so getCurrentRound() here is the same "upcoming round" number the next TURN_STARTED's
      * own banner and StatsOverlay's live "ROUND x/y" line would show). Not called at all for the
-     * game's final round -- see handleMinigameEnded -- since triggerGameOverSequence reveals those
-     * same standings itself right after, and this plain recap would spoil that. */
+     * game's final round -- see handleMinigameEnded -- since the Golden Gnome Awards ceremony
+     * reveals those same standings itself later, and this plain recap would spoil that. */
     private void scheduleRoundCompleteBanner()
     {
         plugin.armBanner(roundCompleteBanner, RunePartyPlugin.ROUND_COMPLETE_BANNER_DURATION_MS, plugin::getCurrentRound, true);

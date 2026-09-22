@@ -389,7 +389,14 @@ public final class DanceDanceRuneScapePresentation implements MinigamePresentati
         WorldPoint arrivalPos = selfPlayer != null ? selfPlayer.getWorldLocation() : null;
         arrivalGate.confirmIfMatched(arrivalAnchor != null && arrivalAnchor.equals(arrivalPos));
 
-        if (roundStartAt == 0 || sequence == null || sequenceTicks == 0) return;
+        // submitted is also checked here, not just at the bottom where it's set -- without this,
+        // the sequence keeps advancing (tickCount incrementing, tiles kept lighting up, score kept
+        // climbing) for however long this round stays active server-side after this client's own
+        // one-shot submission already fired, which can be a real, visible while if another seated
+        // player is slower to finish (bounded by the server's own SUBMISSION_GRACE_SECONDS). Reads
+        // as the dance sequence looping forever, even though only the original submitted score was
+        // ever actually sent -- see this method's own doc for the rest of the one-shot shape.
+        if (roundStartAt == 0 || sequence == null || sequenceTicks == 0 || submitted) return;
 
         int loopNumber = tickCount / sequenceTicks;
         int tickInLoop = tickCount % sequenceTicks;

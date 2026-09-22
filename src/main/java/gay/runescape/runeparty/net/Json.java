@@ -81,6 +81,22 @@ public final class Json
         return out;
     }
 
+    /** Same shape as {@link #safeIntList}, for a JSON array of strings -- e.g.
+     * CEREMONY_BONUS_WINNER_REVEALED's own "winners" (more than one entry means a tie). Never
+     * null, only empty. */
+    public static List<String> safeStrList(JsonObject o, String key)
+    {
+        if (o == null || !o.has(key) || o.get(key).isJsonNull() || !o.get(key).isJsonArray()) return Collections.emptyList();
+        JsonArray arr = o.get(key).getAsJsonArray();
+        List<String> out = new ArrayList<>(arr.size());
+        for (int i = 0; i < arr.size(); i++)
+        {
+            try { out.add(arr.get(i).getAsString()); }
+            catch (Exception ignored) { /* skip malformed entry */ }
+        }
+        return out;
+    }
+
     /** Same shape as {@link #safeIntList}, returning a primitive array instead. One malformed
      * element discards the whole array rather than skipping just that entry (unlike
      * safeIntList). */
