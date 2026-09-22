@@ -146,12 +146,15 @@ public class TileOverlay extends Overlay
     // identical to a random non-target one during the challenge window (see RepeatAfterMeTile's
     // own doc on why that matters) -- only the reveal below actually resolves correct/incorrect.
     private static final Color REPEAT_AFTER_ME_PICKED_OUTLINE_COLOR = new Color(255, 255, 255, 220);
-    // The reveal's own two fills, shown once a round's own deadline passes (see RunePartyPlugin#
-    // isRepeatAfterMeRevealActive) for every cell the local player attempted -- green for one that
-    // was actually a target, red for one that wasn't. Never shown for a cell that was never
-    // attempted at all, correct or not (see renderRepeatAfterMeTile).
-    private static final Color REPEAT_AFTER_ME_CORRECT_FILL_COLOR = new Color(60, 200, 90, 170);
-    private static final Color REPEAT_AFTER_ME_INCORRECT_FILL_COLOR = new Color(220, 60, 60, 170);
+    // The reveal's own two outline colors, shown once a round's own deadline passes (see
+    // RunePartyPlugin#isRepeatAfterMeRevealActive) for every cell the local player attempted --
+    // the same REPEAT_AFTER_ME_PICKED_OUTLINE_COLOR white outline from the still-open challenge
+    // simply recolors in place (see renderRepeatAfterMeTile) rather than disappearing behind a
+    // fill, so a player can see exactly which of their own picks were right without losing track
+    // of what they actually picked. Green for one that was actually a target, red for one that
+    // wasn't. Never shown for a cell that was never attempted at all, correct or not.
+    private static final Color REPEAT_AFTER_ME_CORRECT_OUTLINE_COLOR = new Color(60, 200, 90, 230);
+    private static final Color REPEAT_AFTER_ME_INCORRECT_OUTLINE_COLOR = new Color(220, 60, 60, 230);
     // Crab Rave's own arena outline -- a hot pink, matching CrabRaveTile's own served color_hex
     // (#E91E8C), so the arena floor's outline and the tile-type legend agree.
     private static final Color CRAB_RAVE_ARENA_OUTLINE_COLOR = new Color(233, 30, 140, 190);
@@ -276,6 +279,28 @@ public class TileOverlay extends Overlay
     private void renderCommittedCourse(Graphics2D g)
     {
         List<TileReducer.TileEntry> entries = tileReducer.snapshot();
+
+        // While a real mini-game has been picked but the client's own selection wheel hasn't
+        // actually settled on it yet, suppress every mini-game-only tile type outright. The
+        // server's own board swap is real state that lands on a fixed per-mini-game timer
+        // (BOARD_SWAP_DELAY_SECONDS, 11.3s for every board-swapping mini-game today) started the
+        // instant MINIGAME_STARTED fires server-side -- independent of how long the client's own
+        // "MINIGAME!" banner + spinner sequence actually takes to play out, which varies with
+        // whatever was already queued on the shared turnEffectGate at that exact moment (a
+        // previous turn's own still-settling roll/coin/item effects). Under normal conditions the
+        // fixed delay comfortably outlasts that sequence, but an unusually long queue can let the
+        // new arena appear on screen before the wheel's own reveal, spoiling which mini-game got
+        // picked -- exactly the race isMinigameSelectionRevealed()'s own doc already describes for
+        // Rainbow Rush's course recolor, generalized here to every board-swapping mini-game's own
+        // arena instead of leaving each one to rely on its fixed delay alone to usually win the
+        // race. isMinigameTile (served by /v1/tile-types, already used by RunePartyMapOverlay/
+        // CourseBuilder for the identical "exclude every mini-game-only type" purpose) is what
+        // lets this be one general check instead of a per-tile-type name list.
+        if (plugin.getMinigameKey() != null && !plugin.isMinigameSelectionRevealed())
+        {
+            entries = filterOutMinigameOnlyTiles(entries);
+        }
+
         // Computed once per frame, not per-tile -- see renderRepeatAfterMeTile, the only reader,
         // which would otherwise re-scan the whole tile snapshot 16 times a frame (once per cell).
         List<WorldPoint> repeatAfterMeTiles = plugin.isRepeatAfterMeActive()
@@ -346,6 +371,26 @@ public class TileOverlay extends Overlay
         tableModel.update(entries);
         pondModel.update(entries);
         renderRouteLines(g, entries);
+    }
+
+    /** Drops every entry whose own served tile-type catalog entry (plugin.getTileTypeCatalog(),
+     * the exact same isMinigameTile flag RunePartyMapOverlay#buildLegendRows/CourseBuilder already
+     * use for their own "exclude every mini-game-only type" filtering) says is mini-game-only --
+     * see renderCommittedCourse's own call site doc for why. An unrecognized tileType (there
+     * shouldn't be one, but the catalog fetch could theoretically still be in flight) is kept
+     * rather than dropped, so a genuinely-missing lookup fails open to "just render it normally"
+     * instead of silently hiding real course tiles. */
+    private List<TileReducer.TileEntry> filterOutMinigameOnlyTiles(List<TileReducer.TileEntry> entries)
+    {
+        Map<String, ApiClient.TileTypeOut> catalog = plugin.getTileTypeCatalog();
+        List<TileReducer.TileEntry> filtered = new ArrayList<>(entries.size());
+        for (TileReducer.TileEntry entry : entries)
+        {
+            ApiClient.TileTypeOut type = catalog.get(entry.tileType);
+            if (type != null && type.isMinigameTile) continue;
+            filtered.add(entry);
+        }
+        return filtered;
     }
 
     /** Draws the whole Fishing Contest platform's FISHING_TILE block as one merged-area outline,
@@ -974,20 +1019,23 @@ public class TileOverlay extends Overlay
      * getRepeatAfterMeTargetIndices/getRepeatAfterMeAttemptedIndices:
      * <ol>
      * <li>Sneak peek (isRepeatAfterMePeekActive): this round's own target cells fill
-     * REPEAT_AFTER_ME_PEEK_FILL_COLOR -- deliberately the only phase that ever reveals which cells
-     * are actually correct, since that's the whole point of a peek.</li>
+     * REPEAT_AFTER_ME_PEEK_FILL_COLOR -- deliberately the only phase before the reveal that shows
+     * which cells are actually correct, since that's the whole point of a peek.</li>
      * <li>Still-open challenge (neither peek nor reveal): any attempted cell gets a plain white
-     * outline (REPEAT_AFTER_ME_PICKED_OUTLINE_COLOR), fill only, no right/wrong tell either way --
+     * outline (REPEAT_AFTER_ME_PICKED_OUTLINE_COLOR), no fill, no right/wrong tell either way --
      * see RepeatAfterMeTile's own doc on why revealing correctness mid-round would defeat the whole
      * memory game.</li>
-     * <li>Reveal (isRepeatAfterMeRevealActive, once this round's own deadline passes): every
-     * attempted cell fills green (REPEAT_AFTER_ME_CORRECT_FILL_COLOR) if it was actually a target,
-     * red (REPEAT_AFTER_ME_INCORRECT_FILL_COLOR) otherwise.</li>
+     * <li>Reveal (isRepeatAfterMeRevealActive, once this round's own deadline passes): every target
+     * cell fills REPEAT_AFTER_ME_PEEK_FILL_COLOR again (the answer key reappears, attempted or
+     * not), and every attempted cell's own white outline from the challenge phase above simply
+     * recolors in place -- green (REPEAT_AFTER_ME_CORRECT_OUTLINE_COLOR) if it was actually a
+     * target, red (REPEAT_AFTER_ME_INCORRECT_OUTLINE_COLOR) if it wasn't -- rather than
+     * disappearing behind a fill, so a player can still see exactly which tiles they picked
+     * alongside which ones were actually right.</li>
      * </ol>
-     * A cell that was never attempted at all gets nothing outside the peek, just the merged
+     * A cell that was never attempted and never a target gets nothing in any phase, just the merged
      * REPEAT_AFTER_ME_ARENA_OUTLINE_COLOR outline every cell already shares (see
-     * renderArenaOutline). No per-tile outline on the fill phases either, same "one merged zone
-     * outline instead" shape renderTurfWarsTile uses. */
+     * renderArenaOutline). */
     private void renderRepeatAfterMeTile(Graphics2D g, TileReducer.TileEntry entry, List<WorldPoint> repeatAfterMeTiles)
     {
         Integer index = RepeatAfterMePresentation.indexForPoint(repeatAfterMeTiles, entry.point);
@@ -1002,19 +1050,31 @@ public class TileOverlay extends Overlay
             return;
         }
 
-        if (!plugin.getRepeatAfterMeAttemptedIndices().contains(index)) return;
+        boolean attempted = plugin.getRepeatAfterMeAttemptedIndices().contains(index);
 
         if (plugin.isRepeatAfterMeRevealActive())
         {
-            boolean correct = plugin.getRepeatAfterMeTargetIndices().contains(index);
-            fillArenaCell(g, entry.point, correct ? REPEAT_AFTER_ME_CORRECT_FILL_COLOR : REPEAT_AFTER_ME_INCORRECT_FILL_COLOR);
+            boolean isTarget = plugin.getRepeatAfterMeTargetIndices().contains(index);
+            // The answer key reappears -- same yellow fill the sneak peek used, shown again for
+            // every real target regardless of whether the local player actually picked it.
+            if (isTarget)
+            {
+                fillArenaCell(g, entry.point, REPEAT_AFTER_ME_PEEK_FILL_COLOR);
+            }
+            // The white "you picked this" outline from the challenge phase stays in place and just
+            // recolors, rather than being replaced by a fill -- see this method's own class doc.
+            if (attempted)
+            {
+                renderOutlinedTile(g, entry.point, isTarget ? REPEAT_AFTER_ME_CORRECT_OUTLINE_COLOR : REPEAT_AFTER_ME_INCORRECT_OUTLINE_COLOR, SOLID_STROKE);
+            }
+            return;
         }
-        else
-        {
-            // Round's still open -- plain white outline, no fill, no right/wrong tell (see
-            // REPEAT_AFTER_ME_PICKED_OUTLINE_COLOR's own doc).
-            renderOutlinedTile(g, entry.point, REPEAT_AFTER_ME_PICKED_OUTLINE_COLOR, SOLID_STROKE);
-        }
+
+        if (!attempted) return;
+
+        // Round's still open -- plain white outline, no fill, no right/wrong tell (see
+        // REPEAT_AFTER_ME_PICKED_OUTLINE_COLOR's own doc).
+        renderOutlinedTile(g, entry.point, REPEAT_AFTER_ME_PICKED_OUTLINE_COLOR, SOLID_STROKE);
     }
 
     /** Fill-only cell render shared by renderRepeatAfterMeTile and renderCrabRaveTile -- no
