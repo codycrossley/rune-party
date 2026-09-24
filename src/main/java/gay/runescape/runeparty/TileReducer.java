@@ -136,17 +136,42 @@ public class TileReducer
         return Collections.unmodifiableList(new ArrayList<>(tiles.values()));
     }
 
+    // Backs tileAtIndex() below with a pathIndex -> TileEntry map, rebuilt only when revision()
+    // has moved since the last build -- see that field's own doc. tileAtIndex used to be "only
+    // ever called once per dice roll" (see that method's own now-corrected doc), but TileOverlay's
+    // own renderRouteLines calls it once per outgoing edge of every course tile, every single one
+    // of the ~50 frames/sec render() runs, for as long as the ordinary course is showing (which is
+    // most of a game) -- turning what should be one O(n) pass into an O(n^2) one. Written
+    // payload-then-flag and read flag-then-payload (the standard lock-free safe-publication order)
+    // since TileReducer is read from the client thread but written from whichever thread applies
+    // incoming events -- a reader that observes the new pathIndexCacheRevision is then guaranteed
+    // to observe the pathIndexCache write that preceded it, so no external synchronization is
+    // needed. A benign race (two threads rebuilding concurrently on the same stale revision) just
+    // means one rebuild's result gets overwritten by the other -- both are equally correct, so nothing
+    // is lost beyond one redundant scan.
+    private volatile Map<Integer, TileEntry> pathIndexCache = Collections.emptyMap();
+    private volatile long pathIndexCacheRevision = -1;
+
     /** The course tile at a given path position, or null if nothing is marked with that index
      * (an incomplete/gappy course -- the turn engine should treat that as "can't resolve this
-     * roll" rather than guessing). Course sizes are small (tens to low hundreds of tiles) and this
-     * is only ever called once per dice roll, so a linear scan needs no supporting index. */
+     * roll" rather than guessing). Backed by pathIndexCache above -- O(1) amortized, rebuilt only
+     * when the tile set has actually changed, not a fresh linear scan on every call. */
     public TileEntry tileAtIndex(int pathIndex)
     {
-        for (TileEntry e : tiles.values())
+        long rev = revision.get();
+        long cachedRev = pathIndexCacheRevision; // read the flag first
+        Map<Integer, TileEntry> cache = pathIndexCache; // then the payload it guards
+        if (rev != cachedRev)
         {
-            if (e.pathIndex != null && e.pathIndex == pathIndex) return e;
+            cache = new HashMap<>();
+            for (TileEntry e : tiles.values())
+            {
+                if (e.pathIndex != null) cache.put(e.pathIndex, e);
+            }
+            pathIndexCache = cache; // publish the payload...
+            pathIndexCacheRevision = rev; // ...then the flag that says it's safe to trust
         }
-        return null;
+        return cache.get(pathIndex);
     }
 
     /** The path index of whatever course tile sits at {@code wp}, or null if {@code wp} isn't a

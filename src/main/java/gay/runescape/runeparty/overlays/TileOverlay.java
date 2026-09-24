@@ -1400,20 +1400,42 @@ public class TileOverlay extends Overlay
         return path;
     }
 
+    // Memoizes Color.decode() by hex string -- resolveColor/defaultColorFor below used to
+    // re-parse and re-allocate a Color from the same fixed hex string on every call, for every
+    // tile, every single one of the ~50 frames/sec render() runs: a tile's own color only changes
+    // on a TILE_MARKED event, and a tile-type's own default color (fetched once from the server's
+    // catalog at startup) essentially never changes at all. decode(hex) is a pure function of hex
+    // alone, so caching by hex string is always correct regardless of which tile/tileType asked for
+    // it -- only the successful decode is cached; a malformed hex's own NumberFormatException still
+    // propagates to the caller uncached every time (exceptional and rare enough not to matter,
+    // and caching a *failure* would need to know which tileType's own fallback color to associate
+    // it with, which the hex string alone doesn't carry). Client-thread-only, like the rest of this
+    // overlay, so a plain HashMap needs no synchronization.
+    private final Map<String, Color> decodedColorCache = new HashMap<>();
+
+    private Color decodeColor(String hex)
+    {
+        Color cached = decodedColorCache.get(hex);
+        if (cached != null) return cached;
+        Color decoded = Color.decode(hex);
+        decodedColorCache.put(hex, decoded);
+        return decoded;
+    }
+
     /** Looks up this tile type's color in the served catalog rather than a hardcoded table --
      * falls back to COLOR_UNKNOWN_TYPE for a type the catalog doesn't have (yet, or ever). */
     private Color defaultColorFor(String tileType)
     {
         ApiClient.TileTypeOut t = plugin.getTileTypeCatalog().get(tileType);
         if (t == null || t.colorHex == null) return COLOR_UNKNOWN_TYPE;
-        try { return Color.decode(t.colorHex); }
+        try { return decodeColor(t.colorHex); }
         catch (NumberFormatException e) { return COLOR_UNKNOWN_TYPE; }
     }
 
     private Color resolveColor(String hex, String tileType)
     {
         if (hex == null || hex.isBlank()) return defaultColorFor(tileType);
-        try { return Color.decode(hex); }
+        try { return decodeColor(hex); }
         catch (NumberFormatException e) { return defaultColorFor(tileType); }
     }
 }
