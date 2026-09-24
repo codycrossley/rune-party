@@ -10,6 +10,7 @@ import net.runelite.api.coords.WorldPoint;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class TileReducer
 {
@@ -37,6 +38,21 @@ public class TileReducer
     }
 
     private final ConcurrentHashMap<String, TileEntry> tiles = new ConcurrentHashMap<>();
+    // Bumped on every real mutation (applyMark/applyUnmark/reset) -- lets a per-frame render() path
+    // (e.g. TileOverlay's own model-sync calls, RunePartyPlugin#getTurfWarsTileCounts) cheaply tell
+    // whether the tile set has actually changed since it last did real work, instead of redoing that
+    // work unconditionally on every one of the ~50 frames/sec render() runs even though the tiles
+    // themselves only ever change on a TILE_MARKED/TILE_UNMARKED/TILES_MARKED/TILES_UNMARKED event
+    // (at most once per 600ms game tick). Never reset to 0 -- only ever compared for inequality, so
+    // wraparound (not reachable in practice) is the only thing that would matter and even that just
+    // costs one extra unnecessary recompute, not a correctness bug.
+    private final AtomicLong revision = new AtomicLong();
+
+    /** See {@link #revision}'s own doc. */
+    public long revision()
+    {
+        return revision.get();
+    }
 
     public void apply(ApiClient.EventOut e)
     {
@@ -86,6 +102,7 @@ public class TileReducer
 
         tiles.put(key(x, y, plane, tileType),
             new TileEntry(new WorldPoint(x, y, plane), tileType, color, orientation, pathIndex, nextIndices));
+        revision.incrementAndGet();
     }
 
     private void applyUnmark(JsonObject tile)
@@ -105,11 +122,13 @@ public class TileReducer
             String prefix = x + ":" + y + ":" + plane + ":";
             tiles.keySet().removeIf(k -> k.startsWith(prefix));
         }
+        revision.incrementAndGet();
     }
 
     public void reset()
     {
         tiles.clear();
+        revision.incrementAndGet();
     }
 
     public List<TileEntry> snapshot()

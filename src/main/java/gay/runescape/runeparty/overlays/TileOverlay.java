@@ -210,6 +210,23 @@ public class TileOverlay extends Overlay
     private final RuneMatchRuneModel runeMatchRuneModel;
     private final BalloonModel balloonModel;
 
+    // Guards goldenGnomeModel/coinTrapModel/arenaFireModel/tableModel/pondModel's own update()
+    // calls below (see renderCommittedCourse) against redoing their SceneObjectSet diff/spawn work
+    // on every single one of the ~50 frames/sec render() runs -- once a RuneLiteObject is spawned
+    // and positioned, the game engine itself keeps drawing it every frame with zero further plugin
+    // involvement, so there's nothing to redo until the tiles these five actually key off of
+    // (GOLDEN_GNOME_TILE/COIN_TRAP_TILE/ARENA_TILE/table tiles/POND_TILE) really change -- at most
+    // once per TILE_MARKED/TILES_MARKED event, never once per rendered frame. lastModelSyncRevision
+    // pairs with TileReducer's own revision() (see that field's own doc); lastModelSyncPending pairs
+    // with isMinigameSelectionPending() specifically because that flag alone (a fixed timer, not a
+    // tile mutation) can flip the FILTERED `entries` these five actually see -- via
+    // filterOutMinigameOnlyTiles -- without tileReducer's own revision changing at all, so caching
+    // on revision alone would miss exactly the moment the selection wheel settles and a
+    // mini-game's own decorated tiles should first appear. -1/false so the very first render() call
+    // always runs the real update once, seeding both models and the cache.
+    private long lastModelSyncRevision = -1;
+    private boolean lastModelSyncPending = false;
+
     public TileOverlay(Client client, RunePartyConfig config, RunePartyPlugin plugin, TileReducer tileReducer)
     {
         this.client = client;
@@ -245,6 +262,7 @@ public class TileOverlay extends Overlay
             clearSandwichItemModels();
             clearRuneMatchModels();
             clearBalloonModels();
+            lastModelSyncRevision = -1; // force a real resync once rendering resumes -- see that field's own doc
             return null;
         }
         GamePhase phase = plugin.getPhase();
@@ -259,6 +277,7 @@ public class TileOverlay extends Overlay
             clearSandwichItemModels();
             clearRuneMatchModels();
             clearBalloonModels();
+            lastModelSyncRevision = -1; // force a real resync once rendering resumes -- see that field's own doc
             return null;
         }
 
@@ -331,7 +350,8 @@ public class TileOverlay extends Overlay
         // CourseBuilder for the identical "exclude every mini-game-only type" purpose) is what lets
         // this be one general check instead of a per-tile-type name list -- see
         // isMinigameSelectionPending's own doc for why this filter exists at all.
-        if (isMinigameSelectionPending())
+        boolean minigameSelectionPending = isMinigameSelectionPending();
+        if (minigameSelectionPending)
         {
             entries = filterOutMinigameOnlyTiles(entries);
         }
@@ -383,13 +403,18 @@ public class TileOverlay extends Overlay
         }
 
         renderFishingZoneOutline(g, entries);
-        renderArenaOutline(g, entries, "TURF_WARS_TILE", TURF_WARS_ARENA_OUTLINE_COLOR);
-        renderArenaOutline(g, entries, "SANDWICH_RUSH_TILE", SANDWICH_RUSH_ARENA_OUTLINE_COLOR);
-        renderArenaOutline(g, entries, "HOT_POTATO_TILE", HOT_POTATO_ARENA_OUTLINE_COLOR);
-        renderArenaOutline(g, entries, "REPEAT_AFTER_ME_TILE", REPEAT_AFTER_ME_ARENA_OUTLINE_COLOR);
-        renderArenaOutline(g, entries, "CRAB_RAVE_TILE", CRAB_RAVE_ARENA_OUTLINE_COLOR);
-        renderArenaOutline(g, entries, "RUNE_MATCH_TILE", RUNE_MATCH_ARENA_OUTLINE_COLOR);
-        renderArenaOutline(g, entries, "BALLOON_POP_TILE", BALLOON_POP_ARENA_OUTLINE_COLOR);
+        // Each gated on its own mini-game actually being active -- a full scan of `entries` (a
+        // whole course's worth of tiles) to find zero matches is pure waste on every single one of
+        // the ~50 frames/sec render() runs during ordinary turn-based play, which is the
+        // overwhelming majority of a game's playtime; these tile types only ever exist on the board
+        // at all while their own mini-game's board-swap is live.
+        if (plugin.isTurfWarsActive()) renderArenaOutline(g, entries, "TURF_WARS_TILE", TURF_WARS_ARENA_OUTLINE_COLOR);
+        if (plugin.isSandwichRushActive()) renderArenaOutline(g, entries, "SANDWICH_RUSH_TILE", SANDWICH_RUSH_ARENA_OUTLINE_COLOR);
+        if (plugin.isHotPotatoActive()) renderArenaOutline(g, entries, "HOT_POTATO_TILE", HOT_POTATO_ARENA_OUTLINE_COLOR);
+        if (plugin.isRepeatAfterMeActive()) renderArenaOutline(g, entries, "REPEAT_AFTER_ME_TILE", REPEAT_AFTER_ME_ARENA_OUTLINE_COLOR);
+        if (plugin.isCrabRaveActive()) renderArenaOutline(g, entries, "CRAB_RAVE_TILE", CRAB_RAVE_ARENA_OUTLINE_COLOR);
+        if (plugin.isRuneMatchActive()) renderArenaOutline(g, entries, "RUNE_MATCH_TILE", RUNE_MATCH_ARENA_OUTLINE_COLOR);
+        if (plugin.isBalloonPopActive()) renderArenaOutline(g, entries, "BALLOON_POP_TILE", BALLOON_POP_ARENA_OUTLINE_COLOR);
         // Gated on isCeremonyIntroRevealed() (not just phase/tile-presence like every other arena
         // outline above) -- the real board swap can land while the final mini-game's own rewards/
         // round-complete recap is still playing (see CeremonyPresentation's own doc), so without
@@ -398,15 +423,24 @@ public class TileOverlay extends Overlay
         {
             renderArenaOutline(g, entries, "CEREMONY_TILE", CEREMONY_ARENA_OUTLINE_COLOR);
         }
-        renderColorGroupedOutlines(g, entries, "JADDY_TILE");
-        renderColorGroupedOutlines(g, entries, "BRUTUS_ATTACK_TILE");
+        if (plugin.isJaddyActive()) renderColorGroupedOutlines(g, entries, "JADDY_TILE");
+        if (plugin.isBrutusAttackActive()) renderColorGroupedOutlines(g, entries, "BRUTUS_ATTACK_TILE");
         renderBrutusAttackCrashZone(g);
 
-        goldenGnomeModel.update(entries);
-        coinTrapModel.update(entries);
-        arenaFireModel.update(entries);
-        tableModel.update(entries);
-        pondModel.update(entries);
+        // See lastModelSyncRevision's own doc -- skips redoing these five models' SceneObjectSet
+        // diff/spawn work on frames where nothing they actually key off of has changed, rather than
+        // unconditionally redoing it on every single rendered frame.
+        long currentRevision = tileReducer.revision();
+        if (currentRevision != lastModelSyncRevision || minigameSelectionPending != lastModelSyncPending)
+        {
+            goldenGnomeModel.update(entries);
+            coinTrapModel.update(entries);
+            arenaFireModel.update(entries);
+            tableModel.update(entries);
+            pondModel.update(entries);
+            lastModelSyncRevision = currentRevision;
+            lastModelSyncPending = minigameSelectionPending;
+        }
         renderRouteLines(g, entries);
     }
 
@@ -1170,6 +1204,14 @@ public class TileOverlay extends Overlay
         return dy * CRAB_RAVE_GRID_SIZE + dx;
     }
 
+    // Memoizes computeCrabRaveLitColors() below, keyed on the exact phase index it already derives
+    // from wall-clock time -- that function's own output is deterministic and fixed for the whole
+    // CRAB_RAVE_LIGHT_PHASE_MS (2000ms) window either way, so recomputing it (a Collections.shuffle
+    // over 64 elements + a fresh HashMap) on every one of the ~50 frames/sec render() runs during
+    // that window was pure waste, ~100 identical recomputes for every 1 that actually changes.
+    private static long lastCrabRaveLitPhase = -1;
+    private static Map<Integer, Color> lastCrabRaveLitColors = Collections.emptyMap();
+
     /** Which of the 64 Crab Rave cells are lit this CRAB_RAVE_LIGHT_PHASE_MS window, and each
      * one's own color -- deterministic within a window (so it doesn't flicker frame to frame) via
      * a Random seeded off the window's own index, reshuffling to a fresh random pattern every
@@ -1179,6 +1221,8 @@ public class TileOverlay extends Overlay
     private static Map<Integer, Color> computeCrabRaveLitColors()
     {
         long phase = System.currentTimeMillis() / CRAB_RAVE_LIGHT_PHASE_MS;
+        if (phase == lastCrabRaveLitPhase) return lastCrabRaveLitColors;
+
         Random random = new Random(phase);
 
         List<Integer> indices = new ArrayList<>();
@@ -1190,6 +1234,8 @@ public class TileOverlay extends Overlay
         {
             lit.put(indices.get(i), CRAB_RAVE_LIGHT_COLORS[random.nextInt(CRAB_RAVE_LIGHT_COLORS.length)]);
         }
+        lastCrabRaveLitPhase = phase;
+        lastCrabRaveLitColors = lit;
         return lit;
     }
 

@@ -777,7 +777,7 @@ public class RunePartyPlugin extends Plugin
         new ItemShopEntry("energy-potion", 7),
         new ItemShopEntry("gnome-glider", 9),
         new ItemShopEntry("coin-trap", 10),
-        new ItemShopEntry("tele-block", 12),
+        new ItemShopEntry("ice-barrage", 12),
         new ItemShopEntry("tele-home", 15)
     );
 
@@ -928,29 +928,32 @@ public class RunePartyPlugin extends Plugin
      * "gone, then reappeared elsewhere." */
     public static final long GOLDEN_GNOME_MOVE_SPOTANIM_GAP_MS = 600;
 
-    /** Spotanim played directly on the target's own actor the instant a Tele Block lands on them
-     * (see TELE_BLOCK_APPLIED handling) -- the real spell's own impact graphic (SpotanimID's own
-     * doc groups it right next to TELEPORT_OTHER_IMPACT/CASTING, same "cast at another player"
-     * family), not a generic placeholder. Played via Actor#createSpotAnim (see
-     * triggerSpotAnimOnPlayer), unlike GOLDEN_GNOME_MOVE_SPOTANIM_ID's own fixed-world-point
-     * projectile trick, since this needs to follow the target's actor, not sit at one tile. */
-    public static final int TELE_BLOCK_IMPACT_SPOTANIM_ID = SpotanimID.TELE_BLOCK_IMPACT;
+    /** Spotanim played directly on the target's own actor the instant an Ice Barrage lands on them
+     * (see TELE_BLOCK_APPLIED handling) -- the real Ice Barrage spell's own impact graphic
+     * (SpotanimID.ICE_BARRAGE_IMPACT, id 369), matching the item's own Tele Block -> Ice Barrage
+     * rename (see Items.java/TeleBlockItem.java), not a generic placeholder. Played via
+     * Actor#createSpotAnim (see triggerSpotAnimOnPlayer), unlike GOLDEN_GNOME_MOVE_SPOTANIM_ID's
+     * own fixed-world-point projectile trick, since this needs to follow the target's actor, not
+     * sit at one tile. */
+    public static final int ICE_BARRAGE_IMPACT_SPOTANIM_ID = SpotanimID.ICE_BARRAGE_IMPACT;
 
     /** Height offset (in the same units Actor#createSpotAnim itself takes) for
-     * TELE_BLOCK_IMPACT_SPOTANIM_ID -- a first estimate for "roughly chest height," not measured
-     * against the real spell in-client, same caveat every other un-measured animation-hold/effect
-     * constant in this codebase already carries (see e.g. JAD_SMASH_ANIMATION_HOLD_MS's own doc). */
-    public static final int TELE_BLOCK_IMPACT_SPOTANIM_HEIGHT = 100;
+     * ICE_BARRAGE_IMPACT_SPOTANIM_ID -- 0, since the real spell's own impact graphic is a ground
+     * burst around the target's feet, not something that needs lifting. (Was 100 -- "roughly chest
+     * height" -- while this constant still played the old TELE_BLOCK_IMPACT graphic; that guess
+     * was never re-checked against ICE_BARRAGE_IMPACT's own very different shape, which is why it
+     * visibly floated once the spotanim itself changed.) */
+    public static final int ICE_BARRAGE_IMPACT_SPOTANIM_HEIGHT = 0;
 
     /** Spotanim played directly on the target's own actor the instant a Tele Other lands on them
      * (see TELE_OTHER_USED handling) -- the real Tele Other spell family's own impact graphic
      * (SpotanimID.TELEPORT_OTHER_IMPACT, right next to TELE_BLOCK_IMPACT above in that same "cast
      * at another player" family), not a generic placeholder. Same triggerSpotAnimOnPlayer call
-     * shape as TELE_BLOCK_IMPACT_SPOTANIM_ID. */
+     * shape as ICE_BARRAGE_IMPACT_SPOTANIM_ID. */
     public static final int TELE_OTHER_IMPACT_SPOTANIM_ID = SpotanimID.TELEPORT_OTHER_IMPACT;
 
     /** Height offset for TELE_OTHER_IMPACT_SPOTANIM_ID -- same "roughly chest height" first
-     * estimate TELE_BLOCK_IMPACT_SPOTANIM_HEIGHT's own doc gives, not measured against the real
+     * estimate ICE_BARRAGE_IMPACT_SPOTANIM_HEIGHT's own doc gives, not measured against the real
      * spell in-client. */
     public static final int TELE_OTHER_IMPACT_SPOTANIM_HEIGHT = 100;
 
@@ -959,7 +962,7 @@ public class RunePartyPlugin extends Plugin
      * impact graphic, same choice (and same height=0/delay=0 call shape, see that project's own
      * spawnStoplightSpotanim) the skwid-games plugin's Red Light Green Light elimination effect
      * already uses for the identical "you're out" moment. Played via Actor#createSpotAnim (see
-     * triggerSpotAnimOnPlayer), same as TELE_BLOCK_IMPACT_SPOTANIM_ID above. */
+     * triggerSpotAnimOnPlayer), same as ICE_BARRAGE_IMPACT_SPOTANIM_ID above. */
     public static final int ARENA_ELIMINATION_SPOTANIM_ID = SpotanimID.FX_VOIDWAKER_IMPACT;
 
     /** Spotanim played directly on the winner's own actor the instant their balloon reaches 100
@@ -975,7 +978,7 @@ public class RunePartyPlugin extends Plugin
     /** Spotanim played on the game's own overall winner the instant their name is revealed (see
      * CeremonyPresentation#scheduleWinnerReveal) -- the real "reached level 99" fireworks display,
      * not a generic placeholder, played via Actor#createSpotAnim (see triggerSpotAnimOnPlayer) so
-     * it follows them the way TELE_BLOCK_IMPACT_SPOTANIM_ID's own impact graphic does.
+     * it follows them the way ICE_BARRAGE_IMPACT_SPOTANIM_ID's own impact graphic does.
      * SpotanimID.LEVELUP_MAX (the even bigger "reached max total level" version of this same
      * fireworks display) is the natural escalation if this ever reads as too small for the whole
      * game's own final moment. */
@@ -3788,7 +3791,7 @@ public class RunePartyPlugin extends Plugin
                         scheduleTurnSkippedAnnouncement(skippedRsn);
                         String self = localRsn();
                         addChatMessage((self != null && self.equalsIgnoreCase(skippedRsn) ? "Your" : skippedRsn + "'s")
-                            + " turn was skipped -- Tele Blocked!");
+                            + " turn was skipped -- Ice Barraged!");
                     }
                 }
                 break;
@@ -4033,7 +4036,7 @@ public class RunePartyPlugin extends Plugin
                     if (blockedRsn != null && byRsn != null)
                     {
                         scheduleTeleBlockCastAnnouncement(byRsn, blockedRsn);
-                        triggerSpotAnimOnPlayer(TELE_BLOCK_IMPACT_SPOTANIM_ID, blockedRsn, TELE_BLOCK_IMPACT_SPOTANIM_HEIGHT);
+                        triggerSpotAnimOnPlayer(ICE_BARRAGE_IMPACT_SPOTANIM_ID, blockedRsn, ICE_BARRAGE_IMPACT_SPOTANIM_HEIGHT);
                         addChatMessage(byRsn + " cast teleblock on " + blockedRsn + "! " + blockedRsn + " will lose their next turn.");
                     }
                 }
@@ -4825,14 +4828,28 @@ public class RunePartyPlugin extends Plugin
      * (the end-of-round winner), the two consumers. There's no dedicated score event at all -- a
      * claim is just an ordinary tiles_marked update, so the board's own current colors already
      * are the score. */
+    // Memoizes getTurfWarsTileCounts() below, keyed on TileReducer's own revision() -- see that
+    // field's own doc. Tile ownership only ever changes via a TILES_MARKED event (at most once per
+    // 600ms tick), but TurfWarsScoreOverlay's own live scoreboard calls this every single one of the
+    // ~50 frames/sec render() runs while a round is up, previously re-scanning and re-tallying the
+    // whole board's own tile snapshot every time regardless of whether anything actually changed.
+    private volatile long turfWarsTileCountsRevision = -1;
+    private volatile Map<String, Integer> turfWarsTileCountsCache = Collections.emptyMap();
+
     public Map<String, Integer> getTurfWarsTileCounts()
     {
+        long revision = tileReducer.revision();
+        if (revision == turfWarsTileCountsRevision) return turfWarsTileCountsCache;
+
         Map<String, Integer> counts = new HashMap<>();
         for (TileReducer.TileEntry entry : tileReducer.snapshot())
         {
             if (!"TURF_WARS_TILE".equals(entry.tileType) || entry.color == null) continue;
             counts.merge(entry.color.toUpperCase(Locale.ROOT), 1, Integer::sum);
         }
+        counts = Collections.unmodifiableMap(counts);
+        turfWarsTileCountsCache = counts;
+        turfWarsTileCountsRevision = revision;
         return counts;
     }
     /** The color hex `rsn` is currently assigned for Turf Wars, or null if they're not on a team

@@ -9,13 +9,13 @@ import java.util.List;
  * new item by dropping an Item implementation in this package and registering it here. */
 public final class Items
 {
-    private static final KeyedRegistry<Item> REGISTRY = new KeyedRegistry<>("tele-block");
+    private static final KeyedRegistry<Item> REGISTRY = new KeyedRegistry<>("ice-barrage");
 
     static
     {
         REGISTRY.register(new EnergyPotionItem("energy-potion", "Energy Potion"));
         REGISTRY.register(new CoinTrapItem("coin-trap", "Coin Trap"));
-        REGISTRY.register(new TeleBlockItem("tele-block", "Tele Block"));
+        REGISTRY.register(new TeleBlockItem("ice-barrage", "Ice Barrage"));
         REGISTRY.register(new TeleOtherItem("tele-other", "Tele Other"));
         REGISTRY.register(new HomeTeleportItem("tele-home", "Home Teleport"));
         REGISTRY.register(new GnomeGliderItem("gnome-glider", "Gnome Glider"));

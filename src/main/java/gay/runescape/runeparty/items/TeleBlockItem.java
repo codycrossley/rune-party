@@ -63,14 +63,14 @@ public class TeleBlockItem implements Item
 
     private static BufferedImage loadIcon()
     {
-        try (InputStream is = TeleBlockItem.class.getResourceAsStream("/gay/runescape/runeparty/item_icons/tele-block-icon.png"))
+        try (InputStream is = TeleBlockItem.class.getResourceAsStream("/gay/runescape/runeparty/item_icons/ice-barrage-icon.png"))
         {
-            if (is == null) throw new IOException("tele-block-icon.png resource not found");
+            if (is == null) throw new IOException("ice-barrage-icon.png resource not found");
             return ImageIO.read(is);
         }
         catch (IOException e)
         {
-            log.warn("Failed to load the Tele Block icon", e);
+            log.warn("Failed to load the Ice Barrage icon", e);
             return null;
         }
     }

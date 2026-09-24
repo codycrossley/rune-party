@@ -365,7 +365,7 @@ public class AnnouncementOverlay extends Overlay
         drawCenteredText(g, text, client.getCanvasWidth() / 2, client.getCanvasHeight() / 4, color, alpha);
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(16f));
-        drawCenteredText(g, "Tele Blocked", client.getCanvasWidth() / 2, client.getCanvasHeight() / 4 + 26, color, alpha);
+        drawCenteredText(g, "Ice Barraged", client.getCanvasWidth() / 2, client.getCanvasHeight() / 4 + 26, color, alpha);
     }
 
     /** Dispatches to whichever half of the Spin hint applies to the local viewer: the "it's your

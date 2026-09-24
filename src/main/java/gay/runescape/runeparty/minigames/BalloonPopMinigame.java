@@ -1,17 +1,21 @@
 package gay.runescape.runeparty.minigames;
 
-import java.awt.Color;
+import java.awt.AlphaComposite;
+import java.awt.Composite;
 import java.awt.Graphics2D;
-import java.awt.Polygon;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
+import javax.imageio.ImageIO;
+import lombok.extern.slf4j.Slf4j;
 
-/** A single round balloon with a small knot at its base, reading as "balloon" at wheel-icon size --
- * the real balloons (one per seated player, recolored to that player's own seat color, floating
+/** The real balloons (one per seated player, recolored to that player's own seat color, floating
  * above their head and growing with every 10 clicks) render in-world via models/BalloonModel
  * instead -- see BalloonPopPresentation's own doc. */
+@Slf4j
 public class BalloonPopMinigame implements Minigame
 {
-    private static final Color BALLOON_COLOR = new Color(255, 111, 168); // matches tiles/balloon_pop.py's own color_hex
-    private static final Color OUTLINE_COLOR = new Color(255, 255, 255);
+    private static final BufferedImage ICON = loadIcon();
 
     @Override
     public String getKey()
@@ -28,28 +32,25 @@ public class BalloonPopMinigame implements Minigame
     @Override
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
-        int a = Math.max(0, Math.min(255, Math.round(alpha * 255)));
-        Color fill = new Color(BALLOON_COLOR.getRed(), BALLOON_COLOR.getGreen(), BALLOON_COLOR.getBlue(), a);
-        Color outline = new Color(OUTLINE_COLOR.getRed(), OUTLINE_COLOR.getGreen(), OUTLINE_COLOR.getBlue(), a);
+        if (ICON == null) return;
 
-        int bodyDiameter = Math.round(size * 0.75f);
-        int bodyTop = y - size / 2;
-        int bodyLeft = x - bodyDiameter / 2;
+        Composite original = g.getComposite();
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, Math.min(1f, alpha))));
+        g.drawImage(ICON, x - size / 2, y - size / 2, size, size, null);
+        g.setComposite(original);
+    }
 
-        g.setColor(fill);
-        g.fillOval(bodyLeft, bodyTop, bodyDiameter, bodyDiameter);
-        g.setColor(outline);
-        g.drawOval(bodyLeft, bodyTop, bodyDiameter, bodyDiameter);
-
-        int knotSize = Math.max(2, size / 10);
-        int knotTop = bodyTop + bodyDiameter;
-        Polygon knot = new Polygon();
-        knot.addPoint(x - knotSize, knotTop);
-        knot.addPoint(x + knotSize, knotTop);
-        knot.addPoint(x, knotTop + knotSize);
-        g.setColor(fill);
-        g.fillPolygon(knot);
-        g.setColor(outline);
-        g.drawPolygon(knot);
+    private static BufferedImage loadIcon()
+    {
+        try (InputStream is = BalloonPopMinigame.class.getResourceAsStream("/gay/runescape/runeparty/minigame_icons/hot-click-balloon.png"))
+        {
+            if (is == null) throw new IOException("hot-click-balloon.png resource not found");
+            return ImageIO.read(is);
+        }
+        catch (IOException e)
+        {
+            log.warn("Failed to load the Hot Click Balloon wheel icon", e);
+            return null;
+        }
     }
 }
