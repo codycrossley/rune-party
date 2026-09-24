@@ -533,7 +533,7 @@ public final class DanceDanceRuneScapePresentation implements MinigamePresentati
     }
 
     @Override
-    public void onRoundBegin()
+    public void onRoundBegin(boolean catchingUp)
     {
         sequence = pickSequence();
         sequenceTicks = totalTicks(sequence);

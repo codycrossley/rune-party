@@ -27,10 +27,19 @@ public interface MinigamePresentationFeature
     default void onStarted(boolean catchingUp) {}
 
     /** Stamps this minigame's own round-start wall-clock timestamp -- called once, right as
-     * MINIGAME_ROUND_BEGIN lands, for whichever minigame is currently active. Default no-op, for a
-     * minigame that anchors its own timing off a different event instead (True or False anchors off
-     * its own TRUE_OR_FALSE_ROUND_STARTED). */
-    default void onRoundBegin() {}
+     * MINIGAME_ROUND_BEGIN takes effect, for whichever minigame is currently active. Default
+     * no-op, for a minigame that anchors its own timing off a different event instead (True or
+     * False anchors off its own TRUE_OR_FALSE_ROUND_STARTED). {@code catchingUp} is here (unlike
+     * onStarted's own identically-shaped parameter, this isn't just mirroring it for consistency)
+     * for a real reason: a reconnecting client replaying this same event mid-round should never
+     * repeat a one-shot cosmetic side effect the round's own real start should only ever trigger
+     * once (see CrabRavePresentation's own onRoundBegin, which uses this to gate its 30-second
+     * music cue -- that used to live as a hand-copied CRAB_RAVE_KEY check sitting in
+     * MinigamePresentation's own generic MINIGAME_ROUND_BEGIN dispatch instead, purely because this
+     * parameter didn't exist yet). For an arrival-gated mini-game (RunePartyPlugin#
+     * ARRIVAL_GATHER_KEYS) this is always false when actually called -- see that dispatch's own doc
+     * for why the call itself is deferred until the "BEGIN!" flash reveals, not skipped outright. */
+    default void onRoundBegin(boolean catchingUp) {}
 
     /** A pre-clear hook run from handleMinigameEnded, before minigameKey (and everything else
      * generic) is reset -- for a one-shot side effect that needs to know which minigame just ended

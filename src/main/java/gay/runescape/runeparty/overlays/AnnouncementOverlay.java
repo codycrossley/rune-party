@@ -1932,13 +1932,14 @@ public class AnnouncementOverlay extends Overlay
 
     /** Persistent "gather in the arena" message for the Golden Gnome Awards -- same
      * pulsing-alpha, no-fixed-duration treatment renderArrivalGatherMessage already uses for every
-     * arrival-gated mini-game, just gated on the ceremony's own isCeremonyIntroRevealed() instead
-     * of a minigame key -- NOT the immediate isCeremonyStarted(), so this doesn't stomp over the
-     * final mini-game's own still-playing rewards/round-complete recap (see CeremonyPresentation's
-     * own doc). Hides the instant the Gnome's own first line lands (getGnomeLine() != null). */
+     * arrival-gated mini-game, just gated on the ceremony's own isCeremonyGatherMessageRevealed()
+     * instead of a minigame key -- NOT isCeremonyIntroRevealed()/isCeremonyStarted(), both too
+     * early: this shares the rainbow title's own screen-center slot, so it has to wait for the
+     * title to actually finish, not just start (see CeremonyPresentation's own doc on why those two
+     * flags are split). Hides the instant the Gnome's own first line lands (getGnomeLine() != null). */
     private void renderCeremonyGatherMessage(Graphics2D g)
     {
-        if (!plugin.isCeremonyIntroRevealed()) return;
+        if (!plugin.isCeremonyGatherMessageRevealed()) return;
         if (plugin.getGnomeLine() != null) return;
 
         long now = System.currentTimeMillis();

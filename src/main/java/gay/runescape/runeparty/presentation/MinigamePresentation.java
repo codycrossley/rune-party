@@ -80,12 +80,19 @@ public final class MinigamePresentation
     private volatile boolean minigameCountdownStarted = false;
     private volatile boolean minigameCountdownSkippedForClient = false;
     private volatile long minigameCountdownBannerUntil = 0;
-    // Real state, applied catch-up or not: true once MINIGAME_ROUND_BEGIN has genuinely landed for
-    // the current mini-game -- unlike minigameCountdownBannerUntil (a fixed local timer that always
-    // resolves MINIGAME_COUNTDOWN_DURATION_MS after arming), this reflects the real server-side
-    // moment. The Arena mini-game's own round-begin timing depends on when everyone's actually
-    // walked onto its grid, which isn't tied to the generic countdown's fixed schedule at all --
-    // see AnnouncementOverlay#renderArenaGatherMessage, the reader this exists for.
+    // True once MINIGAME_ROUND_BEGIN has genuinely taken effect for the current mini-game -- unlike
+    // minigameCountdownBannerUntil (a fixed local timer that always resolves
+    // MINIGAME_COUNTDOWN_DURATION_MS after arming), this reflects the real server-side moment. The
+    // Arena mini-game's own round-begin timing depends on when everyone's actually walked onto its
+    // grid, which isn't tied to the generic countdown's fixed schedule at all -- see
+    // AnnouncementOverlay#renderArenaGatherMessage, the reader this exists for. Applied immediately
+    // on catch-up, or for any mini-game outside ARRIVAL_GATHER_KEYS (see the MINIGAME_ROUND_BEGIN
+    // case's own doc) -- but for a live arrival-gated mini-game, deliberately deferred to the exact
+    // moment the "BEGIN!" flash actually appears rather than the instant the raw event lands, so
+    // the gather message this flag hides doesn't disappear into a gap before that flash (or worse,
+    // before it) -- and so this mini-game's own round-start clock (see
+    // MinigamePresentationFeature#onRoundBegin, deferred the same way) can't start ticking ahead of
+    // it either.
     private volatile boolean minigameRoundBegun = false;
     // Same idea as JadPresentation's own awaitingBowFinish, one per response to a pending
     // mini-game ready-check -- see RunePartyPlugin#onAnimationChanged, which consults this via the
@@ -245,19 +252,45 @@ public final class MinigamePresentation
 
             case Events.MINIGAME_ROUND_BEGIN:
             {
-                // Real state, applied catch-up or not: the server's own signal that this round's
-                // real content actually started -- hands off to whichever feature owns this key to
-                // stamp its own round-start clock (see MinigamePresentationFeature#onRoundBegin's
-                // own doc for which mini-games skip this, anchoring off a different event instead).
+                // The server's own signal that this round's real content actually started -- hands
+                // off to whichever feature owns this key to stamp its own round-start clock (see
+                // MinigamePresentationFeature#onRoundBegin's own doc for which mini-games skip
+                // this, anchoring off a different event instead).
                 MinigamePresentationFeature roundBeginFeature = features.get(minigameKey);
-                if (roundBeginFeature != null) roundBeginFeature.onRoundBegin();
-                // Unconditional, unlike the per-feature stamp above -- every mini-game fires this
-                // event, so this flips true regardless of which one is active. See its own field
-                // doc for why this exists separately from the generic countdown's fixed timer.
-                minigameRoundBegun = true;
                 if (!catchingUp && RunePartyPlugin.ARRIVAL_GATHER_KEYS.contains(minigameKey))
                 {
-                    triggerArrivalRoundBeginBanner();
+                    // Deferred to the exact moment the "BEGIN!" flash actually appears (see
+                    // triggerArrivalRoundBeginBanner's own doc), not the instant this event lands
+                    // -- MINIGAME_ROUND_BEGIN can arrive (and this mini-game's own onRoundBegin
+                    // stamp a real roundStartAt) well before that cosmetic flash has had its own
+                    // turn on the shared turnEffectGate, otherwise letting e.g. Dance Dance
+                    // RuneScape's own tiles start lighting up, or Hot Potato's own explosion clock
+                    // start ticking, before the player has actually seen "BEGIN!".
+                    //
+                    // beginKey is re-checked against minigameKey right before actually calling
+                    // onRoundBegin(), rather than trusting the deferred callback always lands while
+                    // this round is still the current one: a real playtest hit exactly this gap for
+                    // Dance Dance RuneScape -- a player leaving mid-round ended it before this
+                    // callback's own gate reservation had elapsed, so by the time it ran,
+                    // onRoundBegin() (and its own reportRoundDuration() call) fired for a round the
+                    // server had already torn down, logging a 409 "isn't active" on a report nobody
+                    // needed anymore. Skipping entirely once stale is harmless -- there's no round
+                    // left for onRoundBegin() to have meaningfully started anyway.
+                    String beginKey = minigameKey;
+                    triggerArrivalRoundBeginBanner(() ->
+                    {
+                        if (!beginKey.equals(minigameKey)) return;
+                        minigameRoundBegun = true;
+                        if (roundBeginFeature != null) roundBeginFeature.onRoundBegin(false);
+                    });
+                }
+                else
+                {
+                    // Real state, applied immediately: catch-up has no banner to wait for, and
+                    // every countdown-driven mini-game's own "3...2...1...BEGIN!" sequence already
+                    // provides an equivalent, tightly-synced reveal moment of its own.
+                    minigameRoundBegun = true;
+                    if (roundBeginFeature != null) roundBeginFeature.onRoundBegin(catchingUp);
                 }
                 break;
             }
@@ -388,10 +421,19 @@ public final class MinigamePresentation
 
     /** Arms AnnouncementOverlay's brief "BEGIN!" flash for an arrival-gated mini-game's own
      * MINIGAME_ROUND_BEGIN -- see ARRIVAL_GATHER_KEYS's own doc for which mini-games this fires
-     * for, and arrivalRoundBeginBanner's own doc for why. */
-    private void triggerArrivalRoundBeginBanner()
+     * for, and arrivalRoundBeginBanner's own doc for why. {@code onRevealed} runs at the exact
+     * moment armBanner's own scheduleAfterTurnEffects callback actually fires -- i.e. the real
+     * instant this flash starts rendering, not whenever MINIGAME_ROUND_BEGIN itself landed -- so
+     * the MINIGAME_ROUND_BEGIN case above can piggyback flipping minigameRoundBegun/stamping this
+     * mini-game's own round-start clock onto that same moment, rather than a separate, unrelated
+     * reservation of its own. */
+    private void triggerArrivalRoundBeginBanner(Runnable onRevealed)
     {
-        plugin.armBanner(arrivalRoundBeginBanner, RunePartyPlugin.ARRIVAL_ROUND_BEGIN_BANNER_DURATION_MS, () -> null, true);
+        plugin.armBanner(arrivalRoundBeginBanner, RunePartyPlugin.ARRIVAL_ROUND_BEGIN_BANNER_DURATION_MS, () ->
+        {
+            onRevealed.run();
+            return null;
+        }, true);
     }
 
     /** Arms AnnouncementOverlay's mini-game final-score recap ("how did everyone do") -- called

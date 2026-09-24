@@ -62,13 +62,24 @@ public final class CeremonyPresentation
     private volatile boolean ceremonyStarted = false; // real state, set immediately regardless of catch-up
     // Flips true once the cosmetic title banner above has actually been armed (i.e. once
     // scheduleAfterTurnEffects's own callback fires, the same moment the final mini-game's own
-    // rewards/round-complete recap has genuinely finished reserving the gate) -- every other
-    // ceremony-visible cosmetic element (the gather message, the arena floor outline, the Gnome
-    // NPC/flanking props) waits on THIS instead of the immediate ceremonyStarted, so none of them
-    // can render before that recap is actually done. Same "real state is immediate, the visual
-    // reveal is deliberately held back" split TileOverlay's own doc describes for Rainbow Rush's
-    // isMinigameSelectionRevealed().
+    // rewards/round-complete recap has genuinely finished reserving the gate) -- the arena floor
+    // outline and the Gnome NPC/flanking props wait on THIS instead of the immediate
+    // ceremonyStarted, so none of them can render before that recap is actually done. Same "real
+    // state is immediate, the visual reveal is deliberately held back" split TileOverlay's own doc
+    // describes for Rainbow Rush's isMinigameSelectionRevealed(). Those three are all world-space
+    // elements with no shared-screen-slot conflict against the title banner, so they're fine
+    // revealing the moment it starts -- unlike the gather message below, which shares the title's
+    // own screen-center position and needs to wait for it to actually finish instead.
     private volatile boolean ceremonyIntroRevealed = false;
+    // Flips true once the title banner's own CEREMONY_TITLE_BANNER_DURATION_MS has fully elapsed
+    // (chained a further step behind ceremonyIntroRevealed above, see handleCeremonyStarted) --
+    // renderCeremonyGatherMessage waits on THIS, not ceremonyIntroRevealed, since the persistent
+    // "gather in the arena" message renders in the exact same screen-center slot the rainbow title
+    // just occupied. Without this split, a real playtest found the two rendering at once: the
+    // title (properly gated behind ceremonyIntroRevealed) appearing, with the gather message
+    // (incorrectly gated on that same, too-early flag) already showing right alongside it instead
+    // of waiting for the title to fade first.
+    private volatile boolean ceremonyGatherMessageRevealed = false;
     // Reset on reset() below -- see ArrivalGate's own doc. No onStarted() equivalent to also reset
     // from -- unlike a mini-game's own arrival gate, the ceremony only ever runs once per game.
     private final ArrivalGate arrivalGate;
@@ -143,6 +154,12 @@ public final class CeremonyPresentation
             ceremonyTitleBanner.until = System.currentTimeMillis() + RunePartyPlugin.CEREMONY_TITLE_BANNER_DURATION_MS;
             plugin.extendTurnEffectGate(ceremonyTitleBanner.until);
             ceremonyIntroRevealed = true;
+
+            // Chained a further step behind the title's own reservation above (0 extra duration of
+            // its own -- the persistent gather message has no fixed end, so nothing needs to wait
+            // behind IT on the gate) so ceremonyGatherMessageRevealed only flips once the title has
+            // actually finished, not the instant it appears -- see that field's own doc.
+            gameOverTask = plugin.scheduleAfterTurnEffects(gameOverTask, 0, () -> ceremonyGatherMessageRevealed = true);
         });
     }
 
@@ -365,6 +382,7 @@ public final class CeremonyPresentation
         gameOverStandings = Collections.emptyList();
         ceremonyStarted = false;
         ceremonyIntroRevealed = false;
+        ceremonyGatherMessageRevealed = false;
         arrivalGate.reset();
         ceremonyTitleBanner.reset();
         gnomeLineBanner.reset();
@@ -384,6 +402,7 @@ public final class CeremonyPresentation
     // ---- getters, mirrored 1:1 by RunePartyPlugin's own facade under their original names ----
     public boolean isCeremonyStarted() { return ceremonyStarted; }
     public boolean isCeremonyIntroRevealed() { return ceremonyIntroRevealed; }
+    public boolean isCeremonyGatherMessageRevealed() { return ceremonyGatherMessageRevealed; }
     public long getCeremonyTitleBannerUntil() { return ceremonyTitleBanner.until; }
     public long getGnomeLineUntil() { return gnomeLineBanner.until; }
     public String getGnomeLine() { return gnomeLineBanner.payload; }

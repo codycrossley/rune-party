@@ -133,7 +133,7 @@ public final class RainbowRushPresentation implements MinigamePresentationFeatur
     }
 
     @Override
-    public void onRoundBegin()
+    public void onRoundBegin(boolean catchingUp)
     {
         roundStartAt = System.currentTimeMillis();
     }

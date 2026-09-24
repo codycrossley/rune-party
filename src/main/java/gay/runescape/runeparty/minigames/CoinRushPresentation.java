@@ -103,7 +103,7 @@ public final class CoinRushPresentation implements MinigamePresentationFeature
     }
 
     @Override
-    public void onRoundBegin()
+    public void onRoundBegin(boolean catchingUp)
     {
         roundStartAt = System.currentTimeMillis();
     }

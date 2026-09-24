@@ -50,4 +50,15 @@ public interface RunePartyConfig extends Config
     {
         return true;
     }
+
+    @ConfigItem(
+        keyName = "playMinigameMusic",
+        name = "Play minigame music",
+        description = "Play audio clips during certain minigames (currently just Crab Rave)",
+        position = 4
+    )
+    default boolean playMinigameMusic()
+    {
+        return true;
+    }
 }

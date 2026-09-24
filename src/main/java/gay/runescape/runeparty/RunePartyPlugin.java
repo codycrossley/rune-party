@@ -102,6 +102,7 @@ import net.runelite.api.gameval.SpotanimID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.audio.AudioPlayer;
 import net.runelite.client.game.SpriteManager;
 import net.runelite.client.input.MouseManager;
 import net.runelite.client.plugins.Plugin;
@@ -417,6 +418,19 @@ public class RunePartyPlugin extends Plugin
      * here only for symmetry/documentation with every other mini-game's own constant of the same
      * shape -- nothing on the client actually reads it. */
     public static final long CRAB_RAVE_START_DELAY_MS = 5_500;
+
+    /** Resource path for Crab Rave's own 30-second music clip, loaded via AudioPlayer#play(Class,
+     * String, float) the same way every icon here already loads via getResourceAsStream -- see
+     * playCrabRaveMusic, the only reader. Must be a WAV (or another javax.sound.sampled-native
+     * format -- MP3 isn't supported without an extra SPI this plugin doesn't bundle), roughly
+     * CRAB_RAVE_DURATION_MS long so it naturally finishes around when the round does. Ships empty
+     * in this repo -- drop the actual file in at
+     * src/main/resources/gay/runescape/runeparty/sounds/crab-rave.wav. */
+    public static final String CRAB_RAVE_MUSIC_RESOURCE_PATH = "/gay/runescape/runeparty/sounds/crab-rave.wav";
+    // No gain adjustment by default -- let the clip's own mastered volume speak for itself rather
+    // than guessing an offset with no clip to test it against. Tweak here if it turns out too
+    // loud/quiet once a real file's in place.
+    public static final float CRAB_RAVE_MUSIC_GAIN_DB = 0f;
 
     // Model 56446 (see the client's own CrabRaveNpcOverlay) -- NPC composition, not a raw model
     // id, so it's spawned via RunePartyRender.loadNpcModel(client, GEMSTONE_CRAB_NPC_ID), same
@@ -1033,6 +1047,7 @@ public class RunePartyPlugin extends Plugin
     @Inject private OverlayManager overlayManager;
     @Inject private MouseManager mouseManager; // WiseOldManDialogueOverlay's own clickable options, the only consumer
     @Inject private SpriteManager spriteManager; // the real chatbox background sprite, same consumer
+    @Inject private AudioPlayer audioPlayer; // Crab Rave's own 30-second music cue, the only consumer -- see playCrabRaveMusic
     @Inject private ModelOutlineRenderer modelOutlineRenderer;
     @Inject private TooltipManager tooltipManager;
     @Inject private OkHttpClient okHttpClient;
@@ -4196,6 +4211,28 @@ public class RunePartyPlugin extends Plugin
         triggerSpotAnimOnPlayer(spotAnimId, rsn, height, 0);
     }
 
+    /** Starts Crab Rave's own CRAB_RAVE_MUSIC_RESOURCE_PATH clip playing, once, the instant its
+     * round genuinely begins -- see presentation/MinigamePresentation's own MINIGAME_ROUND_BEGIN
+     * case, the only caller (deliberately not folded into CrabRavePresentation#onRoundBegin itself,
+     * which has no catchingUp of its own to gate on -- see that interface method's own doc). Silent
+     * no-op if config.playMinigameMusic() is off, or if the clip can't be loaded/played for any
+     * reason (missing resource, unsupported format, no audio line available) -- purely cosmetic,
+     * never worth interrupting a round over. AudioPlayer#play has no stop() of its own to call back
+     * later (see its own javadoc) -- if the round somehow ends early, the clip just plays out to its
+     * natural end regardless; acceptable for a purely decorative music cue. */
+    public void playCrabRaveMusic()
+    {
+        if (!config.playMinigameMusic()) return;
+        try
+        {
+            audioPlayer.play(RunePartyPlugin.class, CRAB_RAVE_MUSIC_RESOURCE_PATH, CRAB_RAVE_MUSIC_GAIN_DB);
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to play the Crab Rave music clip", e);
+        }
+    }
+
     /** Plays the Hot Potato explosion effect (see models/HotPotatoExplosionModel) at {@code rsn}'s
      * current location -- a snapshot at the moment it fires, not an actor-attached effect that
      * follows them the way triggerSpotAnimOnPlayer's own spotanim does, matching "the spot of the
@@ -4720,6 +4757,7 @@ public class RunePartyPlugin extends Plugin
     // is unchanged, so no external caller (AnnouncementOverlay, ConfettiOverlay) needs to change.
     public boolean isCeremonyStarted() { return ceremonyPresentation.isCeremonyStarted(); }
     public boolean isCeremonyIntroRevealed() { return ceremonyPresentation.isCeremonyIntroRevealed(); }
+    public boolean isCeremonyGatherMessageRevealed() { return ceremonyPresentation.isCeremonyGatherMessageRevealed(); }
     public boolean isCeremonyFlankingGnomeVisible(int index) { return ceremonyPresentation.isFlankingGnomeVisible(index); }
     public long getCeremonyTitleBannerUntil() { return ceremonyPresentation.getCeremonyTitleBannerUntil(); }
     public long getGnomeLineUntil() { return ceremonyPresentation.getGnomeLineUntil(); }

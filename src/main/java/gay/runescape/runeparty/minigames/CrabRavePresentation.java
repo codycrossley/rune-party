@@ -39,9 +39,13 @@ public final class CrabRavePresentation implements MinigamePresentationFeature
     }
 
     @Override
-    public void onRoundBegin()
+    public void onRoundBegin(boolean catchingUp)
     {
         roundStartAt = System.currentTimeMillis();
+        // A reconnecting client replaying this same event mid-round should never restart the
+        // music from the top -- see MinigamePresentationFeature#onRoundBegin's own doc for why
+        // this parameter exists at all.
+        if (!catchingUp) plugin.playCrabRaveMusic();
     }
 
     @Override

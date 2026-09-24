@@ -115,7 +115,7 @@ public final class SandwichRushPresentation implements MinigamePresentationFeatu
     }
 
     @Override
-    public void onRoundBegin()
+    public void onRoundBegin(boolean catchingUp)
     {
         roundStartAt = System.currentTimeMillis();
     }
