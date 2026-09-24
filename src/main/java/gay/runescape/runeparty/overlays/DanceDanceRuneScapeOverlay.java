@@ -14,7 +14,6 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.Polygon;
-import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
 
@@ -152,15 +151,15 @@ public class DanceDanceRuneScapeOverlay extends Overlay
         g.draw(poly);
     }
 
+    /** wp is already an instance coordinate straight from Tile/Player#getWorldLocation (unique per
+     * tile, even inside a POH) -- deliberately NOT a template coordinate, so this converts with
+     * LocalPoint.fromWorld directly rather than WorldPoint.toLocalInstance, which expects a
+     * template point and would find nothing for an instance one (and would light every copy of a
+     * repeated POH room chunk for a template one). Outside instances the two are identical. */
     private Polygon canvasTilePoly(WorldPoint wp)
     {
-        Collection<WorldPoint> localPoints = WorldPoint.toLocalInstance(plugin.client.getTopLevelWorldView(), wp);
-        for (WorldPoint local : localPoints)
-        {
-            LocalPoint lp = LocalPoint.fromWorld(plugin.client.getTopLevelWorldView(), local);
-            if (lp == null) continue;
-            return Perspective.getCanvasTilePoly(plugin.client, lp);
-        }
-        return null;
+        LocalPoint lp = LocalPoint.fromWorld(plugin.client.getTopLevelWorldView(), wp);
+        if (lp == null) return null;
+        return Perspective.getCanvasTilePoly(plugin.client, lp);
     }
 }

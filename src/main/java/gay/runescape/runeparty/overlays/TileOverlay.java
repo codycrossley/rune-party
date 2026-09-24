@@ -33,7 +33,6 @@ import lombok.extern.slf4j.Slf4j;
 import java.awt.*;
 import java.awt.geom.Path2D;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -584,20 +583,23 @@ public class TileOverlay extends Overlay
 
         for (WorldPoint wp : tiles)
         {
-            for (WorldPoint local : WorldPoint.toLocalInstance(client.getTopLevelWorldView(), wp))
-            {
-                LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), local);
-                if (lp == null) continue;
+            // Tile points are instance coordinates straight from Tile/Player#getWorldLocation
+            // (unique per tile, even inside a POH) -- deliberately NOT template coordinates, so
+            // this converts with LocalPoint.fromWorld directly rather than
+            // WorldPoint.toLocalInstance, which expects a template point and would find nothing
+            // for an instance one (and would light every copy of a repeated POH room chunk for a
+            // template one). Outside instances the two are identical.
+            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), wp);
+            if (lp == null) continue;
 
-                Polygon poly = Perspective.getCanvasTilePoly(client, lp);
-                if (poly == null) continue;
+            Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+            if (poly == null) continue;
 
-                g.setColor(BRUTUS_CRASH_ZONE_FILL_COLOR);
-                g.fill(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
-                g.setColor(BRUTUS_CRASH_ZONE_OUTLINE_COLOR);
-                g.setStroke(SOLID_STROKE);
-                g.draw(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
-            }
+            g.setColor(BRUTUS_CRASH_ZONE_FILL_COLOR);
+            g.fill(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
+            g.setColor(BRUTUS_CRASH_ZONE_OUTLINE_COLOR);
+            g.setStroke(SOLID_STROKE);
+            g.draw(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
         }
     }
 
@@ -1047,19 +1049,18 @@ public class TileOverlay extends Overlay
      * rounding has to work on the polygon's own (possibly skewed) edges directly. */
     private void renderOutlinedTile(Graphics2D g, WorldPoint wp, Color color, Stroke stroke)
     {
-        Collection<WorldPoint> localPoints = WorldPoint.toLocalInstance(client.getTopLevelWorldView(), wp);
-        for (WorldPoint local : localPoints)
-        {
-            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), local);
-            if (lp == null) continue;
+        // See renderBrutusAttackCrashZone's own doc for why this is LocalPoint.fromWorld directly,
+        // not WorldPoint.toLocalInstance -- wp is already an instance coordinate (POH-safe), not a
+        // template one.
+        LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), wp);
+        if (lp == null) return;
 
-            Polygon poly = Perspective.getCanvasTilePoly(client, lp);
-            if (poly == null) continue;
+        Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+        if (poly == null) return;
 
-            g.setColor(color);
-            g.setStroke(stroke);
-            g.draw(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
-        }
+        g.setColor(color);
+        g.setStroke(stroke);
+        g.draw(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
     }
 
     /** Fills a permanently-solved Rune Match pair's own tiles in RUNE_MATCH_SOLVED_COLOR (still-
@@ -1095,18 +1096,16 @@ public class TileOverlay extends Overlay
         Color base = resolveColor(entry.color, entry.tileType);
         int fillAlpha = entry.color == null ? TURF_WARS_FILL_ALPHA_UNCLAIMED : TURF_WARS_FILL_ALPHA_CLAIMED;
 
-        Collection<WorldPoint> localPoints = WorldPoint.toLocalInstance(client.getTopLevelWorldView(), entry.point);
-        for (WorldPoint local : localPoints)
-        {
-            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), local);
-            if (lp == null) continue;
+        // See renderBrutusAttackCrashZone's own doc for why this is LocalPoint.fromWorld directly,
+        // not WorldPoint.toLocalInstance.
+        LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), entry.point);
+        if (lp == null) return;
 
-            Polygon poly = Perspective.getCanvasTilePoly(client, lp);
-            if (poly == null) continue;
+        Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+        if (poly == null) return;
 
-            g.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), fillAlpha));
-            g.fill(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
-        }
+        g.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), fillAlpha));
+        g.fill(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
     }
 
     /** Draws one Repeat After Me arena cell -- three phases, matched against RunePartyPlugin's own
@@ -1175,18 +1174,16 @@ public class TileOverlay extends Overlay
      * per-tile outline, same "one merged zone outline instead" shape renderTurfWarsTile uses. */
     private void fillArenaCell(Graphics2D g, WorldPoint point, Color fill)
     {
-        Collection<WorldPoint> localPoints = WorldPoint.toLocalInstance(client.getTopLevelWorldView(), point);
-        for (WorldPoint local : localPoints)
-        {
-            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), local);
-            if (lp == null) continue;
+        // See renderBrutusAttackCrashZone's own doc for why this is LocalPoint.fromWorld directly,
+        // not WorldPoint.toLocalInstance.
+        LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), point);
+        if (lp == null) return;
 
-            Polygon poly = Perspective.getCanvasTilePoly(client, lp);
-            if (poly == null) continue;
+        Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+        if (poly == null) return;
 
-            g.setColor(fill);
-            g.fill(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
-        }
+        g.setColor(fill);
+        g.fill(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
     }
 
     /** Draws one Crab Rave arena cell -- fill only (see fillArenaCell), no per-tile outline, just
@@ -1270,34 +1267,32 @@ public class TileOverlay extends Overlay
     {
         boolean visited = plugin.isRainbowRushTileVisited(entry.pathIndex);
 
-        Collection<WorldPoint> localPoints = WorldPoint.toLocalInstance(client.getTopLevelWorldView(), entry.point);
-        for (WorldPoint local : localPoints)
+        // See renderBrutusAttackCrashZone's own doc for why this is LocalPoint.fromWorld directly,
+        // not WorldPoint.toLocalInstance.
+        LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), entry.point);
+        if (lp == null) return;
+
+        Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+        if (poly == null) return;
+
+        Path2D shape = roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX);
+        if (visited)
         {
-            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), local);
-            if (lp == null) continue;
-
-            Polygon poly = Perspective.getCanvasTilePoly(client, lp);
-            if (poly == null) continue;
-
-            Path2D shape = roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX);
-            if (visited)
+            Shape oldClip = g.getClip();
+            g.clip(shape);
+            Rectangle bounds = shape.getBounds();
+            int stripeCount = RAINBOW_RUSH_STRIPE_COLORS.length;
+            int bandHeight = Math.max(1, (bounds.height + stripeCount - 1) / stripeCount);
+            for (int i = 0; i < stripeCount; i++)
             {
-                Shape oldClip = g.getClip();
-                g.clip(shape);
-                Rectangle bounds = shape.getBounds();
-                int stripeCount = RAINBOW_RUSH_STRIPE_COLORS.length;
-                int bandHeight = Math.max(1, (bounds.height + stripeCount - 1) / stripeCount);
-                for (int i = 0; i < stripeCount; i++)
-                {
-                    g.setColor(RAINBOW_RUSH_STRIPE_COLORS[i]);
-                    g.fillRect(bounds.x, bounds.y + i * bandHeight, bounds.width, bandHeight);
-                }
-                g.setClip(oldClip);
+                g.setColor(RAINBOW_RUSH_STRIPE_COLORS[i]);
+                g.fillRect(bounds.x, bounds.y + i * bandHeight, bounds.width, bandHeight);
             }
-            g.setColor(RAINBOW_RUSH_OUTLINE_COLOR);
-            g.setStroke(SOLID_STROKE);
-            g.draw(shape);
+            g.setClip(oldClip);
         }
+        g.setColor(RAINBOW_RUSH_OUTLINE_COLOR);
+        g.setStroke(SOLID_STROKE);
+        g.draw(shape);
     }
 
     /** Builds a rounded-corner outline of {@code poly}, offset inward by {@code insetPx} along
