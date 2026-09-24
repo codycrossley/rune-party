@@ -48,6 +48,13 @@ public final class GnomeNpcOverlay extends Overlay
     private final SceneObjectSet<WorldPoint> objects;
     private final SceneObjectSet<WorldPoint> flankingProps;
 
+    // arenaCenter()'s own resolved result, cached from the first non-empty read -- see that
+    // method's own doc for why re-scanning the 25-tile arena + a manual min/max pass every one of
+    // the ~50 frames/sec render() runs is unnecessary: the ceremony arena's center is fixed the
+    // instant it swaps in and never moves again until clear() (ceremony end) wipes this back to
+    // null.
+    private WorldPoint cachedArenaCenter;
+
     public GnomeNpcOverlay(Client client, RunePartyPlugin plugin)
     {
         this.client = client;
@@ -99,9 +106,12 @@ public final class GnomeNpcOverlay extends Overlay
 
     /** The ceremony arena's own exact middle tile -- the 5x5 CEREMONY_TILE block's own
      * bounding-box center. Null if the arena hasn't swapped in yet, or has already been restored
-     * (the ceremony's over). */
+     * (the ceremony's over). Resolved once and cached (see cachedArenaCenter's own doc) --
+     * everything past the first non-empty read just returns that cached value. */
     private WorldPoint arenaCenter()
     {
+        if (cachedArenaCenter != null) return cachedArenaCenter;
+
         List<WorldPoint> tiles = plugin.findCeremonyArenaTiles();
         if (tiles.isEmpty()) return null;
 
@@ -113,7 +123,8 @@ public final class GnomeNpcOverlay extends Overlay
             minY = Math.min(minY, p.getY());
             maxY = Math.max(maxY, p.getY());
         }
-        return new WorldPoint((minX + maxX) / 2, (minY + maxY) / 2, tiles.get(0).getPlane());
+        cachedArenaCenter = new WorldPoint((minX + maxX) / 2, (minY + maxY) / 2, tiles.get(0).getPlane());
+        return cachedArenaCenter;
     }
 
     /** Despawns and forgets the Gnome RuneLiteObject and both flanking props -- see
@@ -123,5 +134,6 @@ public final class GnomeNpcOverlay extends Overlay
     {
         objects.clear();
         flankingProps.clear();
+        cachedArenaCenter = null; // see that field's own doc -- forces a fresh resolve for the next ceremony
     }
 }

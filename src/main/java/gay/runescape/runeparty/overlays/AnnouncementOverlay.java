@@ -30,6 +30,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
 import java.util.function.BiFunction;
@@ -1784,19 +1785,36 @@ public class AnnouncementOverlay extends Overlay
     /** Word-wraps {@code text} onto as many lines as needed to stay within {@code maxWidth} pixels,
      * each centered and drawn {@code lineHeight} apart. {@code g}'s font must already be set.
      * Returns the y just past the last line drawn, so callers can lay out what comes next. */
-    private int drawWrappedCenteredText(Graphics2D g, String text, int centerX, int y, int maxWidth, int lineHeight, Color color, float alpha)
+    // Memoizes wrapCenteredLines() below, keyed on the exact (text, maxWidth) pair its own line
+    // breaks depend on. Both current callers (renderMinigameReadyCheck/renderTrueOrFalseQuestion)
+    // redraw the same fixed instructions/question text on every one of the ~50 frames/sec their own
+    // banner stays up (only the pulsing alpha actually changes frame to frame -- see
+    // BannerAnim.pulse), so re-splitting and re-measuring that identical string that often for
+    // byte-identical line breaks was pure waste.
+    private String lastWrappedCenteredText = null;
+    private int lastWrappedCenteredMaxWidth = -1;
+    private List<String> lastWrappedCenteredLines = Collections.emptyList();
+
+    /** Greedy word-wrap against {@code maxWidth}, measured via {@code fm} -- same algorithm
+     * drawWrappedCenteredText always ran inline, just split out so the line-splitting itself (which
+     * never changes frame to frame for a fixed banner's own text) can be cached separately from the
+     * actual per-frame draw below (whose alpha/color legitimately can). */
+    private List<String> wrapCenteredLines(FontMetrics fm, String text, int maxWidth)
     {
-        FontMetrics fm = g.getFontMetrics();
+        if (maxWidth == lastWrappedCenteredMaxWidth && Objects.equals(text, lastWrappedCenteredText))
+        {
+            return lastWrappedCenteredLines;
+        }
+
+        List<String> lines = new ArrayList<>();
         String[] words = text.split(" ");
         StringBuilder line = new StringBuilder();
-        int lineY = y;
         for (String word : words)
         {
             String candidate = line.length() == 0 ? word : line + " " + word;
             if (line.length() > 0 && fm.stringWidth(candidate) > maxWidth)
             {
-                drawCenteredText(g, line.toString(), centerX, lineY, color, alpha);
-                lineY += lineHeight;
+                lines.add(line.toString());
                 line = new StringBuilder(word);
             }
             else
@@ -1804,9 +1822,21 @@ public class AnnouncementOverlay extends Overlay
                 line = new StringBuilder(candidate);
             }
         }
-        if (line.length() > 0)
+        if (line.length() > 0) lines.add(line.toString());
+
+        lastWrappedCenteredText = text;
+        lastWrappedCenteredMaxWidth = maxWidth;
+        lastWrappedCenteredLines = lines;
+        return lines;
+    }
+
+    private int drawWrappedCenteredText(Graphics2D g, String text, int centerX, int y, int maxWidth, int lineHeight, Color color, float alpha)
+    {
+        FontMetrics fm = g.getFontMetrics();
+        int lineY = y;
+        for (String line : wrapCenteredLines(fm, text, maxWidth))
         {
-            drawCenteredText(g, line.toString(), centerX, lineY, color, alpha);
+            drawCenteredText(g, line, centerX, lineY, color, alpha);
             lineY += lineHeight;
         }
         return lineY;

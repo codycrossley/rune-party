@@ -24,6 +24,7 @@ import java.awt.RenderingHints;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -510,12 +511,26 @@ public abstract class ChatboxDialogueOverlay extends Overlay
         return blockTopOffset + blockHeight + ascent(g) + BODY_OPTIONS_GAP;
     }
 
+    // Memoizes wrap() below, keyed on the exact (text, maxWidth) pair its own result depends on --
+    // textWidth's own font (RunePartyFonts.DIALOGUE_BITMAP/DIALOGUE_PLAIN) is a fixed, load-once
+    // resource, never varying frame to frame, so wrap()'s output is a pure function of just those
+    // two inputs. drawWrappedText calls this on every one of the ~50 frames/sec render() runs a
+    // dialogue box stays open, but the body text it wraps is static for that whole screen -- only
+    // changing when the encounter/carousel page actually advances -- so this was re-running a full
+    // greedy word-wrap (re-measuring every candidate substring via textWidth) dozens of times a
+    // second for byte-identical output.
+    private String lastWrapText = null;
+    private int lastWrapWidth = -1;
+    private List<String> lastWrapResult = Collections.emptyList();
+
     /** Plain greedy word-wrap against {@code maxWidth} -- good enough for the short, fixed lines
      * these dialogues ever show. Measured via textWidth (the real bitmap font's own per-character
      * advances when loaded, so wrap decisions agree with what actually gets drawn -- not just an
      * AWT approximation the way this always measured before the bitmap font was ported in). */
     private List<String> wrap(Graphics2D g, String text, int maxWidth)
     {
+        if (maxWidth == lastWrapWidth && Objects.equals(text, lastWrapText)) return lastWrapResult;
+
         List<String> lines = new ArrayList<>();
         StringBuilder line = new StringBuilder();
         for (String word : text.split(" "))
@@ -532,6 +547,10 @@ public abstract class ChatboxDialogueOverlay extends Overlay
             }
         }
         if (line.length() > 0) lines.add(line.toString());
+
+        lastWrapText = text;
+        lastWrapWidth = maxWidth;
+        lastWrapResult = lines;
         return lines;
     }
 }

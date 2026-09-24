@@ -111,6 +111,16 @@ public final class CrabRaveNpcOverlay extends Overlay
     // logZoneDiagnosticIfNeeded uses.
     private final Map<Integer, Long> lastDiagnosticLogAt = new HashMap<>();
 
+    // The arena's own bounding-box origin, resolved once from the first non-empty
+    // findCrabRaveTilePoints() read and reused for the rest of the round -- see render()'s own doc
+    // for why re-deriving it (a tile-type scan + two stream().min() reductions) on every one of the
+    // ~50 frames/sec this overlay runs is unnecessary: the arena is fixed the instant it swaps in
+    // and never moves again until clear() (round end) wipes this back to null. Null means "not
+    // resolved yet" -- distinct from a legitimately negative coordinate.
+    private Integer cachedMinX;
+    private Integer cachedMinY;
+    private int cachedPlane;
+
     public CrabRaveNpcOverlay(Client client, RunePartyPlugin plugin)
     {
         this.client = client;
@@ -130,16 +140,23 @@ public final class CrabRaveNpcOverlay extends Overlay
             return null;
         }
 
-        List<WorldPoint> tiles = plugin.findCrabRaveTilePoints();
-        if (tiles.isEmpty())
+        if (cachedMinX == null)
         {
-            clear();
-            return null;
+            List<WorldPoint> tiles = plugin.findCrabRaveTilePoints();
+            if (tiles.isEmpty())
+            {
+                clear();
+                return null;
+            }
+
+            cachedMinX = tiles.stream().mapToInt(WorldPoint::getX).min().orElseThrow();
+            cachedMinY = tiles.stream().mapToInt(WorldPoint::getY).min().orElseThrow();
+            cachedPlane = tiles.get(0).getPlane();
         }
 
-        int minX = tiles.stream().mapToInt(WorldPoint::getX).min().orElseThrow();
-        int minY = tiles.stream().mapToInt(WorldPoint::getY).min().orElseThrow();
-        int plane = tiles.get(0).getPlane();
+        int minX = cachedMinX;
+        int minY = cachedMinY;
+        int plane = cachedPlane;
 
         Set<Integer> desired = new HashSet<>();
         for (int i = 0; i < SPAWNS.size(); i++) desired.add(i);
@@ -218,5 +235,6 @@ public final class CrabRaveNpcOverlay extends Overlay
     public void clear()
     {
         objects.clear();
+        cachedMinX = null; // see that field's own doc -- forces a fresh resolve for the next round
     }
 }

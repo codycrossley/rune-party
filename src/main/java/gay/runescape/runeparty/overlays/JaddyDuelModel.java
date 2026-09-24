@@ -183,12 +183,26 @@ public class JaddyDuelModel extends Overlay
         }
     }
 
+    // Guards updateZoneGeometry()'s own tileReducer scan below against redoing it on every one of
+    // the ~50 frames/sec render() runs for the whole (possibly long) live-duel window -- the two
+    // zones' own centers are fixed the instant the board swaps in for the duel and never move again
+    // until resolve()/clear() ends it, so there's nothing to re-derive once geometryCaptured is
+    // true and TileReducer's own revision() (see that field's own doc) hasn't moved since. Reset by
+    // clear() below, since clearSlot() nulls slotA/slotB.center right out from under a stale "still
+    // captured" flag otherwise -- the next updateZoneGeometry() call has to actually redo the real
+    // scan to repopulate them, not just trust an unchanged revision that predates the wipe.
+    private boolean geometryCaptured = false;
+    private long lastGeometryRevision = -1;
+
     /** Reads the two JADDY_TILE zones' own current colors/centers straight off TileReducer's live
      * snapshot into slotA (TEAM_A_COLOR)/slotB (TEAM_B_COLOR) -- see this class's own doc for why
      * there's no dedicated spawn-point event. Returns false (leaving both slots untouched) if fewer
      * than 2 distinct zone colors are currently on the board, e.g. mid board-swap. */
     private boolean updateZoneGeometry()
     {
+        long revision = tileReducer.revision();
+        if (geometryCaptured && revision == lastGeometryRevision) return true;
+
         List<TileReducer.TileEntry> entries = tileReducer.snapshot();
 
         Integer aMinX = null, aMaxX = null, aMinY = null, aMaxY = null;
@@ -238,6 +252,8 @@ public class JaddyDuelModel extends Overlay
         slotA.facing = centerB;
         slotB.center = centerB;
         slotB.facing = centerA;
+        geometryCaptured = true;
+        lastGeometryRevision = revision;
         return true;
     }
 
@@ -525,6 +541,7 @@ public class JaddyDuelModel extends Overlay
         pendingLoser = null;
         deathApplied = false;
         resolved = false;
+        geometryCaptured = false; // see that field's own doc -- clearSlot below nulls out what it was guarding
         clearSlot(slotA);
         clearSlot(slotB);
     }

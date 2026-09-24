@@ -210,16 +210,18 @@ public class TileOverlay extends Overlay
     private final RuneMatchRuneModel runeMatchRuneModel;
     private final BalloonModel balloonModel;
 
-    // Guards goldenGnomeModel/coinTrapModel/arenaFireModel/tableModel/pondModel's own update()
-    // calls below (see renderCommittedCourse) against redoing their SceneObjectSet diff/spawn work
-    // on every single one of the ~50 frames/sec render() runs -- once a RuneLiteObject is spawned
-    // and positioned, the game engine itself keeps drawing it every frame with zero further plugin
-    // involvement, so there's nothing to redo until the tiles these five actually key off of
-    // (GOLDEN_GNOME_TILE/COIN_TRAP_TILE/ARENA_TILE/table tiles/POND_TILE) really change -- at most
-    // once per TILE_MARKED/TILES_MARKED event, never once per rendered frame. lastModelSyncRevision
-    // pairs with TileReducer's own revision() (see that field's own doc); lastModelSyncPending pairs
-    // with isMinigameSelectionPending() specifically because that flag alone (a fixed timer, not a
-    // tile mutation) can flip the FILTERED `entries` these five actually see -- via
+    // Guards arenaFireModel/tableModel/pondModel's own update() calls below (see
+    // renderCommittedCourse) against redoing their SceneObjectSet diff/spawn work on every single
+    // one of the ~50 frames/sec render() runs -- once a RuneLiteObject is spawned and positioned,
+    // the game engine itself keeps drawing it every frame with zero further plugin involvement, so
+    // there's nothing to redo until the tiles these three actually key off of (ARENA_TILE/table
+    // tiles/POND_TILE) really change -- at most once per TILE_MARKED/TILES_MARKED event, never once
+    // per rendered frame. Deliberately does NOT also guard goldenGnomeModel/coinTrapModel -- see
+    // their own call site's doc for why those two need real per-frame re-evaluation regardless of
+    // whether any tile actually changed. lastModelSyncRevision pairs with TileReducer's own
+    // revision() (see that field's own doc); lastModelSyncPending pairs with
+    // isMinigameSelectionPending() specifically because that flag alone (a fixed timer, not a tile
+    // mutation) can flip the FILTERED `entries` these three actually see -- via
     // filterOutMinigameOnlyTiles -- without tileReducer's own revision changing at all, so caching
     // on revision alone would miss exactly the moment the selection wheel settles and a
     // mini-game's own decorated tiles should first appear. -1/false so the very first render() call
@@ -402,12 +404,16 @@ public class TileOverlay extends Overlay
             renderOutlinedTile(g, entry.point, base, SOLID_STROKE);
         }
 
-        renderFishingZoneOutline(g, entries);
         // Each gated on its own mini-game actually being active -- a full scan of `entries` (a
         // whole course's worth of tiles) to find zero matches is pure waste on every single one of
         // the ~50 frames/sec render() runs during ordinary turn-based play, which is the
         // overwhelming majority of a game's playtime; these tile types only ever exist on the board
-        // at all while their own mini-game's board-swap is live.
+        // at all while their own mini-game's board-swap is live. renderFishingZoneOutline is no
+        // exception -- Fishing Contest board-swaps in FISHING_TILE/POND_TILE exactly like every
+        // other mini-game here (see minigames/fishing_contest.py's own prepare()) -- it was just
+        // missed in an earlier pass since it's its own bespoke scan rather than a call through
+        // renderArenaOutline/renderColorGroupedOutlines like the rest of these.
+        if (plugin.isFishingContestActive()) renderFishingZoneOutline(g, entries);
         if (plugin.isTurfWarsActive()) renderArenaOutline(g, entries, "TURF_WARS_TILE", TURF_WARS_ARENA_OUTLINE_COLOR);
         if (plugin.isSandwichRushActive()) renderArenaOutline(g, entries, "SANDWICH_RUSH_TILE", SANDWICH_RUSH_ARENA_OUTLINE_COLOR);
         if (plugin.isHotPotatoActive()) renderArenaOutline(g, entries, "HOT_POTATO_TILE", HOT_POTATO_ARENA_OUTLINE_COLOR);
@@ -427,14 +433,25 @@ public class TileOverlay extends Overlay
         if (plugin.isBrutusAttackActive()) renderColorGroupedOutlines(g, entries, "BRUTUS_ATTACK_TILE");
         renderBrutusAttackCrashZone(g);
 
-        // See lastModelSyncRevision's own doc -- skips redoing these five models' SceneObjectSet
-        // diff/spawn work on frames where nothing they actually key off of has changed, rather than
-        // unconditionally redoing it on every single rendered frame.
+        // goldenGnomeModel/coinTrapModel are deliberately NOT gated below -- unlike the other three,
+        // their own update() isn't a pure function of `entries` at all: each has its own wall-clock
+        // choreography window (RunePartyPlugin#getGoldenGnomeMoveHideOldAt/ShowNewAt,
+        // #getCoinTrapTriggerUntil) that needs update() to keep getting called, frame after frame,
+        // purely because time is passing -- with no accompanying tile mutation to bump
+        // tileReducer's own revision() at all. Gating these two behind the same revision check an
+        // earlier version of this method used left the old Golden Gnome spot force-persisted
+        // forever the instant a relocation's own hide-old/show-new window opened, since nothing
+        // ever called update() again to notice the window had closed (see GoldenGnomeModel's own
+        // doc for the choreography this is protecting).
+        goldenGnomeModel.update(entries);
+        coinTrapModel.update(entries);
+
+        // See lastModelSyncRevision's own doc -- these three, by contrast, really are pure
+        // functions of `entries`, so skipping their own SceneObjectSet diff/spawn work on frames
+        // where nothing they key off of has changed is safe.
         long currentRevision = tileReducer.revision();
         if (currentRevision != lastModelSyncRevision || minigameSelectionPending != lastModelSyncPending)
         {
-            goldenGnomeModel.update(entries);
-            coinTrapModel.update(entries);
             arenaFireModel.update(entries);
             tableModel.update(entries);
             pondModel.update(entries);

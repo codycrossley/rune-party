@@ -25,6 +25,7 @@ import java.awt.Graphics2D;
 import java.awt.Polygon;
 import java.awt.RenderingHints;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -489,16 +490,32 @@ public class RunePartyMapOverlay extends Overlay
      * Crab Rave, Brutus Attack, Repeat After Me) -- this map is a schematic of the standard course,
      * not whatever arena happens to be swapped in for the mini-game currently playing. Same flag
      * (and reasoning) CourseBuilder's own "Set Tile" submenu already filters on. */
+    // Memoizes buildLegendRows() below, keyed on plugin.getTileTypeCatalog()'s own object identity
+    // -- that field is fetched once at startup and only ever reassigned to a genuinely new Map
+    // reference the one time the real catalog actually lands (see RunePartyPlugin#tileTypeCatalog's
+    // own doc), never mutated in place, so an identity check is exactly the right invalidation
+    // signal. drawLegendFooter calls this every one of the ~50 frames/sec render() runs while the
+    // map overlay is open, previously rebuilding the whole (static) legend list from scratch every
+    // time.
+    private Map<String, ApiClient.TileTypeOut> lastLegendCatalog = null;
+    private List<LegendRow> lastLegendRows = Collections.emptyList();
+
     private List<LegendRow> buildLegendRows()
     {
+        Map<String, ApiClient.TileTypeOut> catalog = plugin.getTileTypeCatalog();
+        if (catalog == lastLegendCatalog) return lastLegendRows;
+
         List<LegendRow> rows = new ArrayList<>();
-        for (ApiClient.TileTypeOut t : plugin.getTileTypeCatalog().values())
+        for (ApiClient.TileTypeOut t : catalog.values())
         {
             if (t.isModifier || t.isMinigameTile) continue;
             rows.add(new LegendRow(LegendShape.SQUARE, tileColor(t.key, null), t.displayName != null ? t.displayName : t.key));
         }
         rows.add(new LegendRow(LegendShape.TRIANGLE, GOLDEN_GNOME_MARKER, modifierName("GOLDEN_GNOME_TILE", "Golden Gnome")));
         rows.add(new LegendRow(LegendShape.DIAMOND, COIN_TRAP_MARKER, modifierName("COIN_TRAP_TILE", "Coin Trap")));
+
+        lastLegendCatalog = catalog;
+        lastLegendRows = rows;
         return rows;
     }
 
