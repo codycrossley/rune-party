@@ -10,6 +10,7 @@ import gay.runescape.runeparty.SceneObjectSet;
 import gay.runescape.runeparty.TileReducer;
 
 import gay.runescape.runeparty.models.ArenaFireModel;
+import gay.runescape.runeparty.models.BalloonModel;
 import gay.runescape.runeparty.models.CoinRushModel;
 import gay.runescape.runeparty.models.CoinTrapModel;
 import gay.runescape.runeparty.models.GoldenGnomeModel;
@@ -136,6 +137,11 @@ public class TileOverlay extends Overlay
     // treatment SANDWICH_RUSH_ARENA_OUTLINE_COLOR's own doc gives (the arena floor never changes
     // color and everyone's just standing/gathering on it, so per-tile fill would be noise).
     private static final Color CEREMONY_ARENA_OUTLINE_COLOR = new Color(184, 134, 11, 190);
+    // Balloon Pop's own arena outline -- a festive pink matching BalloonPopTile's own served
+    // color_hex (#FF6FA8), same "merged outline, no per-tile fill" treatment
+    // SANDWICH_RUSH_ARENA_OUTLINE_COLOR's own doc gives (this is a plain gather-and-click floor,
+    // never a walked path, so per-tile fill would be noise).
+    private static final Color BALLOON_POP_ARENA_OUTLINE_COLOR = new Color(255, 111, 168, 190);
     // A bright gold fill for whichever cells the current round's own sneak peek is revealing (see
     // RunePartyPlugin#isRepeatAfterMePeekActive/getRepeatAfterMeTargetIndices) -- deliberately
     // eye-catching, since the whole point of the peek is to be easy to memorize at a glance.
@@ -202,6 +208,7 @@ public class TileOverlay extends Overlay
     private final TableModel tableModel;
     private final SandwichItemModel sandwichItemModel;
     private final RuneMatchRuneModel runeMatchRuneModel;
+    private final BalloonModel balloonModel;
 
     public TileOverlay(Client client, RunePartyConfig config, RunePartyPlugin plugin, TileReducer tileReducer)
     {
@@ -218,6 +225,7 @@ public class TileOverlay extends Overlay
         this.tableModel = new TableModel(client);
         this.sandwichItemModel = new SandwichItemModel(client);
         this.runeMatchRuneModel = new RuneMatchRuneModel(client);
+        this.balloonModel = new BalloonModel(client, plugin);
 
         setPosition(OverlayPosition.DYNAMIC);
         setLayer(OverlayLayer.ABOVE_SCENE);
@@ -236,6 +244,7 @@ public class TileOverlay extends Overlay
             clearTableModels();
             clearSandwichItemModels();
             clearRuneMatchModels();
+            clearBalloonModels();
             return null;
         }
         GamePhase phase = plugin.getPhase();
@@ -249,6 +258,7 @@ public class TileOverlay extends Overlay
             clearTableModels();
             clearSandwichItemModels();
             clearRuneMatchModels();
+            clearBalloonModels();
             return null;
         }
 
@@ -266,12 +276,14 @@ public class TileOverlay extends Overlay
             coinRushModel.clear();
             sandwichItemModel.update(Collections.emptyMap());
             runeMatchRuneModel.update(Collections.emptyMap());
+            balloonModel.clear();
         }
         else
         {
             coinRushModel.update();
             sandwichItemModel.update(plugin.getSandwichRushSpawns());
             runeMatchRuneModel.update(plugin.isRuneMatchActive() ? plugin.getRuneMatchRevealedSpawns() : Collections.emptyMap());
+            balloonModel.update();
         }
 
         if (plugin.isCoursePlacementMode())
@@ -352,6 +364,7 @@ public class TileOverlay extends Overlay
             if ("SANDWICH_RUSH_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- these tiles never change color, so an individual fill per tile is just noise
             if ("HOT_POTATO_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- same "never change color, individual fill is just noise" reasoning as Sandwich Rush's own SANDWICH_RUSH_TILE
             if ("CEREMONY_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- same "never change color, individual fill is just noise" reasoning as Sandwich Rush's own SANDWICH_RUSH_TILE; this is a gather-and-idle floor, not a walked path
+            if ("BALLOON_POP_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- same "never change color, individual fill is just noise" reasoning as Sandwich Rush's own SANDWICH_RUSH_TILE; this is a gather-and-click floor, not a walked path
             if ("REPEAT_AFTER_ME_TILE".equals(entry.tileType)) { renderRepeatAfterMeTile(g, entry, repeatAfterMeTiles); continue; } // fill only (peek/lit cells), no per-tile outline -- see renderRepeatAfterMeTile
             if ("CRAB_RAVE_TILE".equals(entry.tileType)) { renderCrabRaveTile(g, entry, crabRaveTiles, crabRaveLitColors); continue; } // fill only (randomly-flashing "club light" cells), no per-tile outline -- see renderCrabRaveTile
             if ("JADDY_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline per color instead, see renderColorGroupedOutlines below -- a Jad's own zone is a fixed-color area a huge model stands on top of, not a walked path, so a per-tile fill/outline would just be noise under it
@@ -376,6 +389,7 @@ public class TileOverlay extends Overlay
         renderArenaOutline(g, entries, "REPEAT_AFTER_ME_TILE", REPEAT_AFTER_ME_ARENA_OUTLINE_COLOR);
         renderArenaOutline(g, entries, "CRAB_RAVE_TILE", CRAB_RAVE_ARENA_OUTLINE_COLOR);
         renderArenaOutline(g, entries, "RUNE_MATCH_TILE", RUNE_MATCH_ARENA_OUTLINE_COLOR);
+        renderArenaOutline(g, entries, "BALLOON_POP_TILE", BALLOON_POP_ARENA_OUTLINE_COLOR);
         // Gated on isCeremonyIntroRevealed() (not just phase/tile-presence like every other arena
         // outline above) -- the real board swap can land while the final mini-game's own rewards/
         // round-complete recap is still playing (see CeremonyPresentation's own doc), so without
@@ -611,6 +625,12 @@ public class TileOverlay extends Overlay
     public void clearRuneMatchModels()
     {
         runeMatchRuneModel.clear();
+    }
+
+    /** Despawns and forgets every Balloon Pop balloon RuneLiteObject. */
+    public void clearBalloonModels()
+    {
+        balloonModel.clear();
     }
 
     /** Despawns and forgets every Arena Fire RuneLiteObject. */

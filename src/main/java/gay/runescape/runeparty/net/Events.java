@@ -32,6 +32,21 @@ public final class Events
      * doesn't get paid at the end. */
     public static final String ARENA_PLAYER_ELIMINATED = "ARENA_PLAYER_ELIMINATED";
     /** Server-only echo of this client's (or another seated player's) own one-shot
+     * confirm-balloon-pop-arrival call -- never dispatched on here, the server's own arrival gate
+     * is what actually reacts to it (see minigames/balloon_pop.py). Same treatment
+     * ARENA_ARRIVAL_CONFIRMED/RUNE_MATCH_ARRIVAL_CONFIRMED already get above. */
+    public static final String BALLOON_POP_ARRIVAL_CONFIRMED = "BALLOON_POP_ARRIVAL_CONFIRMED";
+    /** Another player's own balloon just grew another level (1-9, one per 10 real clicks their own
+     * client counted locally) -- dispatched on directly so BalloonPopPresentation can fold it into
+     * its own growthLevelByPlayer map, the real state models/BalloonModel reads every frame to
+     * decide every seated player's own current balloon scale. */
+    public static final String BALLOON_POP_GROWTH = "BALLOON_POP_GROWTH";
+    /** A player's own balloon just reached its 100th click and burst -- fired for every player who
+     * reaches 100, not just the eventual winner (everyone's own balloon still visibly pops on
+     * every client). Dispatched on directly so BalloonPopPresentation can trigger that player's own
+     * burst spotanim/despawn and, the first time this lands each round, record the real winner. */
+    public static final String BALLOON_POP_POPPED = "BALLOON_POP_POPPED";
+    /** Server-only echo of this client's (or another seated player's) own one-shot
      * confirm-brutus-arrival call -- never dispatched on here, the server's own arrival gate is
      * what actually reacts to it (see minigames/brutus_attack.py). */
     public static final String BRUTUS_ARRIVAL_CONFIRMED = "BRUTUS_ARRIVAL_CONFIRMED";

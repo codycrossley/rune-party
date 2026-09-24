@@ -30,6 +30,7 @@ import com.google.gson.Gson;
 import com.google.inject.Provides;
 import gay.runescape.runeparty.items.Items;
 import gay.runescape.runeparty.models.ArenaFireModel;
+import gay.runescape.runeparty.models.BalloonModel;
 import gay.runescape.runeparty.models.HotPotatoExplosionModel;
 import gay.runescape.runeparty.overlays.AnnouncementOverlay;
 import gay.runescape.runeparty.overlays.ClickClickClickOverlay;
@@ -81,6 +82,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.function.ToIntFunction;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import net.runelite.api.ChatMessageType;
@@ -91,11 +93,13 @@ import net.runelite.api.MenuEntry;
 import net.runelite.api.Player;
 import net.runelite.api.Point;
 import net.runelite.api.Tile;
+import net.runelite.api.WorldView;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.MenuEntryAdded;
+import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.MenuOpened;
 import net.runelite.api.gameval.AnimationID;
 import net.runelite.api.gameval.SpotanimID;
@@ -467,6 +471,14 @@ public class RunePartyPlugin extends Plugin
      * Arrival-gated like Arena/Hot Potato/etc -- see ARRIVAL_GATHER_KEYS below. */
     public static final String RUNE_MATCH_KEY = "rune-match";
 
+    /** Client-side key for the Balloon Pop mini-game -- must match the server's own registration
+     * (minigames/balloon_pop.py). A rapid-clicking race: every seated PLAYER spams left-clicks on
+     * their own standing tile, growing their own balloon (see BalloonPopPresentation/
+     * models/BalloonModel) every 10 clicks, until reaching 100 pops it and wins outright
+     * (winner-take-all, not ranked). Arrival-gated like Arena/Hot Potato/Rune Match/etc -- see
+     * ARRIVAL_GATHER_KEYS below. */
+    public static final String BALLOON_POP_KEY = "balloon-pop";
+
     /** Backup ceiling on a Rune Match round if this client hasn't personally finished by then --
      * not a normal win condition, same "failsafe, not the real end condition" shape
      * RAINBOW_RUSH_MAX_DURATION_MS's own doc already gives. Must stay in lockstep with the
@@ -591,7 +603,7 @@ public class RunePartyPlugin extends Plugin
      * fit for this same "fire once, when the round begins" flash without its own separate handling
      * -- left out of scope here rather than half-wired. */
     public static final Set<String> ARRIVAL_GATHER_KEYS = Set.of(
-        ARENA_KEY, TURF_WARS_KEY, SANDWICH_RUSH_KEY, JADDY_KEY, HOT_POTATO_KEY, DANCE_DANCE_RUNESCAPE_KEY, REPEAT_AFTER_ME_KEY, RUNE_MATCH_KEY);
+        ARENA_KEY, TURF_WARS_KEY, SANDWICH_RUSH_KEY, JADDY_KEY, HOT_POTATO_KEY, DANCE_DANCE_RUNESCAPE_KEY, REPEAT_AFTER_ME_KEY, RUNE_MATCH_KEY, BALLOON_POP_KEY);
 
     /** Mini-games whose own round doesn't start on the generic "3...2...1...BEGIN!" countdown --
      * AnnouncementOverlay's own render loop routes each of these to renderArrivalGatherMessage
@@ -950,6 +962,16 @@ public class RunePartyPlugin extends Plugin
      * triggerSpotAnimOnPlayer), same as TELE_BLOCK_IMPACT_SPOTANIM_ID above. */
     public static final int ARENA_ELIMINATION_SPOTANIM_ID = SpotanimID.FX_VOIDWAKER_IMPACT;
 
+    /** Spotanim played directly on the winner's own actor the instant their balloon reaches 100
+     * clicks and pops (see BALLOON_POP_POPPED handling) -- the same real explosion graphic the
+     * skwid-games plugin's own landmine detonation uses (there spawned manually as a world-space
+     * RuneLiteObject via a raw model/anim pair, model 3960 + anim 1230; SpotanimID.
+     * REGICIDE_BARRELFLIGHT_EXPLODING is the actual named spotanim constant that produces that
+     * same model+anim, playable directly via Actor#createSpotAnim -- see triggerSpotAnimOnPlayer --
+     * same call shape as ARENA_ELIMINATION_SPOTANIM_ID above, just following the winner's own
+     * actor instead of sitting at a fixed world point. */
+    public static final int BALLOON_POP_EXPLOSION_SPOTANIM_ID = SpotanimID.REGICIDE_BARRELFLIGHT_EXPLODING;
+
     /** Spotanim played on the game's own overall winner the instant their name is revealed (see
      * CeremonyPresentation#scheduleWinnerReveal) -- the real "reached level 99" fireworks display,
      * not a generic placeholder, played via Actor#createSpotAnim (see triggerSpotAnimOnPlayer) so
@@ -1235,6 +1257,18 @@ public class RunePartyPlugin extends Plugin
     // the local 30-second timer would have fired the submission itself. ----
     private volatile boolean clickClickClickSubmitted = false;
     private final Set<WorldPoint> clickClickClickTiles = new HashSet<>();
+    // ---- Balloon Pop (entirely client-local click-counting, same "never reported per-click"
+    // shape clickClickClickTiles above already uses -- only every 10th click, and the 100th,
+    // actually leave this client, see registerBalloonPopClick/onMenuOptionClicked's own Balloon
+    // Pop branch). balloonPopLocalClicks/balloonPopReportedLevel are owned solely by the client
+    // thread (registerBalloonPopClick runs from an event-bus callback), same single-writer
+    // assumption clickClickClickTiles already relies on, so plain (non-atomic) fields are fine
+    // here. balloonPopPopped guards the one-time report-balloon-pop-pop call and is reset on
+    // MINIGAME_STARTED, set defensively on MINIGAME_ENDED too in case a round ends abnormally
+    // (host force-end) before this client's own 100th click would have fired it. ----
+    private int balloonPopLocalClicks = 0;
+    private int balloonPopReportedLevel = 0; // highest growth level (0-9) already reported this round -- never re-sent
+    private volatile boolean balloonPopPopped = false;
     // Real state, applied catch-up or not: whether the current turn's player has already spent
     // their one-item-per-turn allowance -- reset on every TURN_STARTED, set by ITEM_USED. Mirrors
     // the server's own itemUsedThisTurn.
@@ -2196,6 +2230,104 @@ public class RunePartyPlugin extends Plugin
             e -> addChatMessage("Failed to submit your Click, Click, Click result: " + e.getMessage()));
     }
 
+    /** Passively counts a Balloon Pop click -- deliberately NOT the "Walk here" -> custom RUNELITE
+     * entry idiom addClickClickClickMenuEntry uses: this mini-game's own spec calls for spamming
+     * left-click with no visible custom option in either click menu, and RuneLite fires
+     * MenuOptionClicked for every resolved click regardless of whether a plugin ever added an
+     * entry of its own -- so listening for the real MenuAction.WALK landing on the local player's
+     * own current tile counts every genuine left-click on their own feet with nothing injected
+     * into the menu at all. Clicking anywhere else is untouched real walking, exactly as it
+     * always was.
+     * <p>
+     * Resolving *which* tile a WALK action targets does NOT mean hand-converting this event's own
+     * getParam0()/getParam1() -- two earlier attempts at that (treating them as scene indices via
+     * WorldPoint.fromScene, then as raw local units via WorldPoint.fromLocal) both landed tens to
+     * hundreds of tiles away from the real click in live playtests. RuneLite's own bundled
+     * GroundMarkerPlugin (onMenuEntryAdded, gated on MenuAction.WALK) resolves a ground click a
+     * different way entirely: MenuEntry#getWorldViewId() picks out *which* WorldView the click
+     * actually resolved against, and that WorldView's own getSelectedSceneTile() already holds the
+     * exact clicked Tile -- no manual coordinate math at all. Mirrored here.  */
+    @Subscribe
+    public void onMenuOptionClicked(MenuOptionClicked event)
+    {
+        if (phase != GamePhase.ACTIVE || !isBalloonPopActive() || !isMinigamePlayable()) return;
+        if (event.getMenuAction() != MenuAction.WALK) return;
+
+        Player selfPlayer = client.getLocalPlayer();
+        if (selfPlayer == null) return;
+        WorldPoint selfPos = selfPlayer.getWorldLocation();
+        if (selfPos == null) return;
+
+        WorldView worldView = client.getWorldView(event.getMenuEntry().getWorldViewId());
+        if (worldView == null) return;
+        Tile selectedTile = worldView.getSelectedSceneTile();
+        if (selectedTile == null) return;
+        WorldPoint clicked = WorldPoint.fromLocalInstance(client, selectedTile.getLocalLocation());
+
+        log.debug("[balloon-pop-click-diagnostic] clickedPoint={} selfPos={} matches={}", clicked, selfPos, clicked.equals(selfPos));
+
+        if (!clicked.equals(selfPos)) return;
+
+        registerBalloonPopClick();
+    }
+
+    /** Records one Balloon Pop click -- called from onMenuOptionClicked's own Balloon Pop branch.
+     * Re-checks isBalloonPopActive()/balloonPopPopped here on top of that method's own gate, since
+     * the round could have ended in the moment between the click landing and this running. Every
+     * 10th click reports a new growth level (1-9); the 100th pops the balloon outright instead --
+     * see BalloonPopPresentation's own doc for why neither ever reports more often than that. */
+    private void registerBalloonPopClick()
+    {
+        if (!isBalloonPopActive() || balloonPopPopped) return;
+
+        balloonPopLocalClicks++;
+
+        if (balloonPopLocalClicks >= 100)
+        {
+            balloonPopPopped = true;
+            submitBalloonPopPop();
+            return;
+        }
+
+        int level = balloonPopLocalClicks / 10;
+        if (level > balloonPopReportedLevel)
+        {
+            balloonPopReportedLevel = level;
+            submitBalloonPopGrowth(level);
+        }
+    }
+
+    /** Fires one Balloon Pop growth milestone off to the server -- called at most 9 times per
+     * round, once per completed 10-click level (see registerBalloonPopClick). Fire-and-forget,
+     * same "snapshot at call time, no retry on failure" shape submitClickClickClickResult uses --
+     * a lost report just means this player's own balloon visibly lags a level behind on other
+     * clients until the next one lands, not a hang. */
+    private void submitBalloonPopGrowth(int level)
+    {
+        String self = localRsn();
+        final String gid = gameId;
+        final String token = playerToken;
+        if (self == null || gid == null || token == null) return;
+
+        submitAction("Report Balloon Pop growth",
+            () -> apiClient.reportBalloonPopGrowth(gid, self, token, level),
+            e -> addChatMessage("Failed to report your Hot Click Balloon growth: " + e.getMessage()));
+    }
+
+    /** Fires this player's own one-shot "I just reached 100 clicks" report -- called exactly once
+     * per round, the instant registerBalloonPopClick's own local count reaches 100. */
+    private void submitBalloonPopPop()
+    {
+        String self = localRsn();
+        final String gid = gameId;
+        final String token = playerToken;
+        if (self == null || gid == null || token == null) return;
+
+        submitAction("Report Balloon Pop pop",
+            () -> apiClient.reportBalloonPopPop(gid, self, token),
+            e -> addChatMessage("Failed to report your balloon popping: " + e.getMessage()));
+    }
+
     private static final String GOLDEN_GNOME_PURCHASE_OPTION = "<col=00FF00>Purchase Golden Gnome</col>";
 
     /** The Golden Gnome's own point if the mouse is genuinely over its model's real clickbox (see
@@ -2466,6 +2598,14 @@ public class RunePartyPlugin extends Plugin
         return findTilesByType("RUNE_MATCH_TILE");
     }
 
+    /** Every currently-marked Balloon Pop arena tile -- see BalloonPopPresentation#onTick, the
+     * only reader: the local client checks its own position against this set to decide when to
+     * fire its own one-shot confirm-balloon-pop-arrival report. */
+    public List<WorldPoint> findBalloonPopArenaTiles()
+    {
+        return findTilesByType("BALLOON_POP_TILE");
+    }
+
     /** Every currently-marked Golden Gnome Awards ceremony arena tile -- see
      * CeremonyPresentation#onTick, the only reader: the local client checks its own position
      * against this set to decide when to fire its own one-shot confirm-ceremony-arrival report. */
@@ -2686,6 +2826,15 @@ public class RunePartyPlugin extends Plugin
         if (isRuneMatchActive())
         {
             minigamePresentation.runeMatch().onTick(selfPlayer);
+        }
+
+        // Also independent of the turn engine below -- Balloon Pop's own one-shot
+        // confirm-balloon-pop-arrival report lives inside this one call (see
+        // BalloonPopPresentation#onTick); click counting/growth/pop reporting happens separately,
+        // from the synthetic "Pop!" menu entry, not from this per-tick call.
+        if (isBalloonPopActive())
+        {
+            minigamePresentation.balloonPop().onTick(selfPlayer);
         }
 
         // Also independent of the turn engine below -- unlike every check above, this isn't gated
@@ -3971,6 +4120,40 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
+            case Events.BALLOON_POP_POPPED:
+            {
+                // The winner's own last-known growth level has to be read BEFORE
+                // minigamePresentation.apply folds this same event -- that fold removes them from
+                // growthLevelByPlayer outright (their balloon's already gone, see
+                // BalloonPopPresentation's own doc), so this is the last moment that level's still
+                // available to size the burst's own height against.
+                String winnerRsn = Json.requiredStr(e.payload, type, "player");
+                Integer winnerLevel = winnerRsn != null ? getBalloonPopGrowthLevelByPlayer().get(winnerRsn) : null;
+
+                // minigamePresentation.apply folds the winner/growthLevelByPlayer removal itself
+                // unconditionally -- real state, same "fold now regardless of catch-up" shape every
+                // other case in this switch uses -- but the burst itself is a one-shot cosmetic
+                // reveal, same as ARENA_PLAYER_ELIMINATED's own spotanim just above: a reconnecting
+                // client simply doesn't see a replay of a pop that's already come and gone.
+                minigamePresentation.apply(e, catchingUp);
+                if (!catchingUp)
+                {
+                    if (winnerRsn != null)
+                    {
+                        int level = winnerLevel != null ? winnerLevel : 0;
+                        // Height is computed from the winner's own live Player the instant it's
+                        // found (see triggerSpotAnimOnPlayer's own ToIntFunction overload) via the
+                        // exact same formula BalloonModel#update uses for that balloon's own real
+                        // hover height -- so the burst actually lands where that balloon was, not
+                        // a separately-guessed fixed height.
+                        triggerSpotAnimOnPlayer(BALLOON_POP_EXPLOSION_SPOTANIM_ID, winnerRsn,
+                            p -> BalloonModel.hoverHeightFor(p, level));
+                        addChatMessage(winnerRsn + "'s balloon popped! They win this round.");
+                    }
+                }
+                break;
+            }
+
             case Events.GOLDEN_GNOME_MOVED:
             {
                 goldenGnomePresentation.apply(e, catchingUp);
@@ -4096,6 +4279,7 @@ public class RunePartyPlugin extends Plugin
             case Events.RAINBOW_RUSH_FINISHER_FOUND:
             case Events.RUNE_MATCH_BOARD_SEEDED:
             case Events.RUNE_MATCH_FINISHER_FOUND:
+            case Events.BALLOON_POP_GROWTH:
             case Events.PLAYER_TRANSFORMED:
             case Events.BRUTUS_ROUND_STARTED:
             case Events.BRUTUS_ARRIVAL_PENDING:
@@ -4123,6 +4307,11 @@ public class RunePartyPlugin extends Plugin
                     // Click, Click instance starts with no clicks and no submission.
                     clickClickClickTiles.clear();
                     clickClickClickSubmitted = false;
+                    // Same reasoning -- a fresh Balloon Pop instance starts with no clicks, no
+                    // growth reported yet, and hasn't popped.
+                    balloonPopLocalClicks = 0;
+                    balloonPopReportedLevel = 0;
+                    balloonPopPopped = false;
                 }
                 minigamePresentation.apply(e, catchingUp);
                 break;
@@ -4141,6 +4330,7 @@ public class RunePartyPlugin extends Plugin
                 fishingCatchSubmitted = true;
                 awaitingHeadbangFinish = false;
                 clickClickClickSubmitted = true;
+                balloonPopPopped = true;
                 minigamePresentation.handleMinigameEnded(e.payload, catchingUp, maxRounds, completedRounds);
                 break;
 
@@ -4209,6 +4399,33 @@ public class RunePartyPlugin extends Plugin
     public void triggerSpotAnimOnPlayer(int spotAnimId, String rsn, int height)
     {
         triggerSpotAnimOnPlayer(spotAnimId, rsn, height, 0);
+    }
+
+    /** Same as triggerSpotAnimOnPlayer(int, String, int, int), but the height itself is computed
+     * from {@code rsn}'s own live Player the instant it's actually found on the client thread --
+     * for a height that depends on that specific player's own real getLogicalHeight() (see
+     * BalloonModel#hoverHeightFor, BALLOON_POP_POPPED's own caller) rather than one fixed guess
+     * shared by every player regardless of their own build. */
+    public void triggerSpotAnimOnPlayer(int spotAnimId, String rsn, ToIntFunction<Player> heightFn, int delayTicks)
+    {
+        if (rsn == null) return;
+        clientThread.invoke(() ->
+        {
+            for (Player p : client.getPlayers())
+            {
+                if (p == null || p.getName() == null) continue;
+                if (rsn.equalsIgnoreCase(Text.toJagexName(p.getName())))
+                {
+                    p.createSpotAnim(spotAnimId, spotAnimId, heightFn.applyAsInt(p), delayTicks);
+                    return;
+                }
+            }
+        });
+    }
+
+    public void triggerSpotAnimOnPlayer(int spotAnimId, String rsn, ToIntFunction<Player> heightFn)
+    {
+        triggerSpotAnimOnPlayer(spotAnimId, rsn, heightFn, 0);
     }
 
     /** Starts Crab Rave's own CRAB_RAVE_MUSIC_RESOURCE_PATH clip playing, once, the instant its
@@ -4521,6 +4738,15 @@ public class RunePartyPlugin extends Plugin
     /** The local player's own running count of pairs matched so far this round -- see
      * RuneMatchOverlay, the only consumer. */
     public int getRuneMatchSolvedPairCount() { return minigamePresentation.runeMatch().getSolvedPairCount(); }
+
+    public boolean isBalloonPopActive() { return minigamePresentation.isKeyActive(BALLOON_POP_KEY); }
+    /** Every seated player's own latest known balloon growth level (1-9), keyed by real RSN -- a
+     * player who's already popped (or never reported a level at all) simply has no entry. See
+     * models/BalloonModel, the only consumer. */
+    public Map<String, Integer> getBalloonPopGrowthLevelByPlayer() { return minigamePresentation.balloonPop().getGrowthLevelByPlayer(); }
+    /** The real RSN of this round's own Balloon Pop winner, or null if nobody's popped yet. See
+     * models/BalloonModel, the only consumer. */
+    public String getBalloonPopWinnerRsn() { return minigamePresentation.balloonPop().getWinnerRsn(); }
     /** The rsn currently transformed into Brutus for this round -- null before PLAYER_TRANSFORMED
      * lands. See overlays/PlayerTransformOverlay, the only consumer. */
     public String getBrutusAttackBrutusRsn() { return minigamePresentation.brutusAttack().getBrutusRsn(); }

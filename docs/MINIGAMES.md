@@ -12,6 +12,7 @@ means adding a row here in the same change.**
 | Name                   | Key | Description |
 |------------------------|---|---|
 | Flame Field            | `arena` | Get onto the 4x4 arena — tiles heat up and turn red; get caught on one or step off and you're out. Survivors earn coins. |
+| Hot Click Balloon      | `balloon-pop` | Gather in the arena — a balloon floats above your head. Click your own tile as fast as you can to inflate it; first to 100 clicks pops it and wins outright. |
 | Coin Rush              | `coin-rush` | Coins spawn on random tiles across the board; race to grab them for +2 coins each. |
 | Brutus Bullet          | `brutus-attack` | One random player transforms into Brutus and dashes across the arena over several rounds, trying to crash into everyone else before they reach the far zone. |
 | Click! Click! Click!   | `click-click-click` | Right-click "Click!" on as many unique tiles as you can before time runs out. |

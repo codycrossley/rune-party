@@ -419,6 +419,40 @@ public class ApiClient
         postPlayerAction("/v1/games/" + gameId + "/confirm-ceremony-arrival", playerRsn, playerToken, "Confirm ceremony arrival");
     }
 
+    /** A player's own one-shot self-report that it just reached the Balloon Pop arena -- fired the
+     * instant this client locally detects standing on any BALLOON_POP_TILE. No position travels
+     * with this call. See confirmArenaArrival's own doc for the full reasoning behind this shape. */
+    public void confirmBalloonPopArrival(String gameId, String playerRsn, String playerToken) throws IOException
+    {
+        postPlayerAction("/v1/games/" + gameId + "/confirm-balloon-pop-arrival", playerRsn, playerToken, "Confirm Balloon Pop arrival");
+    }
+
+    /** Reports that this client's own local Balloon Pop click count just crossed another 10-click
+     * milestone (level 1-9) -- fired once per milestone, purely so every OTHER seated client can
+     * render this player's own balloon growing in real time (see BalloonPopPresentation's own
+     * doc). Click counting itself never leaves this client until this call. */
+    public void reportBalloonPopGrowth(String gameId, String playerRsn, String playerToken, int level) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("level", level);
+
+        try (Response resp = post("/v1/games/" + gameId + "/report-balloon-pop-growth", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Report Balloon Pop growth failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** Reports that this client's own local Balloon Pop click count just reached 100 and its own
+     * balloon burst -- one-shot, fired regardless of whether this player actually wins the round
+     * (see events.py's own balloon_pop_popped doc -- every popper's own balloon visibly pops, only
+     * the first one to land actually wins). */
+    public void reportBalloonPopPop(String gameId, String playerRsn, String playerToken) throws IOException
+    {
+        postPlayerAction("/v1/games/" + gameId + "/report-balloon-pop-pop", playerRsn, playerToken, "Report Balloon Pop pop");
+    }
+
     /** Buys the Golden Gnome standing at (x, y, plane). A free side-action during the local
      * player's pending roll, triggered by a right-click menu entry rather than an emote -- doesn't
      * touch pendingRoll or advance the turn, so confirmArrival is still a separate call afterward.
