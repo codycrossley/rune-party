@@ -16,11 +16,14 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** Repeat After Me's own client-side state (server-driven rounds, client-driven timing and
  * judging -- see minigames/repeat_after_me.py's own doc for why). roundNumber/targetIndices are
- * real state, applied catch-up or not, folded straight from REPEAT_AFTER_ME_ROUND_STARTED --
+ * real state, applied catch-up or not, folded from REPEAT_AFTER_ME_ROUND_STARTED --
  * targetIndices is which of the 16 grid cells (0-15, row-major) this round's sneak peek revealed,
- * the exact same shared set every seated client sees. roundStartAt anchors this class's own local
- * peek/challenge clock, the same "stamp off my own round-scoped event, not the generic
- * MINIGAME_ROUND_BEGIN" shape TrueOrFalsePresentation's own roundStartedAt uses -- see getEndsAt.
+ * the exact same shared set every seated client sees. Unlike rounds 2/3 (applied the instant that
+ * event lands), a LIVE client's own round 1 is deliberately buffered until onRoundBegin() actually
+ * fires -- see pendingFirstRoundNumber's own doc for why. roundStartAt anchors this class's own
+ * local peek/challenge clock, the same "stamp off my own round-scoped event, not the generic
+ * MINIGAME_ROUND_BEGIN" shape TrueOrFalsePresentation's own roundStartedAt uses (that one's safe
+ * to apply immediately since True or False isn't arrival-gated -- see getEndsAt).
  * attemptedIndices is purely local judging: EVERY cell the local player has stood on and SPUN
  * since this round began (see onSpinFinished), correct or not -- deliberately not filtered down to
  * just the correct ones, since TileOverlay#renderRepeatAfterMeTile needs the full picked set both
@@ -48,6 +51,17 @@ public final class RepeatAfterMePresentation implements MinigamePresentationFeat
     private volatile boolean awaitingSpinFinish = false;
     // Reset on onStarted/reset -- see ArrivalGate's own doc.
     private final ArrivalGate arrivalGate;
+    // Round 1's own REPEAT_AFTER_ME_ROUND_STARTED can arrive well before this class's own
+    // onRoundBegin() actually fires -- MINIGAME_ROUND_BEGIN's reveal is deliberately deferred
+    // behind the "BEGIN!" flash's own turnEffectGate reservation (see MinigamePresentation's own
+    // MINIGAME_ROUND_BEGIN doc), but this event used to be applied synchronously the instant it
+    // arrived, with no such deferral of its own -- a real playtest caught the sneak peek lighting
+    // up before the "BEGIN!" flash had actually shown. Buffered here for round 1 specifically and
+    // committed for real from onRoundBegin() below; rounds 2/3 have no cosmetic banner to race
+    // against (nothing gates the INTERMISSION_SECONDS gap between rounds), so they still apply
+    // immediately, same as always. Null once there's nothing pending.
+    private volatile Integer pendingFirstRoundNumber;
+    private volatile List<Integer> pendingFirstRoundIndices;
 
     public RepeatAfterMePresentation(RunePartyPlugin plugin)
     {
@@ -66,12 +80,44 @@ public final class RepeatAfterMePresentation implements MinigamePresentationFeat
             List<Integer> indices = Json.safeIntList(e.payload, "gridIndices");
             if (round == null || indices == null) return;
 
-            roundNumber = round;
-            targetIndices = new HashSet<>(indices);
-            attemptedIndices.clear();
-            submitted = false;
-            roundStartAt = System.currentTimeMillis();
+            // See pendingFirstRoundNumber's own doc. A catching-up client has already missed the
+            // "BEGIN!" flash entirely -- it's a one-shot cosmetic reveal, never replayed -- so
+            // there's nothing left to defer round 1 behind; apply immediately, same as every other
+            // round.
+            if (round == 1 && !catchingUp)
+            {
+                pendingFirstRoundNumber = round;
+                pendingFirstRoundIndices = indices;
+                return;
+            }
+
+            applyRoundStarted(round, indices);
         }
+    }
+
+    private void applyRoundStarted(int round, List<Integer> indices)
+    {
+        roundNumber = round;
+        targetIndices = new HashSet<>(indices);
+        attemptedIndices.clear();
+        submitted = false;
+        roundStartAt = System.currentTimeMillis();
+    }
+
+    /** Commits round 1's own buffered reveal (see pendingFirstRoundNumber's own doc) the instant
+     * this arrival-gated mini-game's "BEGIN!" flash actually appears -- {@code catchingUp} is
+     * always false here in practice (see MinigamePresentationFeature#onRoundBegin's own doc for
+     * why), but checked structurally like every other onRoundBegin override regardless. A no-op if
+     * nothing's pending, which is always true for a catching-up client (round 1 already applied
+     * immediately in apply() above) and would also be true, defensively, if this ever somehow fired
+     * twice. */
+    @Override
+    public void onRoundBegin(boolean catchingUp)
+    {
+        if (pendingFirstRoundNumber == null) return;
+        applyRoundStarted(pendingFirstRoundNumber, pendingFirstRoundIndices);
+        pendingFirstRoundNumber = null;
+        pendingFirstRoundIndices = null;
     }
 
     /** Called once per real game tick from RunePartyPlugin#onGameTick while this mini-game is
@@ -160,6 +206,8 @@ public final class RepeatAfterMePresentation implements MinigamePresentationFeat
         attemptedIndices.clear();
         roundStartAt = 0;
         submitted = false;
+        pendingFirstRoundNumber = null;
+        pendingFirstRoundIndices = null;
         arrivalGate.reset();
     }
 
@@ -172,6 +220,8 @@ public final class RepeatAfterMePresentation implements MinigamePresentationFeat
         attemptedIndices.clear();
         roundStartAt = 0;
         submitted = false;
+        pendingFirstRoundNumber = null;
+        pendingFirstRoundIndices = null;
         arrivalGate.reset();
     }
 

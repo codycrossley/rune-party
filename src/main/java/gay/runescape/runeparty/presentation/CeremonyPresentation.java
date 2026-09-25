@@ -8,15 +8,13 @@ import gay.runescape.runeparty.minigames.ArrivalGate;
 import net.runelite.api.Player;
 import net.runelite.api.coords.WorldPoint;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
-/** End-game ceremony state and choreography, extracted out of RunePartyPlugin -- now two chained
+/** End-game ceremony state and choreography, extracted out of RunePartyPlugin -- two chained
  * halves, both server-paced (everyone sees the same thing at the same time):
  * <p>
  * 1. The Golden Gnome Awards: CEREMONY_STARTED (rainbow title, then the persistent "gather in the
@@ -24,61 +22,88 @@ import java.util.concurrent.TimeUnit;
  * (CEREMONY_BONUS_OBJECTIVE_ANNOUNCED -> a real GOLDEN_GNOME_WON grant per winner ->
  * CEREMONY_BONUS_WINNER_REVEALED, itself expanded client-side into "The Golden Gnome is awarded
  * to..." suspense -> the actual name(s) -> that round's own flanking Golden Gnome prop vanishing
- * -> the "+1" popup, see handleBonusWinnerRevealed's own doc) -> CEREMONY_TRANSITION_TO_WINNER.
+ * -> the "+1" popup) -> CEREMONY_TRANSITION_TO_WINNER.
  * <p>
- * 2. The existing standings/winner reveal (unchanged internally, just triggered later than before):
- * "Now it's time to see the winner..." -> one "In Nth place..." reveal per eliminated player (worst
- * to best, stopping once only the top two remain) -> "And the winner is..." -> the winner's name
- * plus ConfettiOverlay's burst -> "GAME OVER!" (moved here, the sequence's own last beat now,
- * instead of its first).
+ * 2. The existing standings/winner reveal: "Now it's time to see the winner..." -> one "In Nth
+ * place..." reveal per eliminated player (worst to best, stopping once only the top two remain) ->
+ * "And the winner is..." -> the winner's name plus ConfettiOverlay's burst -> "GAME OVER!" (this
+ * sequence's own last beat, not its first).
  * <p>
- * Only the very first beat (the rainbow title) needs turnEffectGateUntil chaining
- * (scheduleAfterTurnEffects) -- it can land while the final mini-game's own rewards/round-complete
- * recap is still playing. That same callback is also what flips ceremonyIntroRevealed true --
- * every other purely-cosmetic ceremony-visible element (the gather message, the arena floor
- * outline, the Gnome NPC and its flanking props) waits on THAT instead of the immediate
- * ceremonyStarted, so none of them can render before the recap is actually done either (see
- * ceremonyIntroRevealed's own field doc). Every beat from there on is purely server-paced:
- * ceremony.py (server) sleeps a real, generous duration between each of its own inserts, so
- * there's no risk of two of these overlapping the way independent client-local timers could --
- * each one is just set directly off its own event (the bonus winner reveal's own extra
- * suspense/vanish/popup staging is the one exception, entirely self-contained within the real
- * duration ceremony.py's own BONUS_REVEAL_HOLD_SECONDS already budgets for it). gameOverTask is
- * still the one handle threaded through every step that DOES need it (the title, then the whole
- * standings/winner sequence from triggerWinnerRevealSequence onward).
+ * <b>Every one of the beats above is enqueued onto a single ordered sequence (see {@link #enqueue})
+ * instead of each one scheduling its own follow-up by hand.</b> This class used to mix three
+ * different scheduling idioms -- a chained {@code scheduleAfterTurnEffects} handle for the title and
+ * the whole winner-reveal half, a bespoke "next reveal at" timestamp for the Gnome's own lines, and
+ * no gating at all for the bonus rounds -- on the assumption that ceremony.py's own real, generous
+ * sleep between server-side inserts would always be enough margin. Two real playtests proved that
+ * wrong from two different angles: the final mini-game's own score/rewards/round-complete recap can
+ * run long enough to eat into the fixed gap before the Gnome's first line (which used no gating at
+ * all, back then), and -- the harder bug to see -- once that gap-eating delay pushes ANY beat later
+ * than the server assumed, every later beat with no gating of its own (the bonus rounds) would still
+ * apply immediately the instant its own event landed, overlapping whatever earlier, now-delayed beat
+ * was still on screen. Patching each symptom as it was found (three different one-off fixes for
+ * three different beats) was never going to end, because the actual bug was structural: nothing
+ * tracked "is the PREVIOUS beat, whatever it was, actually done yet" as one single fact every beat
+ * could depend on.
+ * <p>
+ * A single FIFO sequence fixes the whole class of bug at once, by construction: every beat computes
+ * its own reveal time as strictly after both (a) the shared turnEffectGateUntil this class doesn't
+ * own (the just-ended mini-game's own recap, relevant only to the very first beat) and (b) whatever
+ * THIS class's own last-enqueued beat is still occupying. Two beats can never show at once, no beat
+ * can ever be skipped or overwritten by a later one arriving early, and every "handleX" method
+ * becomes a flat, linear list of `enqueue(duration, revealSomething)` calls in the exact order the
+ * ceremony is supposed to play -- the code now reads as the sequence itself, not as scheduling
+ * machinery you have to trace to find the sequence. See enqueue's own doc for the mechanism, and
+ * ceremonyGeneration's own doc for how a mid-ceremony reset (a force-ended game) invalidates
+ * whatever's still pending without needing to track/cancel every individual scheduled task.
+ * <p>
+ * Real state that a catching-up (reconnecting) client needs regardless of any cosmetic reveal --
+ * ceremonyStarted, flankingGnomeVanishAt, bonusRoundIndex's own snapshot inside each banner payload
+ * -- is still applied immediately and unconditionally, exactly where it always was; only the
+ * cosmetic reveal itself (arming a TimedBanner, playing a spotanim) goes through enqueue, and every
+ * handler still short-circuits entirely on catchingUp==true, same as before (a reconnecting client
+ * has already missed every one-shot cosmetic beat, there's nothing left to catch it up on).
  * <p>
  * Exposes handleCeremonyStarted/handleGnomeLine/handleBonusObjectiveAnnounced/
  * handleBonusWinnerRevealed/handleCeremonyTransitionToWinner for RunePartyPlugin's own event
- * handling to call, and clears itself via reset(); RunePartyPlugin still exposes every getter
- * under its original name, just delegating here. */
+ * handling to call, and clears itself via reset(); RunePartyPlugin still exposes every getter under
+ * its original name, just delegating here. */
 public final class CeremonyPresentation
 {
     private final RunePartyPlugin plugin;
 
-    private volatile ScheduledFuture<?> gameOverTask; // one handle threaded through every step below that needs turnEffectGate chaining
+    // ---- the single sequence every ceremony beat is enqueued onto -- see enqueue's own doc ----
+    // The "not before this" timestamp for the NEXT enqueued beat -- 0 means the sequence hasn't
+    // started yet (nothing's been enqueued this ceremony). Only ever moves forward.
+    private volatile long nextBeatAt = 0;
+    // Bumped by reset() -- every enqueue() closure captures the generation it was scheduled under
+    // and checks it's still current before actually applying its own effect, so a mid-ceremony
+    // reset (the host force-ending the game) can't have a stale, already-scheduled beat from the
+    // OLD ceremony mutate banner state after the fact. Simpler and more robust than trying to track
+    // and cancel every individual ScheduledFuture the way a single gameOverTask handle used to
+    // (and could only ever ward off ONE pending task at a time, which stopped being enough the
+    // moment more than one beat could be in flight at once).
+    private volatile int ceremonyGeneration = 0;
+
     private volatile List<RosterReducer.RosterEntry> gameOverStandings = Collections.emptyList();
 
     // ---- Golden Gnome Awards (server-paced, everyone sees it) ----
     private volatile boolean ceremonyStarted = false; // real state, set immediately regardless of catch-up
-    // Flips true once the cosmetic title banner above has actually been armed (i.e. once
-    // scheduleAfterTurnEffects's own callback fires, the same moment the final mini-game's own
-    // rewards/round-complete recap has genuinely finished reserving the gate) -- the arena floor
-    // outline and the Gnome NPC/flanking props wait on THIS instead of the immediate
-    // ceremonyStarted, so none of them can render before that recap is actually done. Same "real
-    // state is immediate, the visual reveal is deliberately held back" split TileOverlay's own doc
-    // describes for Rainbow Rush's isMinigameSelectionRevealed(). Those three are all world-space
-    // elements with no shared-screen-slot conflict against the title banner, so they're fine
-    // revealing the moment it starts -- unlike the gather message below, which shares the title's
-    // own screen-center position and needs to wait for it to actually finish instead.
+    // Flips true once the cosmetic title banner has actually been enqueued AND its own turn in the
+    // sequence has arrived (i.e. once the just-ended mini-game's own recap has genuinely finished)
+    // -- the arena floor outline and the Gnome NPC/flanking props wait on THIS instead of the
+    // immediate ceremonyStarted, so none of them can render before that recap is actually done.
+    // Same "real state is immediate, the visual reveal is deliberately held back" split TileOverlay's
+    // own doc describes for Rainbow Rush's isMinigameSelectionRevealed(). Those three are all
+    // world-space elements with no shared-screen-slot conflict against the title banner, so they're
+    // fine revealing the moment it starts -- unlike the gather message below, which shares the
+    // title's own screen-center position and needs to wait for it to actually finish instead.
     private volatile boolean ceremonyIntroRevealed = false;
-    // Flips true once the title banner's own CEREMONY_TITLE_BANNER_DURATION_MS has fully elapsed
-    // (chained a further step behind ceremonyIntroRevealed above, see handleCeremonyStarted) --
-    // renderCeremonyGatherMessage waits on THIS, not ceremonyIntroRevealed, since the persistent
-    // "gather in the arena" message renders in the exact same screen-center slot the rainbow title
-    // just occupied. Without this split, a real playtest found the two rendering at once: the
-    // title (properly gated behind ceremonyIntroRevealed) appearing, with the gather message
-    // (incorrectly gated on that same, too-early flag) already showing right alongside it instead
-    // of waiting for the title to fade first.
+    // Flips true once the title's own reveal has both started AND held the screen for its own full
+    // CEREMONY_TITLE_BANNER_DURATION_MS (a second, immediately-following, zero-duration beat --
+    // see handleCeremonyStarted) -- renderCeremonyGatherMessage waits on THIS, not
+    // ceremonyIntroRevealed, since the persistent "gather in the arena" message renders in the
+    // exact same screen-center slot the rainbow title just occupied. Without this split, a real
+    // playtest found the two rendering at once.
     private volatile boolean ceremonyGatherMessageRevealed = false;
     // Reset on reset() below -- see ArrivalGate's own doc. No onStarted() equivalent to also reset
     // from -- unlike a mini-game's own arrival gate, the ceremony only ever runs once per game.
@@ -104,13 +129,48 @@ public final class CeremonyPresentation
     private final TimedBanner<Void> winnerSuspenseBanner = new TimedBanner<>();
     private final TimedBanner<String> winnerRevealBanner = new TimedBanner<>(); // payload: winner rsn
     private final TimedBanner<Void> confettiBanner = new TimedBanner<>();
-    private final TimedBanner<Void> gameOverBanner = new TimedBanner<>(); // now the sequence's own LAST beat, not its first
+    private final TimedBanner<Void> gameOverBanner = new TimedBanner<>(); // this sequence's own LAST beat, not its first
 
     public CeremonyPresentation(RunePartyPlugin plugin)
     {
         this.plugin = plugin;
         this.arrivalGate = new ArrivalGate(plugin, "the Golden Gnome Awards", "the ceremony arena",
             (self, gid, token) -> plugin.apiClient.confirmCeremonyArrival(gid, self, token));
+    }
+
+    /** Appends one ceremony "beat" to the single sequence every beat in this class goes through --
+     * {@code reveal} runs the instant it's this beat's own turn (arming whatever banner/spotanim/
+     * flag it owns), {@code durationMs} is how long it then holds the screen before the NEXT
+     * enqueued beat gets its own turn. Every call computes its own slot as strictly after both (a)
+     * the shared turnEffectGateUntil (RunePartyPlugin) this class doesn't own -- only ever relevant
+     * to the very first beat of a ceremony, since this method itself keeps that same gate extended
+     * to cover every beat after that -- and (b) nextBeatAt, this class's own record of when its
+     * last-enqueued beat's own slot ends. Because nextBeatAt only ever moves forward and every
+     * caller just appends, this is a plain FIFO queue: a beat can never be skipped (unlike the old
+     * per-beat "cancel whatever was previously scheduled" chaining, correct only when a single
+     * producer schedules each stage from inside the previous stage's own already-fired callback,
+     * wrong the instant more than one server event can land before an earlier one's own reveal has
+     * fired) and two beats can never show at once (unlike the old "no gating, apply immediately"
+     * shape the bonus rounds used to use, correct only as long as nothing upstream was ever
+     * delayed -- which stopped being true the moment the Gnome's own lines needed real queueing).
+     * <p>
+     * Captures the current {@link #ceremonyGeneration} so a reset() that runs after this was
+     * enqueued but before it fires (the host force-ending the game mid-ceremony) makes it a no-op
+     * instead of letting a stale beat from an old ceremony mutate banner state after the fact. */
+    private void enqueue(long durationMs, Runnable reveal)
+    {
+        int generation = ceremonyGeneration;
+        long now = System.currentTimeMillis();
+        long gateUntil = plugin.getTurnEffectGateUntil();
+        long earliestFromSharedGate = gateUntil > now ? gateUntil + RunePartyPlugin.POST_TURN_EFFECT_GRACE_MS : now;
+        long revealAt = Math.max(earliestFromSharedGate, nextBeatAt);
+        nextBeatAt = revealAt + durationMs;
+        plugin.extendTurnEffectGate(nextBeatAt);
+
+        plugin.uiTimerExec.schedule(() ->
+        {
+            if (generation == ceremonyGeneration) reveal.run();
+        }, Math.max(0, revealAt - now), TimeUnit.MILLISECONDS);
     }
 
     /** Called once per real game tick from RunePartyPlugin#onGameTick while the ceremony's own
@@ -142,68 +202,81 @@ public final class CeremonyPresentation
      * celebratory-banner handling already uses), so a client that only catches up on the fact that
      * the ceremony's already under way skips straight to whatever's actually current instead of
      * replaying a rainbow title for a moment that's long since passed. The rainbow title itself is
-     * cosmetic-only, scheduled behind whatever's still reserving the gate (the final mini-game's
-     * own rewards/round-complete recap, most likely) -- see this class's own doc. */
+     * cosmetic-only, enqueued as this ceremony's very first beat -- see enqueue's own doc for how
+     * that ends up waiting behind the final mini-game's own still-playing recap. The gather
+     * message's own reveal is a second, zero-duration beat enqueued right behind it, so
+     * ceremonyGatherMessageRevealed only flips once the title has actually finished holding the
+     * screen, not the instant it appears. */
     public void handleCeremonyStarted(boolean catchingUp)
     {
         ceremonyStarted = true;
         if (catchingUp) return;
 
-        gameOverTask = plugin.scheduleAfterTurnEffects(gameOverTask, RunePartyPlugin.CEREMONY_TITLE_BANNER_DURATION_MS, () ->
+        enqueue(RunePartyPlugin.CEREMONY_TITLE_BANNER_DURATION_MS, () ->
         {
             ceremonyTitleBanner.until = System.currentTimeMillis() + RunePartyPlugin.CEREMONY_TITLE_BANNER_DURATION_MS;
-            plugin.extendTurnEffectGate(ceremonyTitleBanner.until);
             ceremonyIntroRevealed = true;
-
-            // Chained a further step behind the title's own reservation above (0 extra duration of
-            // its own -- the persistent gather message has no fixed end, so nothing needs to wait
-            // behind IT on the gate) so ceremonyGatherMessageRevealed only flips once the title has
-            // actually finished, not the instant it appears -- see that field's own doc.
-            gameOverTask = plugin.scheduleAfterTurnEffects(gameOverTask, 0, () -> ceremonyGatherMessageRevealed = true);
         });
+        enqueue(0, () -> ceremonyGatherMessageRevealed = true);
     }
 
-    /** One of the Gnome's own scripted lines -- purely server-paced from here (see this class's
-     * own doc), no turnEffectGate chaining needed. */
+    /** One of the Gnome's own scripted lines -- enqueued behind whatever's already queued (the
+     * title/gather beats above, most likely, for this ceremony's very first line) exactly like
+     * every other beat in this class. */
     public void handleGnomeLine(String line, boolean catchingUp)
     {
         if (catchingUp) return;
-        gnomeLineBanner.payload = line;
-        gnomeLineBanner.until = System.currentTimeMillis() + RunePartyPlugin.CEREMONY_GNOME_LINE_DURATION_MS;
+        enqueue(RunePartyPlugin.CEREMONY_GNOME_LINE_DURATION_MS, () ->
+        {
+            gnomeLineBanner.payload = line;
+            gnomeLineBanner.until = System.currentTimeMillis() + RunePartyPlugin.CEREMONY_GNOME_LINE_DURATION_MS;
+        });
     }
 
+    /** One bonus round's own objective announcement -- bonusRoundIndex is incremented and the
+     * payload (which snapshots that round index for "first"/"second" wording) built immediately,
+     * synchronously, the instant this event lands -- only the actual banner reveal is deferred via
+     * enqueue. This matters: by the time this beat's own delayed turn finally arrives, a LATER
+     * round's own CEREMONY_BONUS_OBJECTIVE_ANNOUNCED could already have landed and incremented
+     * bonusRoundIndex again, so reading it fresh inside the enqueued reveal itself would risk
+     * showing the wrong round's own ordinal. Capturing it into the payload up front avoids that
+     * regardless of how delayed this beat's own reveal ends up being. */
     public void handleBonusObjectiveAnnounced(String displayName, String description, boolean catchingUp)
     {
         if (catchingUp) return;
         bonusRoundIndex++;
-        bonusObjectiveBanner.payload = new BonusObjectivePayload(bonusRoundIndex, displayName, description);
-        bonusObjectiveBanner.until = System.currentTimeMillis() + RunePartyPlugin.CEREMONY_BONUS_ANNOUNCE_DURATION_MS;
+        BonusObjectivePayload payload = new BonusObjectivePayload(bonusRoundIndex, displayName, description);
+
+        enqueue(RunePartyPlugin.CEREMONY_BONUS_ANNOUNCE_DURATION_MS, () ->
+        {
+            bonusObjectiveBanner.payload = payload;
+            bonusObjectiveBanner.until = System.currentTimeMillis() + RunePartyPlugin.CEREMONY_BONUS_ANNOUNCE_DURATION_MS;
+        });
     }
 
-    /** The bonus round's own winner reveal -- deliberately NOT shown the instant this event lands.
-     * Mirrors scheduleWinnerSuspense/scheduleWinnerReveal's own shape below (the existing "And the
-     * winner is..." -> name beat), which is itself purely a client-local delay chained off one
-     * already-landed server event, no dedicated suspense event of its own -- same idea here: the
-     * client already knows the winner(s) from this payload, it just sits on that for
-     * CEREMONY_BONUS_SUSPENSE_DURATION_MS behind a "The Golden Gnome is awarded to..." cliffhanger
-     * first. Once the real name(s) actually appear, this round's own flanking Golden Gnome prop
-     * (bonusRoundIndex - 1) plays its vanish spotanim -- see triggerFlankingGnomeVanish's own doc
-     * for why the "+1" popup itself waits for that animation to actually finish. Uses
-     * plugin.uiTimerExec directly (not scheduleAfterTurnEffects/gameOverTask) since nothing else
-     * can be competing for the screen at this specific point in the ceremony -- same tool
-     * GOLDEN_GNOME_MOVED's own spotanim-gap choreography already uses for an identical reason. */
+    /** The bonus round's own winner reveal -- expanded into two enqueued beats rather than shown
+     * the instant this event lands: a "The Golden Gnome is awarded to..." suspense cliffhanger,
+     * then (once THAT beat's own turn ends) the actual name(s) -- which is also where this round's
+     * own flanking Golden Gnome prop plays its vanish spotanim, see triggerFlankingGnomeVanish's
+     * own doc for why the "+1" popup itself waits for that animation to actually finish rather than
+     * being a third top-level beat of its own. roundIndex is captured here, synchronously, for the
+     * identical reason handleBonusObjectiveAnnounced's own payload capture is -- by the time the
+     * second beat's own reveal actually fires, a later round's own bonusRoundIndex increment could
+     * already have landed. */
     public void handleBonusWinnerRevealed(List<String> winners, boolean catchingUp)
     {
         if (catchingUp) return;
+        int roundIndex = bonusRoundIndex;
 
-        bonusSuspenseBanner.until = System.currentTimeMillis() + RunePartyPlugin.CEREMONY_BONUS_SUSPENSE_DURATION_MS;
+        enqueue(RunePartyPlugin.CEREMONY_BONUS_SUSPENSE_DURATION_MS, () ->
+            bonusSuspenseBanner.until = System.currentTimeMillis() + RunePartyPlugin.CEREMONY_BONUS_SUSPENSE_DURATION_MS);
 
-        plugin.uiTimerExec.schedule(() ->
+        enqueue(RunePartyPlugin.CEREMONY_BONUS_REVEAL_DURATION_MS, () ->
         {
             bonusWinnerBanner.payload = winners;
             bonusWinnerBanner.until = System.currentTimeMillis() + RunePartyPlugin.CEREMONY_BONUS_REVEAL_DURATION_MS;
-            triggerFlankingGnomeVanish(winners);
-        }, RunePartyPlugin.CEREMONY_BONUS_SUSPENSE_DURATION_MS, TimeUnit.MILLISECONDS);
+            triggerFlankingGnomeVanish(roundIndex, winners);
+        });
     }
 
     /** Plays this round's own flanking Golden Gnome prop's vanish spotanim -- the exact same
@@ -212,14 +285,18 @@ public final class CeremonyPresentation
      * this prop is gone for good, matching the user's own "it just disappears" framing. Real vanish
      * state (flankingGnomeVanishAt) is set immediately so GnomeNpcOverlay stops rendering it after
      * GOLDEN_GNOME_MOVE_VANISH_DELAY_MS, same delay the board's own gnome uses to let the spotanim
-     * visually cover the model actually disappearing. The "+1 Golden Gnome" popup for every winner
-     * is deliberately deferred to that same moment (not shown the instant GOLDEN_GNOME_WON already
-     * landed server-side -- see GoldenGnomePresentation's own "ceremony_bonus" exclusion) via
-     * showGoldenGnomeCountPopup, reading the real, already-folded running total straight off
-     * RosterReducer rather than needing to carry it through this event at all. */
-    private void triggerFlankingGnomeVanish(List<String> winners)
+     * visually cover the model actually disappearing.
+     * <p>
+     * The "+1 Golden Gnome" popup is deliberately NOT its own top-level enqueue()'d beat -- unlike
+     * every other multi-part beat in this class, it isn't the ceremony's own NEXT thing to show,
+     * it's a delayed side effect happening WHILE the "names" beat above is still holding the
+     * screen (the popup floats over the still-visible winner names, it doesn't replace them). A
+     * plain nested plugin.uiTimerExec call, scoped to this specific choreography and re-checked
+     * against ceremonyGeneration the same way enqueue's own closures are, is the right tool here --
+     * same reasoning this used before, just now guarded against a mid-choreography reset too. */
+    private void triggerFlankingGnomeVanish(int roundIndex, List<String> winners)
     {
-        int index = bonusRoundIndex - 1;
+        int index = roundIndex - 1;
         if (index < 0 || index >= flankingGnomeVanishAt.length) return;
 
         WorldPoint point = flankingGnomePoint(index);
@@ -229,8 +306,10 @@ public final class CeremonyPresentation
         }
         flankingGnomeVanishAt[index] = System.currentTimeMillis();
 
+        int generation = ceremonyGeneration;
         plugin.uiTimerExec.schedule(() ->
         {
+            if (generation != ceremonyGeneration) return;
             for (String rsn : winners)
             {
                 plugin.showGoldenGnomeCountPopup(rsn, plugin.getRosterReducer().getGoldenGnomeCount(rsn), 1);
@@ -282,103 +361,64 @@ public final class CeremonyPresentation
     }
 
     /** CEREMONY_TRANSITION_TO_WINNER's own handling -- the Golden Gnome Awards' own hand-off into
-     * the existing, unchanged standings/winner-reveal sequence below. No-ops if nobody's actually
-     * seated. */
+     * the existing standings/winner-reveal sequence, now just more beats enqueued onto the same
+     * single sequence everything else in this class uses (see enqueue's own doc) instead of its
+     * own separate gameOverTask-chained recursion. No-ops if nobody's actually seated. Each
+     * `entry`/`payload` below is a fresh binding per loop iteration (Java's enhanced for-loop, not
+     * a mutated shared index), so every place-reveal's own lambda safely captures its own entry
+     * regardless of how many beats end up queued ahead of it. */
     public void handleCeremonyTransitionToWinner(boolean catchingUp)
     {
         if (catchingUp) return;
-        triggerWinnerRevealSequence();
-    }
 
-    /** The existing standings/winner-reveal sequence, unchanged internally -- see this class's own
-     * doc for the one thing that DID change (gameOverBanner moved from this sequence's first beat
-     * to its last, scheduled from scheduleWinnerReveal's own completion instead of here). */
-    private void triggerWinnerRevealSequence()
-    {
         List<RosterReducer.RosterEntry> standings = computeFinalStandings();
         if (standings.isEmpty()) return;
         gameOverStandings = standings;
-        scheduleWinnerIntro();
-    }
 
-    private void scheduleWinnerIntro()
-    {
-        gameOverTask = plugin.scheduleAfterTurnEffects(gameOverTask, RunePartyPlugin.WINNER_INTRO_DURATION_MS, () ->
+        enqueue(RunePartyPlugin.WINNER_INTRO_DURATION_MS, () ->
+            winnerIntroBanner.until = System.currentTimeMillis() + RunePartyPlugin.WINNER_INTRO_DURATION_MS);
+
+        // Worst to best, stopping once only the top two remain -- e.g. a 4-player game reveals 4th
+        // then 3rd, leaving 1st/2nd for the "And the winner is..." showdown. A 2-player game has
+        // nothing to reveal here, so this loop simply enqueues nothing.
+        for (int i = standings.size() - 1; i >= 2; i--)
         {
-            winnerIntroBanner.until = System.currentTimeMillis() + RunePartyPlugin.WINNER_INTRO_DURATION_MS;
-            plugin.extendTurnEffectGate(winnerIntroBanner.until);
-
-            // Worst to best, stopping once only the top two remain -- e.g. a 4-player game reveals
-            // 4th then 3rd, leaving 1st/2nd for the "And the winner is..." showdown. A 2-player
-            // game has nothing to reveal here, so this list ends up empty.
-            List<RosterReducer.RosterEntry> revealOrder = new ArrayList<>();
-            for (int i = gameOverStandings.size() - 1; i >= 2; i--) revealOrder.add(gameOverStandings.get(i));
-            schedulePlaceReveal(revealOrder, 0);
-        });
-    }
-
-    private void schedulePlaceReveal(List<RosterReducer.RosterEntry> revealOrder, int index)
-    {
-        if (index >= revealOrder.size())
-        {
-            scheduleWinnerSuspense();
-            return;
+            RosterReducer.RosterEntry entry = standings.get(i);
+            PlaceRevealPayload payload = new PlaceRevealPayload(entry.rsn, i + 1, entry.coins, entry.goldenGnomeCount);
+            enqueue(RunePartyPlugin.PLACE_REVEAL_DURATION_MS, () ->
+            {
+                placeReveal.payload = payload;
+                placeReveal.until = System.currentTimeMillis() + RunePartyPlugin.PLACE_REVEAL_DURATION_MS;
+            });
         }
 
-        gameOverTask = plugin.scheduleAfterTurnEffects(gameOverTask, RunePartyPlugin.PLACE_REVEAL_DURATION_MS, () ->
-        {
-            RosterReducer.RosterEntry entry = revealOrder.get(index);
-            placeReveal.payload = new PlaceRevealPayload(entry.rsn, gameOverStandings.indexOf(entry) + 1, entry.coins, entry.goldenGnomeCount);
-            placeReveal.until = System.currentTimeMillis() + RunePartyPlugin.PLACE_REVEAL_DURATION_MS;
-            plugin.extendTurnEffectGate(placeReveal.until);
-            schedulePlaceReveal(revealOrder, index + 1);
-        });
-    }
+        enqueue(RunePartyPlugin.WINNER_SUSPENSE_DURATION_MS, () ->
+            winnerSuspenseBanner.until = System.currentTimeMillis() + RunePartyPlugin.WINNER_SUSPENSE_DURATION_MS);
 
-    private void scheduleWinnerSuspense()
-    {
-        gameOverTask = plugin.scheduleAfterTurnEffects(gameOverTask, RunePartyPlugin.WINNER_SUSPENSE_DURATION_MS, () ->
+        // gameOverStandings is sorted winner-first, so index 0 is always the winner. Held alongside
+        // ConfettiOverlay's burst (confettiBanner runs shorter so the confetti finishes settling
+        // while the name's still up) and the real level-99 fireworks spotanim on the winner's own
+        // actor.
+        RosterReducer.RosterEntry winner = standings.get(0);
+        enqueue(RunePartyPlugin.WINNER_REVEAL_DURATION_MS, () ->
         {
-            winnerSuspenseBanner.until = System.currentTimeMillis() + RunePartyPlugin.WINNER_SUSPENSE_DURATION_MS;
-            plugin.extendTurnEffectGate(winnerSuspenseBanner.until);
-            scheduleWinnerReveal();
-        });
-    }
-
-    /** The winner's own name, held alongside ConfettiOverlay's burst (confettiBanner runs shorter
-     * so the confetti finishes settling while the name's still up) and the real level-99 fireworks
-     * spotanim on the winner's own actor (WINNER_FIREWORKS_SPOTANIM_ID), then schedules
-     * "GAME OVER!" -- the sequence's own true final beat now, not its first. gameOverStandings is
-     * sorted winner-first, so index 0 is always the winner. */
-    private void scheduleWinnerReveal()
-    {
-        gameOverTask = plugin.scheduleAfterTurnEffects(gameOverTask, RunePartyPlugin.WINNER_REVEAL_DURATION_MS, () ->
-        {
-            RosterReducer.RosterEntry winner = gameOverStandings.get(0);
-            winnerRevealBanner.payload = winner.rsn;
             long now = System.currentTimeMillis();
+            winnerRevealBanner.payload = winner.rsn;
             winnerRevealBanner.until = now + RunePartyPlugin.WINNER_REVEAL_DURATION_MS;
             confettiBanner.until = now + RunePartyPlugin.CONFETTI_DURATION_MS;
             plugin.triggerSpotAnimOnPlayer(RunePartyPlugin.WINNER_FIREWORKS_SPOTANIM_ID, winner.rsn, RunePartyPlugin.WINNER_FIREWORKS_SPOTANIM_HEIGHT);
             plugin.addChatMessage(winner.rsn + " won Rune Party Showdown!");
-            scheduleGameOverFinale();
         });
-    }
 
-    /** "GAME OVER!" -- the whole ceremony's own true last word, scheduled behind the winner
-     * reveal/confetti's own reservation instead of preceding everything else the way it used to. */
-    private void scheduleGameOverFinale()
-    {
-        gameOverTask = plugin.scheduleAfterTurnEffects(gameOverTask, RunePartyPlugin.GAME_OVER_TITLE_DURATION_MS, () ->
-        {
-            gameOverBanner.until = System.currentTimeMillis() + RunePartyPlugin.GAME_OVER_TITLE_DURATION_MS;
-            plugin.extendTurnEffectGate(gameOverBanner.until);
-        });
+        // "GAME OVER!" -- the whole ceremony's own true last word.
+        enqueue(RunePartyPlugin.GAME_OVER_TITLE_DURATION_MS, () ->
+            gameOverBanner.until = System.currentTimeMillis() + RunePartyPlugin.GAME_OVER_TITLE_DURATION_MS);
     }
 
     public void reset()
     {
-        if (gameOverTask != null) { gameOverTask.cancel(false); gameOverTask = null; }
+        ceremonyGeneration++; // invalidate every still-pending enqueue()'d/nested closure -- see that field's own doc
+        nextBeatAt = 0;
         gameOverStandings = Collections.emptyList();
         ceremonyStarted = false;
         ceremonyIntroRevealed = false;
@@ -443,7 +483,8 @@ public final class CeremonyPresentation
         }
     }
 
-    /** Payload for one place-reveal step in the end-game ceremony -- see schedulePlaceReveal. */
+    /** Payload for one place-reveal step in the end-game ceremony -- see
+     * handleCeremonyTransitionToWinner. */
     private static final class PlaceRevealPayload
     {
         final String rsn;
