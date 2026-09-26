@@ -41,7 +41,7 @@ public class CoinTrapItem implements Item
     @Override
     public String getEffectDescription(boolean isLocalPlayer)
     {
-        return "Place it on a tile to steal coins from anyone but " + (isLocalPlayer ? "you" : "them") + " who lands on it.";
+        return "Place it on a tile to steal coins from someone who lands on it.";
     }
 
     @Override

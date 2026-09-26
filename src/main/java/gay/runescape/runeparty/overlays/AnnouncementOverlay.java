@@ -224,6 +224,22 @@ public class AnnouncementOverlay extends Overlay
     private static final float JAD_TAUNT_SIZE = 26f;
     private static final float JAD_COUNTDOWN_SIZE = 40f;
 
+    // Screen-fit safety net -- every one of this overlay's single-phrase/rainbow text draws funnels
+    // through drawCenteredText/drawCenteredRainbowText below, which auto-shrink (see fitFont) rather
+    // than let a title, name, or line run past the viewer's own CURRENT canvas edges -- computed
+    // fresh from client.getCanvasWidth() each call, not the game window's normal/design size, so a
+    // resized or small client is covered too. A composite line built from several independently
+    // pre-measured segments (renderSpinHintSelf/Waiting, drawEmoteInstruction, drawPlayerRows'
+    // rank/name/stats columns, renderTrueOrFalseReveal's per-player rows) can't shrink itself that
+    // way -- see fitScale's own doc -- so those measure their own worst case up front and apply the
+    // same scale to every segment before laying anything out. Genuine multi-sentence content (mini-
+    // game instructions, True or False questions) still wraps onto multiple lines instead of
+    // shrinking -- see drawWrappedCenteredText -- since a whole paragraph squeezed onto one line
+    // would turn unreadable long before it ran out of room that way.
+    private static final int SCREEN_SAFE_MARGIN_PX = 24; // kept clear on both sides of the canvas edge
+    private static final int MIN_SAFE_TEXT_WIDTH_PX = 240; // floor so a tiny/resized window can't force degenerate wrapping/shrinking
+    private static final float MIN_FIT_SCALE = 0.5f; // never shrink a line past half its designed size
+
     private static final Font MARIO_PARTY_FONT = RunePartyFonts.MARIO_PARTY;
 
     private final Client client;
@@ -411,6 +427,21 @@ public class AnnouncementOverlay extends Overlay
         g.setFont(spinFont);
         int spinWidth = g.getFontMetrics().stringWidth(spinWord);
 
+        // Shrunk together (see fitScale) rather than left to overflow -- the "or use an item..."
+        // suffix is the longest text on screen during a normal turn, and the first to run off a
+        // small/resized client if it isn't checked.
+        float scale = fitScale(prefixWidth + spinWidth + suffixWidth);
+        if (scale < 1f)
+        {
+            normalFont = normalFont.deriveFont(normalFont.getSize2D() * scale);
+            spinFont = spinFont.deriveFont(spinFont.getSize2D() * scale);
+            g.setFont(normalFont);
+            prefixWidth = g.getFontMetrics().stringWidth(prefix);
+            suffixWidth = g.getFontMetrics().stringWidth(suffix);
+            g.setFont(spinFont);
+            spinWidth = g.getFontMetrics().stringWidth(spinWord);
+        }
+
         int y = client.getCanvasHeight() / 4 + 40;
         int x = client.getCanvasWidth() / 2 - (prefixWidth + spinWidth + suffixWidth) / 2;
 
@@ -437,6 +468,16 @@ public class AnnouncementOverlay extends Overlay
         int prefixWidth = g.getFontMetrics().stringWidth(prefix);
         int nameWidth = g.getFontMetrics().stringWidth(rsn);
         int suffixWidth = g.getFontMetrics().stringWidth(suffix);
+
+        float scale = fitScale(prefixWidth + nameWidth + suffixWidth);
+        if (scale < 1f)
+        {
+            font = font.deriveFont(font.getSize2D() * scale);
+            g.setFont(font);
+            prefixWidth = g.getFontMetrics().stringWidth(prefix);
+            nameWidth = g.getFontMetrics().stringWidth(rsn);
+            suffixWidth = g.getFontMetrics().stringWidth(suffix);
+        }
 
         int y = client.getCanvasHeight() / 4 + 40;
         int x = client.getCanvasWidth() / 2 - (prefixWidth + nameWidth + suffixWidth) / 2;
@@ -542,6 +583,18 @@ public class AnnouncementOverlay extends Overlay
         g.setFont(wordFont);
         int wordWidth = g.getFontMetrics().stringWidth(word);
 
+        float scale = fitScale(prefixWidth + wordWidth + suffixWidth);
+        if (scale < 1f)
+        {
+            plainFont = plainFont.deriveFont(plainFont.getSize2D() * scale);
+            wordFont = wordFont.deriveFont(wordFont.getSize2D() * scale);
+            g.setFont(plainFont);
+            prefixWidth = g.getFontMetrics().stringWidth(prefix);
+            suffixWidth = g.getFontMetrics().stringWidth(quoteSuffix);
+            g.setFont(wordFont);
+            wordWidth = g.getFontMetrics().stringWidth(word);
+        }
+
         int x = centerX - (prefixWidth + wordWidth + suffixWidth) / 2;
 
         g.setFont(plainFont);
@@ -574,23 +627,50 @@ public class AnnouncementOverlay extends Overlay
     /** One drawStandingsLine per player, in list order. Shared by renderMinigameReadyCheck,
      * renderTrueOrFalseQuestion, renderMinigameRewardsBanner, and renderRoundCompleteBanner, which
      * differ only in sort order, rank prefix, and status text/color. {@code rankFn} receives the
-     * 1-based row index. */
+     * 1-based row index.
+     * <p>
+     * Every row is measured up front at {@code nameFont}/{@code statsFont}'s own design size, and if
+     * the widest one would overflow the viewer's own current screen (see fitScale), every row shrinks
+     * together by the same amount -- 8 seated players with long RSNs and a wordy stats string is
+     * exactly the kind of list that gets busy on a small/resized client, and letting each row shrink
+     * independently would leave the name column ragged instead of aligned. */
     private void drawPlayerRows(Graphics2D g, List<RosterReducer.RosterEntry> players,
         Font nameFont, Font statsFont, BiFunction<RosterReducer.RosterEntry, Integer, String> rankFn,
         Function<RosterReducer.RosterEntry, String> statsFn,
         Function<RosterReducer.RosterEntry, Color> statsColorFn,
         int centerX, int startY, int lineHeight, float alpha)
     {
-        int y = startY;
+        FontMetrics nameFm = g.getFontMetrics(nameFont);
+        FontMetrics statsFm = g.getFontMetrics(statsFont);
+
+        List<String> ranks = new ArrayList<>();
+        List<String> stats = new ArrayList<>();
+        int widest = 0;
         int i = 1;
         for (RosterReducer.RosterEntry entry : players)
         {
+            String rank = rankFn.apply(entry, i);
+            String stat = statsFn.apply(entry);
+            ranks.add(rank);
+            stats.add(stat);
+            widest = Math.max(widest, nameFm.stringWidth(rank) + nameFm.stringWidth(entry.rsn) + statsFm.stringWidth(stat));
+            i++;
+        }
+
+        float scale = fitScale(widest);
+        Font rowNameFont = scale < 1f ? nameFont.deriveFont(nameFont.getSize2D() * scale) : nameFont;
+        Font rowStatsFont = scale < 1f ? statsFont.deriveFont(statsFont.getSize2D() * scale) : statsFont;
+        int rowLineHeight = scale < 1f ? Math.round(lineHeight * scale) : lineHeight;
+
+        int y = startY;
+        for (int idx = 0; idx < players.size(); idx++)
+        {
+            RosterReducer.RosterEntry entry = players.get(idx);
             RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
             Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
-            drawStandingsLine(g, nameFont, statsFont, rankFn.apply(entry, i), entry.rsn, nameColor,
-                statsFn.apply(entry), statsColorFn.apply(entry), centerX, y, alpha);
-            y += lineHeight;
-            i++;
+            drawStandingsLine(g, rowNameFont, rowStatsFont, ranks.get(idx), entry.rsn, nameColor,
+                stats.get(idx), statsColorFn.apply(entry), centerX, y, alpha);
+            y += rowLineHeight;
         }
     }
 
@@ -1386,7 +1466,7 @@ public class AnnouncementOverlay extends Overlay
         {
             g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE));
             afterInstructionsY = drawWrappedCenteredText(g, instructions, centerX, y + 30,
-                READY_CHECK_INSTRUCTIONS_MAX_WIDTH, READY_CHECK_INSTRUCTIONS_LINE_HEIGHT, Color.WHITE, alpha) - READY_CHECK_INSTRUCTIONS_LINE_HEIGHT;
+                Math.min(READY_CHECK_INSTRUCTIONS_MAX_WIDTH, safeTextWidth()), READY_CHECK_INSTRUCTIONS_LINE_HEIGHT, Color.WHITE, alpha) - READY_CHECK_INSTRUCTIONS_LINE_HEIGHT;
         }
 
         Font emoteFont = FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
@@ -1612,7 +1692,7 @@ public class AnnouncementOverlay extends Overlay
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_QUESTION_SIZE));
         int afterQuestionY = drawWrappedCenteredText(g, question, centerX, y + 34,
-            TRUE_OR_FALSE_QUESTION_MAX_WIDTH, TRUE_OR_FALSE_QUESTION_LINE_HEIGHT, Color.WHITE, 1f);
+            Math.min(TRUE_OR_FALSE_QUESTION_MAX_WIDTH, safeTextWidth()), TRUE_OR_FALSE_QUESTION_LINE_HEIGHT, Color.WHITE, 1f);
 
         long now = System.currentTimeMillis();
         g.setFont(MARIO_PARTY_FONT.deriveFont(TRUE_OR_FALSE_COUNTDOWN_SIZE));
@@ -1771,14 +1851,34 @@ public class AnnouncementOverlay extends Overlay
 
         Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_REVEAL_LINE_SIZE);
         Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(TRUE_OR_FALSE_REVEAL_LINE_SIZE);
-        int lineY = y + 36;
-        for (TrueOrFalseResult result : plugin.getTrueOrFalseLastResults())
+
+        List<TrueOrFalseResult> results = plugin.getTrueOrFalseLastResults();
+        List<String> statuses = new ArrayList<>();
+        FontMetrics nameFm = g.getFontMetrics(nameFont);
+        FontMetrics statsFm = g.getFontMetrics(statsFont);
+        int widest = 0;
+        for (TrueOrFalseResult result : results)
         {
             String answerText = result.answer == null ? "no answer" : (result.answer ? "True" : "False");
             String status = "   " + answerText + (result.correct ? " -- correct!" : " -- wrong");
+            statuses.add(status);
+            widest = Math.max(widest, nameFm.stringWidth(result.rsn) + statsFm.stringWidth(status));
+        }
+
+        // Same shared-scale treatment as drawPlayerRows -- see its own doc -- so every row shrinks
+        // together instead of drifting independently.
+        float scale = fitScale(widest);
+        Font rowNameFont = scale < 1f ? nameFont.deriveFont(nameFont.getSize2D() * scale) : nameFont;
+        Font rowStatsFont = scale < 1f ? statsFont.deriveFont(statsFont.getSize2D() * scale) : statsFont;
+        int rowLineHeight = scale < 1f ? Math.round(TRUE_OR_FALSE_REVEAL_LINE_HEIGHT * scale) : TRUE_OR_FALSE_REVEAL_LINE_HEIGHT;
+
+        int lineY = y + 36;
+        for (int idx = 0; idx < results.size(); idx++)
+        {
+            TrueOrFalseResult result = results.get(idx);
             Color statusColor = result.correct ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR;
-            drawStandingsLine(g, nameFont, statsFont, "", result.rsn, Color.LIGHT_GRAY, status, statusColor, centerX, lineY, alpha);
-            lineY += TRUE_OR_FALSE_REVEAL_LINE_HEIGHT;
+            drawStandingsLine(g, rowNameFont, rowStatsFont, "", result.rsn, Color.LIGHT_GRAY, statuses.get(idx), statusColor, centerX, lineY, alpha);
+            lineY += rowLineHeight;
         }
     }
 
@@ -2184,22 +2284,84 @@ public class AnnouncementOverlay extends Overlay
         drawCenteredText(g, "Please stand on the Start Tile to begin.", centerX, y + 28, Color.LIGHT_GRAY, alpha);
     }
 
-    /** Shared centered/shadowed string draw -- caller sets the font first. */
+    /** The widest a horizontally-centered line/row should ever be drawn, given the viewer's own
+     * CURRENT canvas size -- not a fixed design-time constant -- so every banner authored against a
+     * normal game window still fits entirely on screen for someone who has resized their client or
+     * plays on a small one. Cheap enough (one subtraction) to recompute fresh every frame; no resize
+     * listener needed since the very next frame after a resize just sees the new canvas size. */
+    private int safeTextWidth()
+    {
+        return Math.max(MIN_SAFE_TEXT_WIDTH_PX, client.getCanvasWidth() - 2 * SCREEN_SAFE_MARGIN_PX);
+    }
+
+    /** Scale factor to shrink a composite line/row's own already-measured "design" width by so it
+     * fits within safeTextWidth() -- 1f (unchanged) if it already fits. A composite line built from
+     * several separately-measured segments can't shrink itself the way a single drawCenteredText
+     * call can: by the time any one segment is actually drawn, its caller has already measured every
+     * segment at the font size it intends to use and laid out x offsets from that. So those callers
+     * measure the WHOLE line/row at its normal design size first, get this shared scale, then
+     * re-derive every segment's font by the same factor before laying anything out for real --
+     * keeping proportions between segments consistent instead of each drifting independently. */
+    private float fitScale(int designWidth)
+    {
+        int maxWidth = safeTextWidth();
+        if (designWidth <= maxWidth) return 1f;
+        return Math.max(MIN_FIT_SCALE, maxWidth / (float) designWidth);
+    }
+
+    /** Shared centered/shadowed string draw -- caller sets the font first. Auto-shrinks (see
+     * fitScale) rather than let {@code text} run past the viewer's own current screen edges, then
+     * restores the caller's original font before returning so anything drawn right after (e.g. a
+     * backdrop sized off that same font's metrics) is unaffected.
+     * <p>
+     * Measures {@code text} exactly once for the common case (no shrink needed) -- the same
+     * measurement this method always had to do for centering doubles as the fit check, rather than
+     * a separate pass measuring the same string twice every frame. A second measurement only happens
+     * on the rare frame where a shrink actually applies, since {@code fitScale}'s ratio is a linear
+     * approximation of the smaller font's real width. */
     private void drawCenteredText(Graphics2D g, String text, int centerX, int y, Color color, float alpha)
     {
-        int x = centerX - g.getFontMetrics().stringWidth(text) / 2;
-        drawLeftAlignedText(g, text, x, y, color, alpha);
+        Font original = g.getFont();
+        int width = g.getFontMetrics(original).stringWidth(text);
+        float scale = fitScale(width);
+
+        Font font = original;
+        if (scale < 1f)
+        {
+            font = original.deriveFont(original.getSize2D() * scale);
+            g.setFont(font);
+            width = g.getFontMetrics().stringWidth(text);
+        }
+
+        drawLeftAlignedText(g, text, centerX - width / 2, y, color, alpha);
+        if (font != original) g.setFont(original);
     }
 
     /** Same as drawCenteredText, but colors each non-space character from {@code letterColors} in
-     * order instead of one solid color. */
+     * order instead of one solid color. Same auto-shrink/restore treatment, and same
+     * measure-once-in-the-common-case reasoning -- the per-character width loop below is already
+     * required (rainbow text needs per-character positions regardless of fit), so it doubles as the
+     * fit check instead of adding a separate measurement pass. */
     private void drawCenteredRainbowText(Graphics2D g, String text, Color[] letterColors, int centerX, int y, float alpha)
     {
-        FontMetrics fm = g.getFontMetrics();
+        Font original = g.getFont();
+        FontMetrics fm = g.getFontMetrics(original);
         int totalWidth = 0;
         for (int i = 0; i < text.length(); i++) totalWidth += fm.charWidth(text.charAt(i));
+        float scale = fitScale(totalWidth);
+
+        Font font = original;
+        if (scale < 1f)
+        {
+            font = original.deriveFont(original.getSize2D() * scale);
+            g.setFont(font);
+            fm = g.getFontMetrics();
+            totalWidth = 0;
+            for (int i = 0; i < text.length(); i++) totalWidth += fm.charWidth(text.charAt(i));
+        }
 
         drawLeftAlignedRainbowText(g, text, letterColors, centerX - totalWidth / 2, y, alpha);
+        if (font != original) g.setFont(original);
     }
 
     /** Draws {@code text} left-aligned from canvas x {@code x}, and returns the x just past what it

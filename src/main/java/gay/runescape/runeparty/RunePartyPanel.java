@@ -26,7 +26,8 @@ public class RunePartyPanel extends PluginPanel
     private static final int BORDER = 8;
     private static final Color ROW_EVEN = new Color(40, 40, 40);
     private static final Color ROW_ODD  = new Color(50, 50, 50);
-    private static final Color COLOR_TURN = new Color(255, 210, 0);
+    private static final Color COLOR_TURN = new Color(255, 210, 0); // statusLabel's own "X's turn" text -- the roster itself now outlines instead, see refreshRoster
+    private static final int ROW_TURN_OUTLINE_PX = 2; // roster row outline thickness for whoever's up, in their own seat color
 
     private final RunePartyPlugin plugin;
 
@@ -842,6 +843,10 @@ public class RunePartyPanel extends PluginPanel
             useBtn.setAlignmentX(LEFT_ALIGNMENT);
             useBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
             useBtn.setEnabled(canUseNow);
+            // Same effect text AnnouncementOverlay#renderItemGrantDescription already shows right
+            // after a grant -- surfacing it here too means a player doesn't have to remember what an
+            // item does (or use it blind) once that one-time reveal has scrolled past.
+            useBtn.setToolTipText(item.getEffectDescription(true));
             useBtn.addActionListener(e -> {
                 if (item.requiresPlacement()) plugin.beginItemPlacement(itemKey);
                 else if (item.requiresTarget()) plugin.beginItemTargeting(itemKey);
@@ -899,6 +904,18 @@ public class RunePartyPanel extends PluginPanel
         }
     }
 
+    /** Two lines per player -- a full-width name line, then a "Coins: N   GG: N   Items: N" stats
+     * line underneath -- rather than the single-row, 5-equal-column table this used to be. That
+     * older layout gave "Player" the same fixed width as "Coins"/"Golden Gnomes"/"Items", so a
+     * longer RSN just got clipped by the column boundary; stacking the stats onto their own line
+     * frees the name line to use the panel's entire width instead. No more column header (see
+     * sectionLabel("Players") above this table in buildInGameCard) -- there's nothing left to align
+     * into columns once stats aren't laid out side by side with the name.
+     * <p>
+     * Whoever's up is marked by outlining their whole entry in their own seat color (see
+     * ROW_TURN_OUTLINE_PX) rather than turning their name orange -- reads at a glance even when
+     * scanning past a name in the entry itself, and doubles as a reminder of which seat color
+     * belongs to which player. */
     private void refreshRoster(List<RosterReducer.RosterEntry> entries)
     {
         String key = buildRosterKey(entries) + plugin.getPhase() + '|' + plugin.getCurrentTurnRsn();
@@ -907,37 +924,45 @@ public class RunePartyPanel extends PluginPanel
 
         rosterTablePanel.removeAll();
 
-        JPanel header = new JPanel(new GridLayout(1, 5));
-        header.setBackground(new Color(30, 30, 30));
-        header.setBorder(new EmptyBorder(3, 6, 3, 6));
-        header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
-        header.add(smallLabel("#"));
-        header.add(smallLabel("Player"));
-        header.add(smallLabel("Coins"));
-        header.add(smallLabel("Golden Gnomes"));
-        header.add(smallLabel("Items"));
-        rosterTablePanel.add(header);
-
         for (int i = 0; i < entries.size(); i++)
         {
             RosterReducer.RosterEntry entry = entries.get(i);
-            JPanel row = new JPanel(new GridLayout(1, 5));
+
+            JPanel row = new JPanel();
+            row.setLayout(new BoxLayout(row, BoxLayout.Y_AXIS));
             row.setBackground(i % 2 == 0 ? ROW_EVEN : ROW_ODD);
-            row.setBorder(new EmptyBorder(3, 6, 3, 6));
-            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+            row.setAlignmentX(LEFT_ALIGNMENT);
+            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
 
             boolean onTurn = entry.rsn.equalsIgnoreCase(plugin.getCurrentTurnRsn());
-            Color nameColor = onTurn ? COLOR_TURN : (entry.joined ? Color.WHITE : ColorScheme.MEDIUM_GRAY_COLOR);
-
+            Color nameColor = entry.joined ? Color.WHITE : ColorScheme.MEDIUM_GRAY_COLOR;
             RunePartyColor seatColor = entry.role == RunePartyRole.PLAYER ? RunePartyColor.forNumber(entry.colorNumber) : null;
             Color numberColor = seatColor != null ? seatColor.awt : Color.WHITE;
-            row.add(smallLabel(entry.role == RunePartyRole.PLAYER ? entry.number : "", numberColor));
+
+            // Whoever's up gets their own seat color outlining the whole entry instead of their name
+            // turning orange -- the inner empty border shrinks by the outline's own thickness on
+            // each side, so a row's total size (and the next row's y position) doesn't shift the
+            // instant a turn starts/ends.
+            row.setBorder(onTurn
+                ? BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(numberColor, ROW_TURN_OUTLINE_PX), new EmptyBorder(4 - ROW_TURN_OUTLINE_PX, 6 - ROW_TURN_OUTLINE_PX, 4 - ROW_TURN_OUTLINE_PX, 6 - ROW_TURN_OUTLINE_PX))
+                : new EmptyBorder(4, 6, 4, 6));
+
+            JPanel nameRow = new JPanel(new BorderLayout(6, 0));
+            nameRow.setOpaque(false);
+            nameRow.setAlignmentX(LEFT_ALIGNMENT);
+            nameRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 18));
+            JLabel numberLabel = smallLabel(entry.role == RunePartyRole.PLAYER ? String.valueOf(entry.number) : "", numberColor);
             JLabel nameLabel = smallLabel(entry.rsn, nameColor);
-            row.add(nameLabel);
-            row.add(smallLabel(String.valueOf(entry.coins)));
-            row.add(smallLabel(String.valueOf(entry.goldenGnomeCount)));
+            nameRow.add(numberLabel, BorderLayout.WEST);
+            nameRow.add(nameLabel, BorderLayout.CENTER);
+
             int itemCount = entry.items.values().stream().mapToInt(Integer::intValue).sum();
-            row.add(smallLabel(String.valueOf(itemCount)));
+            JLabel statsLabel = smallLabel("Coins: " + entry.coins + "   GG: " + entry.goldenGnomeCount + "   Items: " + itemCount,
+                ColorScheme.LIGHT_GRAY_COLOR);
+            statsLabel.setAlignmentX(LEFT_ALIGNMENT);
+
+            row.add(nameRow);
+            row.add(statsLabel);
 
             if (plugin.isHost() && entry.role == RunePartyRole.SPECTATOR && !plugin.isGameFull())
             {

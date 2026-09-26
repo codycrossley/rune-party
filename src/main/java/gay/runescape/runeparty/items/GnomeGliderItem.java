@@ -59,8 +59,8 @@ public class GnomeGliderItem implements Item
     public String getUseAnnouncementSubtitle(boolean isLocalPlayer)
     {
         return isLocalPlayer
-            ? "You'll pass the Golden Gnome on your next roll."
-            : "They'll pass the Golden Gnome on their next roll.";
+            ? "Flies you to one space before the Golden Gnome."
+            : "Flies them to one space before the Golden Gnome.";
     }
 
     @Override
