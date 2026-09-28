@@ -198,13 +198,27 @@ public final class BalloonModel
         for (short c : faceColors) distinct.add(c);
 
         int targetRgb = targetColor.getRGB() & 0xFFFFFF;
-        int targetHue = JagexColor.unpackHue(JagexColor.rgbToHSL(targetRgb, 1.0));
-        int targetSaturation = JagexColor.unpackSaturation(JagexColor.rgbToHSL(targetRgb, 1.0));
+        short targetHsl = JagexColor.rgbToHSL(targetRgb, 1.0);
+        int targetHue = JagexColor.unpackHue(targetHsl);
+        int targetSaturation = JagexColor.unpackSaturation(targetHsl);
+
+        // RunePartyColor.BLACK/WHITE are both achromatic (R==G==B), which makes saturation 0 and
+        // hue meaningless -- packHSL(anyHue, 0, luminance) is the same gray no matter what hue is.
+        // Preserving each ORIGINAL face's own luminance below (to keep the balloon's real shading/
+        // highlights) is right for an actual hue like red or blue, but for an achromatic target it
+        // just reproduces whatever gray that face's luminance already happened to be, completely
+        // ignoring how dark or light the target color itself is -- a "black" balloon built this way
+        // read as identical to a "white" one, since neither ever touched luminance at all. Only for
+        // an achromatic target, override luminance to the target's own instead, so the balloon
+        // actually renders at that color's real darkness/lightness.
+        boolean achromaticTarget = targetSaturation == 0;
+        int targetLuminance = JagexColor.unpackLuminance(targetHsl);
 
         ModelData result = raw.cloneColors().cloneVertices();
         for (short original : distinct)
         {
-            short recolored = JagexColor.packHSL(targetHue, targetSaturation, JagexColor.unpackLuminance(original));
+            int luminance = achromaticTarget ? targetLuminance : JagexColor.unpackLuminance(original);
+            short recolored = JagexColor.packHSL(targetHue, targetSaturation, luminance);
             result = result.recolor(original, recolored);
         }
 

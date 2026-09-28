@@ -211,7 +211,6 @@ public class AnnouncementOverlay extends Overlay
     private static final Stroke CHANCE_SPACE_ARROW_SHAFT_STROKE = new BasicStroke(6f);
     private static final int CHANCE_SPACE_ARROW_ITEM_CLEARANCE = 48; // gap between the arrow shaft and the coin/gnome icon above it
     private static final int CHANCE_SPACE_ITEM_ICON_SIZE = 52; // 2x the original placeholder-art size
-    private static final Stroke CHANCE_SPACE_FIZZLE_STROKE = new BasicStroke(3f);
     private static final int CHANCE_SPACE_ANNOUNCEMENT_TOP_GAP = 30; // gap below the token name labels before the announcement's own header line
     private static final float CHANCE_SPACE_ANNOUNCEMENT_HEADER_SIZE = 22f;
     private static final float CHANCE_SPACE_ANNOUNCEMENT_LINE_SIZE = 18f;
@@ -746,7 +745,6 @@ public class AnnouncementOverlay extends Overlay
         long[] slotDelayMs = plugin.getChanceSpaceIconsSlotDelayMs();
         String[] announcementLines = plugin.getChanceSpaceAnnouncementLines();
         if (leftRsn == null || rightRsn == null || outcomeType == null || direction == null || slotDelayMs == null) return;
-        boolean gnomeTransferred = plugin.isChanceSpaceIconsGnomeTransferred();
 
         long elapsed = System.currentTimeMillis() - plugin.getChanceSpaceIconsStart();
         int centerX = drawableWidth() / 2;
@@ -758,7 +756,7 @@ public class AnnouncementOverlay extends Overlay
         if (anim != null) drawChanceSpaceToken(g, leftRsn, centerX - CHANCE_SPACE_ICON_SPACING, y, anim[0], anim[1]);
 
         anim = slotAnim(elapsed, slotDelayMs[1], stageAlpha);
-        if (anim != null) drawChanceSpaceArrow(g, direction, outcomeType, gnomeTransferred, centerX, y, anim[0], anim[1]);
+        if (anim != null) drawChanceSpaceArrow(g, direction, outcomeType, centerX, y, anim[0], anim[1]);
 
         anim = slotAnim(elapsed, slotDelayMs[2], stageAlpha);
         if (anim != null) drawChanceSpaceToken(g, rightRsn, centerX + CHANCE_SPACE_ICON_SPACING, y, anim[0], anim[1]);
@@ -851,7 +849,7 @@ public class AnnouncementOverlay extends Overlay
      * are a strict one-way gift now, never a mutual swap) -- with the item that moved -- coins or a
      * Golden Gnome, see {@link #drawChanceSpaceCoinIcon}/{@link #drawChanceSpaceGnomeIcon} -- drawn
      * above its center. */
-    private void drawChanceSpaceArrow(Graphics2D g, String direction, String outcomeType, boolean gnomeTransferred,
+    private void drawChanceSpaceArrow(Graphics2D g, String direction, String outcomeType,
                                        int cx, int cy, float scale, float alpha)
     {
         int halfWidth = Math.round(CHANCE_SPACE_ARROW_HALF_WIDTH * scale);
@@ -873,7 +871,7 @@ public class AnnouncementOverlay extends Overlay
         int itemY = cy - CHANCE_SPACE_ARROW_ITEM_CLEARANCE;
         int itemSize = Math.round(CHANCE_SPACE_ITEM_ICON_SIZE * scale);
         if ("coins".equals(outcomeType)) drawChanceSpaceCoinIcon(g, cx, itemY, itemSize, alpha);
-        else drawChanceSpaceGnomeIcon(g, cx, itemY, itemSize, alpha, gnomeTransferred);
+        else drawChanceSpaceGnomeIcon(g, cx, itemY, itemSize, alpha);
     }
 
     private void drawChanceSpaceArrowHead(Graphics2D g, int tipX, int y, int dir, int halfWidth, int headLength)
@@ -894,21 +892,14 @@ public class AnnouncementOverlay extends Overlay
         drawIconImage(g, chanceSpaceCoinIcon, cx, cy, size, alpha);
     }
 
-    /** Draws chanceSpaceGnomeIcon the same way as the coin icon above, but dimmed with a red slash
-     * through it when a gnome swap fizzled (neither player held one) -- so the tableau still reads
-     * as "attempted, nothing moved" rather than a normal transfer. */
-    private void drawChanceSpaceGnomeIcon(Graphics2D g, int cx, int cy, int size, float alpha, boolean transferred)
+    /** Draws chanceSpaceGnomeIcon the same way as the coin icon above -- including on a fizzled
+     * gnome swap (neither player held one to give): the announcement text underneath already says
+     * so plainly, so dimming the icon and slashing a red line through it on top of that just read as
+     * a rendering glitch (a barely-visible Golden Gnome half-hidden behind the tableau's own
+     * backdrop) rather than an intentional "nothing happened" cue. */
+    private void drawChanceSpaceGnomeIcon(Graphics2D g, int cx, int cy, int size, float alpha)
     {
-        float iconAlpha = transferred ? alpha : alpha * 0.4f;
-        drawIconImage(g, chanceSpaceGnomeIcon, cx, cy, size, iconAlpha);
-
-        if (!transferred)
-        {
-            int r = size / 2;
-            g.setStroke(CHANCE_SPACE_FIZZLE_STROKE);
-            g.setColor(RunePartyRender.withAlpha(new Color(220, 50, 50), alpha));
-            g.drawLine(cx - r, cy + r, cx + r, cy - r - size / 2);
-        }
+        drawIconImage(g, chanceSpaceGnomeIcon, cx, cy, size, alpha);
     }
 
     private void drawIconImage(Graphics2D g, BufferedImage icon, int cx, int cy, int size, float alpha)
@@ -1168,7 +1159,7 @@ public class AnnouncementOverlay extends Overlay
         }
     }
 
-    /** Draws "You/&lt;caster&gt; cast teleblock on &lt;target&gt;/you!" plus a matching subtitle.
+    /** Draws "You/&lt;caster&gt; cast Ice Barrage on &lt;target&gt;/you!" plus a matching subtitle.
      * Personalized for whichever role the local viewer is; a third party sees both names. */
     private void renderTeleBlockCastAnnouncement(Graphics2D g)
     {
@@ -1186,7 +1177,7 @@ public class AnnouncementOverlay extends Overlay
 
         String casterPart = isCaster ? "You" : caster;
         String targetPart = isTarget ? "you" : target;
-        String title = casterPart + " cast teleblock on " + targetPart + "!";
+        String title = casterPart + " cast Ice Barrage on " + targetPart + "!";
         String subtitle = isTarget ? "You will lose your next turn." : target + " will lose their next turn.";
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_TITLE_SIZE));

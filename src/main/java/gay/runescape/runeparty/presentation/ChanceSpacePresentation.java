@@ -144,7 +144,8 @@ public final class ChanceSpacePresentation
      * `receiver` (whichever of participantA/participantB actually received the gift) is null only
      * for a fizzled gnome gift, in which case the arrow points toward a random one of the two --
      * neither is the "intended" recipient since a fizzle means neither participant held one to
-     * begin with -- dimmed by the fizzle rendering itself. */
+     * begin with. The announcement text (buildAnnouncementLines) is what actually says so; the
+     * tableau's own icon renders the same either way. */
     private static RevealPayload buildRevealPayload(String participantA, String participantB, String outcome,
                                                       Boolean gnomeTransferred, String receiver, Integer amount)
     {
@@ -168,7 +169,7 @@ public final class ChanceSpacePresentation
 
         String[] lines = buildAnnouncementLines(participantA, participantB, outcome, amount, gnomeTransferred, receiver);
 
-        return new RevealPayload(leftRsn, rightRsn, outcome, receiver != null, direction, slotDelayMs, lines);
+        return new RevealPayload(leftRsn, rightRsn, outcome, direction, slotDelayMs, lines);
     }
 
     /** The text that fades in underneath the icon tableau once every icon's settled -- a header
@@ -234,7 +235,6 @@ public final class ChanceSpacePresentation
     public String getIconsLeftRsn() { return reveal.payload != null ? reveal.payload.leftRsn : null; }
     public String getIconsRightRsn() { return reveal.payload != null ? reveal.payload.rightRsn : null; }
     public String getIconsOutcomeType() { return reveal.payload != null ? reveal.payload.outcome : null; }
-    public boolean isIconsGnomeTransferred() { return reveal.payload != null && reveal.payload.gnomeTransferred; }
     public String getIconsArrowDirection() { return reveal.payload != null ? reveal.payload.arrowDirection : null; }
     public long[] getIconsSlotDelayMs() { return reveal.payload != null ? reveal.payload.slotDelayMs : null; }
     public String[] getAnnouncementLines() { return reveal.payload != null ? reveal.payload.announcementLines : null; }
@@ -242,24 +242,25 @@ public final class ChanceSpacePresentation
     /** Payload for the reveal banner: which rsn sits on which side of the tableau, the arrow's
      * direction (always one way, see buildRevealPayload's own doc), which item icon (coins vs
      * Golden Gnome) sits above it, each slot's own reveal delay, and the announcement lines shown
-     * once the tableau settles (see buildAnnouncementLines). */
+     * once the tableau settles (see buildAnnouncementLines). A fizzled gnome gift (neither
+     * participant held one) isn't tracked here -- the announcement text already says so, and the
+     * icon itself no longer renders any different for it, see AnnouncementOverlay#
+     * drawChanceSpaceGnomeIcon's own doc. */
     private static final class RevealPayload
     {
         final String leftRsn;
         final String rightRsn;
         final String outcome; // "coins" or "golden_gnome"
-        final boolean gnomeTransferred; // only meaningful when outcome == "golden_gnome"
         final String arrowDirection; // "LEFT" or "RIGHT" -- never "BOTH", see this class's own doc
         final long[] slotDelayMs; // length 3, indexed 0=left participant, 1=arrow, 2=right participant
         final String[] announcementLines;
 
-        RevealPayload(String leftRsn, String rightRsn, String outcome, boolean gnomeTransferred,
+        RevealPayload(String leftRsn, String rightRsn, String outcome,
                       String arrowDirection, long[] slotDelayMs, String[] announcementLines)
         {
             this.leftRsn = leftRsn;
             this.rightRsn = rightRsn;
             this.outcome = outcome;
-            this.gnomeTransferred = gnomeTransferred;
             this.arrowDirection = arrowDirection;
             this.slotDelayMs = slotDelayMs;
             this.announcementLines = announcementLines;

@@ -1435,7 +1435,7 @@ public class RunePartyPlugin extends Plugin
         }
     }
 
-    /** Payload for the "You/&lt;caster&gt; cast teleblock on &lt;target&gt;!" banner -- see
+    /** Payload for the "You/&lt;caster&gt; cast Ice Barrage on &lt;target&gt;!" banner -- see
      * teleBlockCastAnnounce's own doc for why this isn't just ItemPresentation's own
      * ItemUsedAnnouncePayload (no target field there). */
     private static final class TeleBlockCastPayload
@@ -4025,7 +4025,7 @@ public class RunePartyPlugin extends Plugin
                 // TeleBlockItem leaves hasUseAnnouncement() at its default false -- the generic
                 // "You used/<rsn> used <item>!" banner ITEM_USED already fires above has no
                 // target field to phrase around, so this fires its own dedicated "You/<caster>
-                // cast teleblock on <target>!" banner instead, alongside the impact spotanim on
+                // cast Ice Barrage on <target>!" banner instead, alongside the impact spotanim on
                 // the target's own actor -- both fire together, right here, since there's no
                 // earlier "reveal" step for this to wait behind. teleblockedByPlayer itself is
                 // already updated unconditionally by rosterReducer.apply above, catch-up or not.
@@ -4037,7 +4037,7 @@ public class RunePartyPlugin extends Plugin
                     {
                         scheduleTeleBlockCastAnnouncement(byRsn, blockedRsn);
                         triggerSpotAnimOnPlayer(ICE_BARRAGE_IMPACT_SPOTANIM_ID, blockedRsn, ICE_BARRAGE_IMPACT_SPOTANIM_HEIGHT);
-                        addChatMessage(byRsn + " cast teleblock on " + blockedRsn + "! " + blockedRsn + " will lose their next turn.");
+                        addChatMessage(byRsn + " cast Ice Barrage on " + blockedRsn + "! " + blockedRsn + " will lose their next turn.");
                     }
                 }
                 break;
@@ -5077,7 +5077,6 @@ public class RunePartyPlugin extends Plugin
     public String getChanceSpaceIconsLeftRsn() { return chanceSpacePresentation.getIconsLeftRsn(); }
     public String getChanceSpaceIconsRightRsn() { return chanceSpacePresentation.getIconsRightRsn(); }
     public String getChanceSpaceIconsOutcomeType() { return chanceSpacePresentation.getIconsOutcomeType(); }
-    public boolean isChanceSpaceIconsGnomeTransferred() { return chanceSpacePresentation.isIconsGnomeTransferred(); }
     public String getChanceSpaceIconsArrowDirection() { return chanceSpacePresentation.getIconsArrowDirection(); }
     public long[] getChanceSpaceIconsSlotDelayMs() { return chanceSpacePresentation.getIconsSlotDelayMs(); }
     public String[] getChanceSpaceAnnouncementLines() { return chanceSpacePresentation.getAnnouncementLines(); }
