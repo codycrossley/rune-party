@@ -138,6 +138,22 @@ public class JaddyDuelModel extends Overlay
             return null;
         }
 
+        // The server applies the board swap (real state) the instant MINIGAME_STARTED fires --
+        // independent of how long AnnouncementOverlay's own "MINIGAME!" banner + selection wheel
+        // take to actually play out on a live client, which varies with whatever else was already
+        // queued on the shared turnEffectGate at that moment (e.g. a still-settling item-pickup
+        // reveal). Without this check the Jads could spawn on the actual game board before the
+        // wheel ever reveals "Who's Your Jaddy?" was even picked -- see
+        // RunePartyPlugin#isMinigameSelectionRevealed's own doc, and TileOverlay#
+        // isMinigameSelectionPending for the same race generalized to every other board-swapping
+        // mini-game's own arena. True immediately for a catching-up client -- there's no reveal
+        // moment to wait for when you're just resyncing to a duel already in progress.
+        if (!resolved && !plugin.isMinigameSelectionRevealed())
+        {
+            clear();
+            return null;
+        }
+
         if (resolved)
         {
             // Frozen at whatever slotA/slotB.center/facing were the instant resolve() landed --

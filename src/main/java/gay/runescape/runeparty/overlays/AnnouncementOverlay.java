@@ -226,16 +226,20 @@ public class AnnouncementOverlay extends Overlay
 
     // Screen-fit safety net -- every one of this overlay's single-phrase/rainbow text draws funnels
     // through drawCenteredText/drawCenteredRainbowText below, which auto-shrink (see fitFont) rather
-    // than let a title, name, or line run past the viewer's own CURRENT canvas edges -- computed
-    // fresh from client.getCanvasWidth() each call, not the game window's normal/design size, so a
-    // resized or small client is covered too. A composite line built from several independently
-    // pre-measured segments (renderSpinHintSelf/Waiting, drawEmoteInstruction, drawPlayerRows'
-    // rank/name/stats columns, renderTrueOrFalseReveal's per-player rows) can't shrink itself that
-    // way -- see fitScale's own doc -- so those measure their own worst case up front and apply the
-    // same scale to every segment before laying anything out. Genuine multi-sentence content (mini-
-    // game instructions, True or False questions) still wraps onto multiple lines instead of
-    // shrinking -- see drawWrappedCenteredText -- since a whole paragraph squeezed onto one line
-    // would turn unreadable long before it ran out of room that way.
+    // than let a title, name, or line run past the viewer's own CURRENT drawable edges -- computed
+    // fresh from drawableWidth() (see its own doc) each call, not the game window's normal/design
+    // size, so a resized/small client is covered, AND so is Fixed mode, where the actual 3D viewport
+    // is smaller than the full canvas and the rest is native OSRS widgets (inventory, chat, minimap)
+    // that would otherwise sit on top of anything centered on the raw canvas instead. Every
+    // centerX/y position formula in this file (not just the wrap/shrink width) is anchored to
+    // drawableWidth()/drawableHeight() for the same reason -- see their own doc. A composite line
+    // built from several independently pre-measured segments (renderSpinHintSelf/Waiting,
+    // drawEmoteInstruction, drawPlayerRows' rank/name/stats columns, renderTrueOrFalseReveal's
+    // per-player rows) can't shrink itself that way -- see fitScale's own doc -- so those measure
+    // their own worst case up front and apply the same scale to every segment before laying anything
+    // out. Genuine multi-sentence content (mini-game instructions, True or False questions) still
+    // wraps onto multiple lines instead of shrinking -- see drawWrappedCenteredText -- since a whole
+    // paragraph squeezed onto one line would turn unreadable long before it ran out of room that way.
     private static final int SCREEN_SAFE_MARGIN_PX = 24; // kept clear on both sides of the canvas edge
     private static final int MIN_SAFE_TEXT_WIDTH_PX = 240; // floor so a tiny/resized window can't force degenerate wrapping/shrinking
     private static final float MIN_FIT_SCALE = 0.5f; // never shrink a line past half its designed size
@@ -361,7 +365,7 @@ public class AnnouncementOverlay extends Overlay
         Color color = seatColor != null ? seatColor.awt : Color.WHITE;
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(36f));
-        drawCenteredText(g, text, client.getCanvasWidth() / 2, client.getCanvasHeight() / 4, color, alpha);
+        drawCenteredText(g, text, drawableWidth() / 2, drawableHeight() / 4, color, alpha);
     }
 
     /** Stands in for renderTurnAnnouncement when a player's turn was skipped by a Tele Block. */
@@ -379,10 +383,10 @@ public class AnnouncementOverlay extends Overlay
         Color color = seatColor != null ? seatColor.awt : Color.WHITE;
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(36f));
-        drawCenteredText(g, text, client.getCanvasWidth() / 2, client.getCanvasHeight() / 4, color, alpha);
+        drawCenteredText(g, text, drawableWidth() / 2, drawableHeight() / 4, color, alpha);
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(16f));
-        drawCenteredText(g, "Ice Barraged", client.getCanvasWidth() / 2, client.getCanvasHeight() / 4 + 26, color, alpha);
+        drawCenteredText(g, "Ice Barraged", drawableWidth() / 2, drawableHeight() / 4 + 26, color, alpha);
     }
 
     /** Dispatches to whichever half of the Spin hint applies to the local viewer: the "it's your
@@ -442,8 +446,8 @@ public class AnnouncementOverlay extends Overlay
             spinWidth = g.getFontMetrics().stringWidth(spinWord);
         }
 
-        int y = client.getCanvasHeight() / 4 + 40;
-        int x = client.getCanvasWidth() / 2 - (prefixWidth + spinWidth + suffixWidth) / 2;
+        int y = drawableHeight() / 4 + 40;
+        int x = drawableWidth() / 2 - (prefixWidth + spinWidth + suffixWidth) / 2;
 
         g.setFont(normalFont);
         x = drawLeftAlignedText(g, prefix, x, y, SPIN_HINT_COLOR, alpha);
@@ -479,8 +483,8 @@ public class AnnouncementOverlay extends Overlay
             suffixWidth = g.getFontMetrics().stringWidth(suffix);
         }
 
-        int y = client.getCanvasHeight() / 4 + 40;
-        int x = client.getCanvasWidth() / 2 - (prefixWidth + nameWidth + suffixWidth) / 2;
+        int y = drawableHeight() / 4 + 40;
+        int x = drawableWidth() / 2 - (prefixWidth + nameWidth + suffixWidth) / 2;
 
         RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
         Color nameColor = seatColor != null ? seatColor.awt : SPIN_HINT_COLOR;
@@ -501,8 +505,8 @@ public class AnnouncementOverlay extends Overlay
 
         float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), SPIN_HINT_PULSE_PERIOD_MS);
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(SPIN_HINT_SIZE));
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 4 + 40;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 4 + 40;
         drawCenteredText(g, "Return to your tile to roll the dice!", centerX, y, SPIN_HINT_COLOR, alpha);
     }
 
@@ -517,8 +521,8 @@ public class AnnouncementOverlay extends Overlay
 
         float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), SPIN_HINT_PULSE_PERIOD_MS);
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(SPIN_HINT_SIZE));
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 4 + 40;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 4 + 40;
         drawCenteredText(g, "Head to the Start Tile to begin!", centerX, y, SPIN_HINT_COLOR, alpha);
     }
 
@@ -535,8 +539,8 @@ public class AnnouncementOverlay extends Overlay
 
         float alpha = GOLDEN_GNOME_OFFER_MIN_ALPHA + (1f - GOLDEN_GNOME_OFFER_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS);
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         boolean isLocal = isLocal(encounterRsn);
 
@@ -705,7 +709,7 @@ public class AnnouncementOverlay extends Overlay
         if (text == null) return;
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OUTCOME_SIZE));
-        drawCenteredText(g, text, client.getCanvasWidth() / 2, client.getCanvasHeight() / 3, color, alpha);
+        drawCenteredText(g, text, drawableWidth() / 2, drawableHeight() / 3, color, alpha);
     }
 
     /** Draws the "CHANCE TILE!" title card -- same rainbow single-line treatment as "ITEM SPACE!"
@@ -716,8 +720,8 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.getChanceSpaceTitleUntil(), MINIGAME_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
         drawCenteredRainbowText(g, "CHANCE TILE!", RAINBOW_LETTER_COLORS, centerX, y, alpha);
@@ -745,8 +749,8 @@ public class AnnouncementOverlay extends Overlay
         boolean gnomeTransferred = plugin.isChanceSpaceIconsGnomeTransferred();
 
         long elapsed = System.currentTimeMillis() - plugin.getChanceSpaceIconsStart();
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 2;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 2;
 
         drawChanceSpaceBackdrop(g, announcementLines, centerX, y, stageAlpha);
 
@@ -944,7 +948,7 @@ public class AnnouncementOverlay extends Overlay
         if (text == null) return;
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OUTCOME_SIZE));
-        drawCenteredText(g, text, client.getCanvasWidth() / 2, client.getCanvasHeight() / 3, Color.WHITE, alpha);
+        drawCenteredText(g, text, drawableWidth() / 2, drawableHeight() / 3, Color.WHITE, alpha);
     }
 
     /** Draws the "MINIGAME!" title card. A pure title card -- instructions are shown by the
@@ -954,8 +958,8 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.getMinigameBannerUntil(), MINIGAME_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
         drawCenteredRainbowText(g, "MINIGAME!", RAINBOW_LETTER_COLORS, centerX, y, alpha);
@@ -967,8 +971,8 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.getMinigameOverBannerUntil(), MINIGAME_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
         drawCenteredRainbowText(g, "MINIGAME OVER!", RAINBOW_LETTER_COLORS, centerX, y, alpha);
@@ -984,8 +988,8 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.getArrivalRoundBeginBannerUntil(), MINIGAME_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 2;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 2;
 
         g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_COUNTDOWN_SIZE));
         drawCenteredRainbowText(g, "BEGIN!", RAINBOW_LETTER_COLORS, centerX, y, alpha);
@@ -1005,8 +1009,8 @@ public class AnnouncementOverlay extends Overlay
         try { color = Color.decode(colorHex); }
         catch (NumberFormatException e) { return; }
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 2;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 2;
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE));
         drawCenteredText(g, "This is your team color!", centerX, y, color, alpha);
@@ -1044,8 +1048,8 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.getItemBannerUntil(), MINIGAME_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
         drawCenteredRainbowText(g, "ITEM SPACE!", RAINBOW_LETTER_COLORS, centerX, y, alpha);
@@ -1092,8 +1096,8 @@ public class AnnouncementOverlay extends Overlay
         Item item = Items.get(plugin.getItemGrantDescriptionKey());
         if (rsn == null || item == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         boolean isLocal = isLocal(rsn);
         String subtitle = item.getEffectDescription(isLocal);
@@ -1117,8 +1121,8 @@ public class AnnouncementOverlay extends Overlay
         String rsn = plugin.getItemCapBlockedRsn();
         if (rsn == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
         int cap = plugin.getItemCapBlockedCap();
 
         boolean isLocal = isLocal(rsn);
@@ -1145,8 +1149,8 @@ public class AnnouncementOverlay extends Overlay
         Item item = Items.get(plugin.getItemUsedAnnounceItemKey());
         if (rsn == null || item == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         boolean isLocal = isLocal(rsn);
 
@@ -1174,8 +1178,8 @@ public class AnnouncementOverlay extends Overlay
         String target = plugin.getTeleBlockCastTargetRsn();
         if (caster == null || target == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         boolean isCaster = isLocal(caster);
         boolean isTarget = isLocal(target);
@@ -1203,8 +1207,8 @@ public class AnnouncementOverlay extends Overlay
         String target = plugin.getTeleOtherUsedTargetRsn();
         if (caster == null || target == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         String casterPart = isLocal(caster) ? "You" : caster;
         String targetPart = isLocal(target) ? "you" : target;
@@ -1223,8 +1227,8 @@ public class AnnouncementOverlay extends Overlay
         String rsn = plugin.getCoinTrapAnnounceRsn();
         if (rsn == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         String title = (isLocal(rsn) ? "You" : rsn) + " landed on a Coin Trap!";
 
@@ -1245,8 +1249,8 @@ public class AnnouncementOverlay extends Overlay
         String kind = plugin.getWiseOldManStolenKind();
         if (thief == null || victim == null || kind == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         String thiefLabel = isLocal(thief) ? "You" : thief;
         String victimLabel = isLocal(victim) ? "you" : victim;
@@ -1303,7 +1307,7 @@ public class AnnouncementOverlay extends Overlay
         if (text == null) return;
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(ITEM_SHOP_OUTCOME_SIZE));
-        drawCenteredText(g, text, client.getCanvasWidth() / 2, client.getCanvasHeight() / 3, color, alpha);
+        drawCenteredText(g, text, drawableWidth() / 2, drawableHeight() / 3, color, alpha);
     }
 
     /** How far the wheel has rotated at {@code elapsed} into its spin -- eased to a stop, then held
@@ -1340,8 +1344,8 @@ public class AnnouncementOverlay extends Overlay
         int n = wheelEntries.size();
         float segmentDeg = 360f / n;
 
-        int cx = client.getCanvasWidth() / 2;
-        int cy = client.getCanvasHeight() / 2;
+        int cx = drawableWidth() / 2;
+        int cy = drawableHeight() / 2;
         float radius = WHEEL_RADIUS * scale;
 
         Graphics2D wheel = (Graphics2D) g.create();
@@ -1448,8 +1452,8 @@ public class AnnouncementOverlay extends Overlay
 
         float alpha = MINIGAME_READY_CHECK_MIN_ALPHA + (1f - MINIGAME_READY_CHECK_MIN_ALPHA) * BannerAnim.pulse(now, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         String displayName = plugin.getMinigameDisplayName();
         if (displayName != null)
@@ -1503,8 +1507,8 @@ public class AnnouncementOverlay extends Overlay
             ? 1.4f - 0.4f * (withinTick / (float) MINIGAME_COUNTDOWN_POP_MS)
             : 1f;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 2;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 2;
 
         g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_COUNTDOWN_SIZE * scale));
         if (number >= 1)
@@ -1530,8 +1534,8 @@ public class AnnouncementOverlay extends Overlay
         long now = System.currentTimeMillis();
         float alpha = MINIGAME_READY_CHECK_MIN_ALPHA + (1f - MINIGAME_READY_CHECK_MIN_ALPHA) * BannerAnim.pulse(now, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 2;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 2;
 
         String text;
         if (RunePartyPlugin.JADDY_KEY.equals(plugin.getMinigameKey()))
@@ -1574,8 +1578,8 @@ public class AnnouncementOverlay extends Overlay
 
         int phase = (int) Math.min(2, elapsed / RunePartyPlugin.RAINBOW_RUSH_LIGHT_PHASE_MS); // 0=red, 1=orange, 2=green
 
-        int centerX = client.getCanvasWidth() / 2;
-        int centerY = client.getCanvasHeight() / 2;
+        int centerX = drawableWidth() / 2;
+        int centerY = drawableHeight() / 2;
 
         int boxWidth = TRAFFIC_LIGHT_DOT_RADIUS * 2 + TRAFFIC_LIGHT_PADDING * 2;
         int boxHeight = TRAFFIC_LIGHT_DOT_RADIUS * 6 + TRAFFIC_LIGHT_GAP * 2 + TRAFFIC_LIGHT_PADDING * 2;
@@ -1667,8 +1671,8 @@ public class AnnouncementOverlay extends Overlay
             text = localWon ? "Your team's Jad won!" : "The other team's Jad won!";
         }
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 2;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 2;
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_TITLE_SIZE));
         drawCenteredText(g, text, centerX, y, color, alpha);
@@ -1684,8 +1688,8 @@ public class AnnouncementOverlay extends Overlay
         String question = plugin.getTrueOrFalseQuestion();
         if (question == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3 - 20;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3 - 20;
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_ROUND_LABEL_SIZE));
         drawCenteredText(g, "Round " + plugin.getTrueOrFalseRoundNumber() + "/5", centerX, y, Color.WHITE, 1f);
@@ -1744,8 +1748,8 @@ public class AnnouncementOverlay extends Overlay
         long now = System.currentTimeMillis();
         if (now >= endsAt) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         int secondsLeft = (int) Math.max(0, Math.ceil((endsAt - now) / 1000.0));
         g.setFont(MARIO_PARTY_FONT.deriveFont(TRUE_OR_FALSE_COUNTDOWN_SIZE));
@@ -1774,8 +1778,8 @@ public class AnnouncementOverlay extends Overlay
         if (dashEndsAt != 0 && now < dashEndsAt) return;
 
         float alpha = MINIGAME_READY_CHECK_MIN_ALPHA + (1f - MINIGAME_READY_CHECK_MIN_ALPHA) * BannerAnim.pulse(now, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 2;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 2;
 
         String text = plugin.isLocalPlayerAssignedBrutus()
             ? "Head to your own zone (pink)!"
@@ -1804,8 +1808,8 @@ public class AnnouncementOverlay extends Overlay
         long now = System.currentTimeMillis();
         if (now >= endsAt) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         int secondsLeft = (int) Math.max(0, Math.ceil((endsAt - now) / 1000.0));
         g.setFont(MARIO_PARTY_FONT.deriveFont(TRUE_OR_FALSE_COUNTDOWN_SIZE));
@@ -1823,8 +1827,8 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.getBrutusAttackDashResultBannerUntil(), DEFAULT_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         String text = plugin.isBrutusAttackDashResultHit() ? "HIT!" : "MISS!";
         g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
@@ -1841,8 +1845,8 @@ public class AnnouncementOverlay extends Overlay
         Boolean correctAnswer = plugin.getTrueOrFalseLastCorrectAnswer();
         if (correctAnswer == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         String title = "The answer was " + (correctAnswer ? "TRUE" : "FALSE") + "!";
         Color titleColor = correctAnswer ? TRUE_OR_FALSE_TRUE_COLOR : TRUE_OR_FALSE_FALSE_COLOR;
@@ -1955,8 +1959,8 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.getMinigameScoreBannerUntil(), MINIGAME_REWARDS_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_REWARDS_TITLE_SIZE));
         drawCenteredRainbowText(g, "FINAL SCORE", RAINBOW_LETTER_COLORS, centerX, y, alpha);
@@ -1989,8 +1993,8 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.getMinigameRewardsBannerUntil(), MINIGAME_REWARDS_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_REWARDS_TITLE_SIZE));
         drawCenteredRainbowText(g, "REWARDS", RAINBOW_LETTER_COLORS, centerX, y, alpha);
@@ -2022,8 +2026,8 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.getRoundCompleteBannerUntil(), ROUND_COMPLETE_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         g.setFont(MARIO_PARTY_FONT.deriveFont(ROUND_COMPLETE_TITLE_SIZE));
         drawCenteredRainbowText(g, "ROUND " + plugin.getRoundCompleteRoundNumber(), RAINBOW_LETTER_COLORS, centerX, y, alpha);
@@ -2053,8 +2057,8 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.getCeremonyTitleBannerUntil(), GAME_OVER_TITLE_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 2 - 20;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 2 - 20;
 
         g.setFont(MARIO_PARTY_FONT.deriveFont(GAME_OVER_TITLE_SIZE));
         drawCenteredRainbowText(g, "GOLDEN GNOME AWARDS!", RAINBOW_LETTER_COLORS, centerX, y, alpha);
@@ -2075,8 +2079,8 @@ public class AnnouncementOverlay extends Overlay
         long now = System.currentTimeMillis();
         float alpha = MINIGAME_READY_CHECK_MIN_ALPHA + (1f - MINIGAME_READY_CHECK_MIN_ALPHA) * BannerAnim.pulse(now, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 2;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 2;
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE));
         drawCenteredText(g, "Everyone must gather in the arena!", centerX, y, Color.WHITE, alpha);
@@ -2091,8 +2095,8 @@ public class AnnouncementOverlay extends Overlay
         String line = plugin.getGnomeLine();
         if (line == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 2;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 2;
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE));
         drawCenteredText(g, line, centerX, y, Color.WHITE, alpha);
@@ -2107,8 +2111,8 @@ public class AnnouncementOverlay extends Overlay
         String description = plugin.getBonusObjectiveDescription();
         if (description == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 2;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 2;
 
         String ordinal = plugin.getBonusObjectiveRoundIndex() == 1 ? "first" : plugin.getBonusObjectiveRoundIndex() == 2 ? "second" : (plugin.getBonusObjectiveRoundIndex() + "th");
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE));
@@ -2124,8 +2128,8 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.getBonusSuspenseBannerUntil(), WINNER_INTRO_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 2;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 2;
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE));
         drawCenteredText(g, "The Golden Gnome is awarded to...", centerX, y, Color.WHITE, alpha);
@@ -2141,8 +2145,8 @@ public class AnnouncementOverlay extends Overlay
         List<String> winners = plugin.getBonusWinners();
         if (winners.isEmpty()) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 2;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 2;
 
         String names = String.join(" and ", winners);
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE));
@@ -2154,8 +2158,8 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.getGameOverBannerUntil(), GAME_OVER_TITLE_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 2 - 20;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 2 - 20;
 
         g.setFont(MARIO_PARTY_FONT.deriveFont(GAME_OVER_TITLE_SIZE));
         drawCenteredRainbowText(g, "GAME OVER!", RAINBOW_LETTER_COLORS, centerX, y, alpha);
@@ -2167,8 +2171,8 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.getWinnerIntroBannerUntil(), WINNER_INTRO_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 2;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 2;
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE));
         drawCenteredText(g, "Now it's time to see the winner...", centerX, y, Color.WHITE, alpha);
@@ -2183,8 +2187,8 @@ public class AnnouncementOverlay extends Overlay
         String rsn = plugin.getPlaceRevealRsn();
         if (rsn == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 2 - 20;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 2 - 20;
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(PLACE_REVEAL_RANK_SIZE));
         drawCenteredText(g, "In " + ordinal(plugin.getPlaceRevealRank()) + " place...", centerX, y, Color.LIGHT_GRAY, alpha);
@@ -2202,8 +2206,8 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.getWinnerSuspenseUntil(), WINNER_SUSPENSE_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 2;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 2;
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(WINNER_SUSPENSE_SIZE));
         drawCenteredText(g, "And the winner is...", centerX, y, Color.WHITE, alpha);
@@ -2218,8 +2222,8 @@ public class AnnouncementOverlay extends Overlay
         String rsn = plugin.getWinnerRsn();
         if (rsn == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 2 - 10;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 2 - 10;
 
         g.setFont(MARIO_PARTY_FONT.deriveFont(WINNER_REVEAL_NAME_SIZE));
         drawCenteredRainbowText(g, rsn, RAINBOW_LETTER_COLORS, centerX, y, alpha);
@@ -2254,8 +2258,8 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.getWelcomeBannerUntil(), WELCOME_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         g.setFont(FontManager.getRunescapeBoldFont().deriveFont(WELCOME_LEAD_SIZE));
         drawCenteredText(g, "WELCOME TO", centerX, y, Color.WHITE, alpha);
@@ -2274,8 +2278,8 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.getGameStartBannerUntil(), GAME_START_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = client.getCanvasWidth() / 2;
-        int y = client.getCanvasHeight() / 3;
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
 
         g.setFont(MARIO_PARTY_FONT.deriveFont(GAME_START_TITLE_SIZE));
         drawCenteredRainbowText(g, "HERE WE GO!", RAINBOW_LETTER_COLORS, centerX, y, alpha);
@@ -2284,14 +2288,42 @@ public class AnnouncementOverlay extends Overlay
         drawCenteredText(g, "Please stand on the Start Tile to begin.", centerX, y + 28, Color.LIGHT_GRAY, alpha);
     }
 
+    /** The width every "centerX = drawableWidth() / N" position formula in this file is actually
+     * measured against -- the real 3D game viewport, not the full RuneLite canvas. In OSRS's Fixed
+     * layouts (and some Resizable ones), the viewport is a sub-rectangle of the canvas: the
+     * inventory/minimap/chat widgets occupy the rest of it. Centering on the raw canvas -- as this
+     * whole file used to -- puts text partly or entirely behind those widgets whenever the viewport
+     * doesn't fill the canvas.
+     * <p>
+     * {@code client.getViewportXOffset()} is normally just a handful of px -- the viewport sits
+     * flush against the canvas's own top-left corner, the widgets eat into its right/bottom edges
+     * instead, not its left/top -- so doubling that offset here builds a "virtual canvas" exactly
+     * the size the real viewport would need to be centered within. That makes drawableWidth() / 2
+     * (by far the most common divisor below, i.e. every plain centerX) land EXACTLY on the
+     * viewport's own true center, and leaves only a negligible (offset/3-ish, a couple px at most)
+     * error for the handful of non-center vertical fractions (/3, /4) this file also uses --
+     * dramatically simpler than threading an explicit origin offset through every one of this file's
+     * position formulas individually. */
+    private int drawableWidth()
+    {
+        return client.getViewportWidth() + 2 * client.getViewportXOffset();
+    }
+
+    /** Vertical counterpart to drawableWidth() -- see its own doc. */
+    private int drawableHeight()
+    {
+        return client.getViewportHeight() + 2 * client.getViewportYOffset();
+    }
+
     /** The widest a horizontally-centered line/row should ever be drawn, given the viewer's own
-     * CURRENT canvas size -- not a fixed design-time constant -- so every banner authored against a
-     * normal game window still fits entirely on screen for someone who has resized their client or
-     * plays on a small one. Cheap enough (one subtraction) to recompute fresh every frame; no resize
-     * listener needed since the very next frame after a resize just sees the new canvas size. */
+     * CURRENT viewport size (see drawableWidth()) -- not a fixed design-time constant -- so every
+     * banner authored against a normal game window still fits entirely within the visible 3D
+     * viewport, not behind Fixed mode's own widgets and not off a resized/small client's own edge.
+     * Cheap enough (one subtraction) to recompute fresh every frame; no resize/layout-change
+     * listener needed since the very next frame just sees the new viewport size. */
     private int safeTextWidth()
     {
-        return Math.max(MIN_SAFE_TEXT_WIDTH_PX, client.getCanvasWidth() - 2 * SCREEN_SAFE_MARGIN_PX);
+        return Math.max(MIN_SAFE_TEXT_WIDTH_PX, drawableWidth() - 2 * SCREEN_SAFE_MARGIN_PX);
     }
 
     /** Scale factor to shrink a composite line/row's own already-measured "design" width by so it
@@ -2469,8 +2501,8 @@ public class AnnouncementOverlay extends Overlay
 
         int size = Math.round(DIE_SIZE * scale);
         int half = size / 2;
-        int cx = client.getCanvasWidth() / 2 + jitterX;
-        int cy = client.getCanvasHeight() / 2 + jitterY;
+        int cx = drawableWidth() / 2 + jitterX;
+        int cy = drawableHeight() / 2 + jitterY;
 
         RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
         Color color = seatColor != null ? seatColor.awt : Color.WHITE;

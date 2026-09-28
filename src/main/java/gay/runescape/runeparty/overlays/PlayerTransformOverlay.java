@@ -87,7 +87,11 @@ public final class PlayerTransformOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (plugin.getPhase() != GamePhase.ACTIVE || !plugin.isBrutusAttackActive())
+        // isMinigameSelectionRevealed() matters here for the same reason JaddyDuelModel's own doc
+        // gives: isBrutusAttackActive() alone flips true the instant MINIGAME_STARTED lands, well
+        // before the client's own selection wheel has actually spun to a stop, so Brutus's target
+        // could otherwise transform into his giant model ahead of the "MINIGAME!" reveal.
+        if (plugin.getPhase() != GamePhase.ACTIVE || !plugin.isBrutusAttackActive() || !plugin.isMinigameSelectionRevealed())
         {
             clear();
             return null;

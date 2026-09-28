@@ -134,7 +134,11 @@ public final class CrabRaveNpcOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (plugin.getPhase() != GamePhase.ACTIVE || !plugin.isCrabRaveActive())
+        // isMinigameSelectionRevealed() matters here for the same reason JaddyDuelModel's own doc
+        // gives: isCrabRaveActive() alone flips true the instant MINIGAME_STARTED lands, well
+        // before the client's own selection wheel has actually spun to a stop, so these NPCs could
+        // otherwise spawn on the real board ahead of the "MINIGAME!" reveal.
+        if (plugin.getPhase() != GamePhase.ACTIVE || !plugin.isCrabRaveActive() || !plugin.isMinigameSelectionRevealed())
         {
             clear();
             return null;

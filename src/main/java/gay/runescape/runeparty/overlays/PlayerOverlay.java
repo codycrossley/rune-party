@@ -132,7 +132,13 @@ public class PlayerOverlay extends Overlay
             if (seatColor == null) continue;
 
             Color c = seatColor.awt;
-            if (plugin.isTurfWarsActive())
+            // Both branches also require isMinigameSelectionRevealed() -- isTurfWarsActive()/
+            // isJaddyActive() alone flip true the instant MINIGAME_STARTED lands, well before the
+            // selection wheel has actually revealed which mini-game was picked, so recoloring
+            // outlines on that signal alone spoiled the reveal (players' tokens visibly split into
+            // team colors before anyone could see "Turf Wars"/"Who's Your Jaddy?" was even chosen).
+            // Same reasoning the Brutus Attack branch below already got right.
+            if (plugin.isTurfWarsActive() && plugin.isMinigameSelectionRevealed())
             {
                 // Recolors every seated player's own outline/token to their Turf Wars assigned
                 // color instead of their usual per-seat one, for the whole round. Falls back to
@@ -140,7 +146,7 @@ public class PlayerOverlay extends Overlay
                 Color teamColor = plugin.getPlayerTeamColor(rsn);
                 if (teamColor != null) c = teamColor;
             }
-            else if (plugin.isJaddyActive())
+            else if (plugin.isJaddyActive() && plugin.isMinigameSelectionRevealed())
             {
                 // Same idea as Turf Wars above, but there's no assignment event at all here --
                 // whichever JADDY_TILE zone this player's own real WorldLocation currently sits on

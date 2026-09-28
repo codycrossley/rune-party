@@ -216,9 +216,9 @@ public final class CoursePreset
         tiles.add(new RelativeTile(6, 2, "ITEM_TILE", null));
         tiles.add(new RelativeTile(5, 2, "WISE_OLD_MAN_TILE", null));
         tiles.add(new RelativeTile(4, 2, "PATH", null));
-        tiles.add(new RelativeTile(1, 2, "JAD_TILE", null));
-        tiles.add(new RelativeTile(2, 2, "ITEM_TILE", null));
         tiles.add(new RelativeTile(3, 2, "PENALTY_TILE", null));
+        tiles.add(new RelativeTile(2, 2, "ITEM_TILE", null));
+        tiles.add(new RelativeTile(1, 2, "JAD_TILE", null));
         tiles.add(new RelativeTile(0, 2, "PENALTY_TILE", null));
         tiles.add(new RelativeTile(-1, 2, "PENALTY_TILE", null));
         tiles.add(new RelativeTile(-2, 2, "PATH", null));
