@@ -63,7 +63,7 @@ public final class CoinRushPresentation implements MinigamePresentationFeature
                 // carries a real coin-total change of its own -- the server doesn't actually
                 // credit a Coin Rush pickup to the player's balance until the round ends, one lump
                 // sum per player -- so the only thing worth showing live, right now, is a purely
-                // cosmetic "+2" flash (see enqueueCoinPopup's totalless=true), never a running total.
+                // cosmetic "+7" flash (see enqueueCoinPopup's totalless=true), never a running total.
                 Integer spawnId = Json.requiredInt(e.payload, type, "id");
                 if (spawnId != null)
                 {

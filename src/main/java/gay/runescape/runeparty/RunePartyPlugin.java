@@ -253,12 +253,12 @@ public class RunePartyPlugin extends Plugin
      * via MINIGAME_ENDED regardless of what this says. */
     public static final long COIN_RUSH_DURATION_MS = 30000;
 
-    /** Coins a single Coin Rush pickup is worth -- must match the server's own reward-per-coin.
-     * The server never actually credits this to the player's real balance until the round ends (a
-     * single lump sum, see the "coin_rush" COINS_CHANGED case) -- this constant only exists so the
-     * mid-round "+2" flash (see COIN_RUSH_COLLECTED handling) has a number to show immediately,
-     * without waiting on that real payout. */
-    public static final int COIN_RUSH_REWARD = 2;
+    /** Coins a single Coin Rush pickup is worth -- must match the server's own REWARD_PER_COIN
+     * (minigames/coin_rush.py). The server never actually credits this to the player's real
+     * balance until the round ends (a single lump sum, see the "coin_rush" COINS_CHANGED case) --
+     * this constant only exists so the mid-round "+7" flash (see COIN_RUSH_COLLECTED handling) has
+     * a number to show immediately, without waiting on that real payout. */
+    public static final int COIN_RUSH_REWARD = 7;
 
     /** How long Coin Rush's mid-round "+2" flash stays up above a player's head after they collect
      * a coin -- see COIN_RUSH_COLLECTED's own enqueueCoinPopup call. Deliberately shorter than
@@ -734,7 +734,7 @@ public class RunePartyPlugin extends Plugin
     // even offer the "steal a Golden Gnome" option when the local player can't afford it, same
     // "the server still re-checks for real" reasoning hoveredPurchasableGoldenGnomePoint's own doc
     // gives for its own affordability guard.
-    public static final int WISE_OLD_MAN_GNOME_STEAL_COST = 73;
+    public static final int WISE_OLD_MAN_GNOME_STEAL_COST = 99;
 
     /** How long AnnouncementOverlay's Wise Old Man outcome banner stays up -- "<thief> stole N
      * coins from <victim>!"/"...a Golden Gnome from <victim>!" -- fired on WISE_OLD_MAN_STOLEN,
@@ -769,16 +769,16 @@ public class RunePartyPlugin extends Plugin
         }
     }
 
-    // V1 placeholder prices, all in the 7-15 coin range -- not yet host-configurable or balanced
-    // against each item's own real power, same "placeholder, will adjust later" status
-    // GOLDEN_GNOME_PRICE started at. Order/keys/prices must match the server's own
-    // ITEM_SHOP_CATALOG (app.py) exactly.
+    // Priced by each item's own real power (confirmed with the user alongside the wider
+    // coin-economy rebalance -- see app.py's own ITEM_SHOP_CATALOG doc for the per-item reasoning).
+    // Order/keys/prices must match the server's own ITEM_SHOP_CATALOG (app.py) exactly.
     public static final List<ItemShopEntry> ITEM_SHOP_CATALOG = List.of(
-        new ItemShopEntry("energy-potion", 7),
-        new ItemShopEntry("gnome-glider", 9),
-        new ItemShopEntry("coin-trap", 10),
-        new ItemShopEntry("ice-barrage", 12),
-        new ItemShopEntry("tele-home", 15)
+        new ItemShopEntry("energy-potion", 10),
+        new ItemShopEntry("gnome-glider", 55),
+        new ItemShopEntry("coin-trap", 15),
+        new ItemShopEntry("ice-barrage", 45),
+        new ItemShopEntry("tele-other", 35),
+        new ItemShopEntry("tele-home", 25)
     );
 
     /** How long AnnouncementOverlay's Item Shop outcome banner stays up -- "You/<rsn> purchased
@@ -4219,13 +4219,16 @@ public class RunePartyPlugin extends Plugin
                 // unattended coin change.
                 // "chance_space" is deliberately excluded here -- ChanceSpacePresentation triggers
                 // its own coin popup manually (see its own applyDeferredDelta), at its own reveal's
-                // chosen moment rather than the instant this event arrives.
+                // chosen moment rather than the instant this event arrives. "starting_coins" (the
+                // flat STARTING_COINS grant start_game fires for every seated player) gets the same
+                // plain popup treatment as standard_tile/start_tile -- a real, immediate coin
+                // change with no staged reveal of its own to wait on.
                 String coinsChangedReason = Json.requiredStr(e.payload, type, "reason");
                 if (!catchingUp && ("standard_tile".equals(coinsChangedReason) || "start_tile".equals(coinsChangedReason)
                     || "item".equals(coinsChangedReason) || "coin_trap".equals(coinsChangedReason)
                     || "coin_rush".equals(coinsChangedReason) || "true_or_false".equals(coinsChangedReason)
                     || "jad_smash".equals(coinsChangedReason) || "jad_bow".equals(coinsChangedReason)
-                    || "dev_adjust".equals(coinsChangedReason)))
+                    || "starting_coins".equals(coinsChangedReason) || "dev_adjust".equals(coinsChangedReason)))
                 {
                     String coinsChangedRsn = Json.requiredStr(e.payload, type, "player");
                     Integer delta = Json.requiredInt(e.payload, type, "delta");

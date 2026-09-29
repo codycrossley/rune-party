@@ -240,11 +240,16 @@ public final class CoursePreset
             tiles.set(i, new RelativeTile(t.dx, t.dy, t.tileType, t.color, (i + 1) % courseLen));
         }
 
-        // Decorative Golden Gnome modifier, stacked on the same tile index 2 (a PATH) sits on --
-        // same "two steps out from START" placement the previous generated loop used (see
-        // RelativeTile#decorative's own doc for why this has to be appended *after* the real path
-        // rather than spliced in at its logical dx/dy).
-        tiles.add(new RelativeTile(-3, -2, "GOLDEN_GNOME_TILE", null, true));
+        // Decorative Golden Gnome modifier, stacked exactly on START -- same placement
+        // HardcodedCourse's own presets already use (see RelativeTile#decorative's own doc for why
+        // this has to be appended *after* the real path rather than spliced in at its logical
+        // dx/dy). start_game's own doc: a Golden Gnome sitting exactly on START the instant the
+        // game begins gets relocated to a random PATH tile automatically, so placing it here (a
+        // clean, deterministic spot for a freshly-placed course to have it sit at) plus that
+        // existing relocation is all that's needed for it to land somewhere random at kickoff,
+        // same as every hard-coded preset already does -- no separate mechanism needed for the
+        // Standard Loop specifically.
+        tiles.add(new RelativeTile(-5, -2, "GOLDEN_GNOME_TILE", null, true));
 
         return new CoursePreset("Standard Loop", tiles);
     }
