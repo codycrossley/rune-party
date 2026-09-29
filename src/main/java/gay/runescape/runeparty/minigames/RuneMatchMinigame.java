@@ -1,18 +1,20 @@
 package gay.runescape.runeparty.minigames;
 
-import java.awt.Color;
+import java.awt.AlphaComposite;
+import java.awt.Composite;
 import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
+import javax.imageio.ImageIO;
+import lombok.extern.slf4j.Slf4j;
 
-/** A 4x4 grid of dimmed squares, reading as "sixteen hidden cards" at wheel-icon size -- distinct
- * from Arena's own scattered red/green hazard grid despite the shared 4x4 layout. The real board
- * (a 7x7 arena, 16 of those 49 tiles hiding a rune pair each) renders in-world via TileOverlay/
- * RuneMatchRuneModel instead -- see RuneMatchPresentation's own doc. */
+/** The real board (a 7x7 arena, 16 of those 49 tiles hiding a rune pair each) renders in-world via
+ * TileOverlay/RuneMatchRuneModel instead -- see RuneMatchPresentation's own doc. */
+@Slf4j
 public class RuneMatchMinigame implements Minigame
 {
-    private static final Color CARD_COLOR = new Color(110, 110, 110);
-    private static final Color CARD_OUTLINE = new Color(255, 255, 255);
-    private static final int GRID_DIM = 4;
-    private static final int GRID_GAP = 1;
+    private static final BufferedImage ICON = loadIcon();
 
     @Override
     public String getKey()
@@ -29,27 +31,25 @@ public class RuneMatchMinigame implements Minigame
     @Override
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
-        int a = Math.max(0, Math.min(255, Math.round(alpha * 255)));
+        if (ICON == null) return;
 
-        Color card = new Color(CARD_COLOR.getRed(), CARD_COLOR.getGreen(), CARD_COLOR.getBlue(), a);
-        Color outline = new Color(CARD_OUTLINE.getRed(), CARD_OUTLINE.getGreen(), CARD_OUTLINE.getBlue(), a);
+        Composite original = g.getComposite();
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, Math.min(1f, alpha))));
+        g.drawImage(ICON, x - size / 2, y - size / 2, size, size, null);
+        g.setComposite(original);
+    }
 
-        int cell = (size - GRID_GAP * (GRID_DIM - 1)) / GRID_DIM;
-        int used = cell * GRID_DIM + GRID_GAP * (GRID_DIM - 1);
-        int left = x - used / 2;
-        int top = y - used / 2;
-
-        for (int row = 0; row < GRID_DIM; row++)
+    private static BufferedImage loadIcon()
+    {
+        try (InputStream is = RuneMatchMinigame.class.getResourceAsStream("/gay/runescape/runeparty/minigame_icons/rune-match.png"))
         {
-            for (int col = 0; col < GRID_DIM; col++)
-            {
-                int cx = left + col * (cell + GRID_GAP);
-                int cy = top + row * (cell + GRID_GAP);
-                g.setColor(card);
-                g.fillRect(cx, cy, cell, cell);
-                g.setColor(outline);
-                g.drawRect(cx, cy, cell, cell);
-            }
+            if (is == null) throw new IOException("rune-match.png resource not found");
+            return ImageIO.read(is);
+        }
+        catch (IOException e)
+        {
+            log.warn("Failed to load the Rune Match wheel icon", e);
+            return null;
         }
     }
 }

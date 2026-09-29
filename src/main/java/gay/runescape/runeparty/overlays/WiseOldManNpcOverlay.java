@@ -20,13 +20,14 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Spawns a purely-decorative Wise Old Man NPC model standing one tile south of every currently-
- * marked WISE_OLD_MAN_TILE, for as long as the game itself is active -- unlike CrabRaveNpcOverlay's
- * own spawns (only up for that one mini-game's own duration), this tracks the tile's own real,
- * host-placed presence on the board directly, the same "no server-driven spawn event, every
- * client derives an identical spot from tiles it already has" reasoning that class's own doc
- * gives. Zero gameplay effect -- the actual encounter is driven entirely by landing on the tile
- * itself (see WiseOldManDialogueOverlay); this is just who's standing there. Idles on
+/** Spawns a purely-decorative Wise Old Man NPC model standing just inside the course loop, beside
+ * every currently-marked WISE_OLD_MAN_TILE (see RunePartyPlugin#findInteriorNpcSpawnPoint for
+ * exactly how that spot is chosen), for as long as the game itself is active -- unlike
+ * CrabRaveNpcOverlay's own spawns (only up for that one mini-game's own duration), this tracks the
+ * tile's own real, host-placed presence on the board directly, the same "no server-driven spawn
+ * event, every client derives an identical spot from tiles it already has" reasoning that class's
+ * own doc gives. Zero gameplay effect -- the actual encounter is driven entirely by landing on the
+ * tile itself (see WiseOldManDialogueOverlay); this is just who's standing there. Idles on
  * WISE_OLD_MAN_IDLE_ANIMATION_ID the whole time, facing the tile itself. Recolored by hand to a
  * custom palette (see RECOLOR_FIND/RECOLOR_REPLACE) rather than left in WISE_OLD_MAN_NPC_ID's own
  * natural colors -- same "the real spawn pipeline applies an NPC's declared recolors automatically,
@@ -86,7 +87,7 @@ public final class WiseOldManNpcOverlay extends Overlay
         }
 
         Set<WorldPoint> desired = new HashSet<>(tiles);
-        objects.sync(desired, WiseOldManNpcOverlay::spawnPoint, k ->
+        objects.sync(desired, plugin::findInteriorNpcSpawnPoint, k ->
         {
             if (recoloredModel == null) buildRecoloredModel();
             return recoloredModel != null ? recoloredModel : RunePartyRender.loadNpcModel(client, RunePartyPlugin.WISE_OLD_MAN_NPC_ID);
@@ -97,7 +98,7 @@ public final class WiseOldManNpcOverlay extends Overlay
             RuneLiteObject obj = objects.get(tilePoint);
             if (obj == null || obj.getModel() == null) continue;
 
-            obj.setOrientation(RunePartyRender.orientationFacing(spawnPoint(tilePoint), tilePoint));
+            obj.setOrientation(RunePartyRender.orientationFacing(plugin.findInteriorNpcSpawnPoint(tilePoint), tilePoint));
 
             if (obj.getAnimation() == null)
             {
@@ -111,11 +112,6 @@ public final class WiseOldManNpcOverlay extends Overlay
         }
 
         return null;
-    }
-
-    private static WorldPoint spawnPoint(WorldPoint tilePoint)
-    {
-        return tilePoint.dy(-1);
     }
 
     /** Builds recoloredModel the first time it's needed -- a no-op once already built. Retried on

@@ -20,8 +20,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Spawns a purely-decorative Item Shop shopkeeper NPC model standing one tile south of every
- * currently-marked ITEM_SHOP_TILE, for as long as the game itself is active -- verbatim same
+/** Spawns a purely-decorative Item Shop shopkeeper NPC model standing just inside the course loop,
+ * beside every currently-marked ITEM_SHOP_TILE (see RunePartyPlugin#findInteriorNpcSpawnPoint for
+ * exactly how that spot is chosen), for as long as the game itself is active -- verbatim same
  * "no server-driven spawn event, every client derives an identical spot from tiles it already
  * has" shape WiseOldManNpcOverlay's own doc gives. Zero gameplay effect -- the actual encounter is
  * driven entirely by landing on the tile itself (see ItemShopDialogueOverlay); this is just who's
@@ -101,7 +102,7 @@ public final class ItemShopNpcOverlay extends Overlay
         }
 
         Set<WorldPoint> desired = new HashSet<>(tiles);
-        objects.sync(desired, ItemShopNpcOverlay::spawnPoint, k ->
+        objects.sync(desired, plugin::findInteriorNpcSpawnPoint, k ->
         {
             if (recoloredModel == null) buildRecoloredModel();
             return recoloredModel != null ? recoloredModel : RunePartyRender.loadNpcModel(client, RunePartyPlugin.ITEM_SHOP_NPC_ID);
@@ -112,7 +113,7 @@ public final class ItemShopNpcOverlay extends Overlay
             RuneLiteObject obj = objects.get(tilePoint);
             if (obj == null || obj.getModel() == null) continue;
 
-            obj.setOrientation(RunePartyRender.orientationFacing(spawnPoint(tilePoint), tilePoint));
+            obj.setOrientation(RunePartyRender.orientationFacing(plugin.findInteriorNpcSpawnPoint(tilePoint), tilePoint));
 
             if (obj.getAnimation() == null)
             {
@@ -126,11 +127,6 @@ public final class ItemShopNpcOverlay extends Overlay
         }
 
         return null;
-    }
-
-    private static WorldPoint spawnPoint(WorldPoint tilePoint)
-    {
-        return tilePoint.dy(-1);
     }
 
     /** Builds recoloredModel the first time it's needed -- a no-op once already built. Retried on

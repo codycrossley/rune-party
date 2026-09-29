@@ -2532,6 +2532,109 @@ public class RunePartyPlugin extends Plugin
         return findTilesByType("ITEM_SHOP_TILE");
     }
 
+    // Cache for findInteriorNpcSpawnPoint below -- keyed on the NPC's own anchor tile point,
+    // invalidated whenever tileReducer's own revision() moves (see that field's own doc), so a
+    // purely decorative NPC's spawn point -- computed from a full course-centroid scan plus a
+    // path-direction lookup, neither of them free -- isn't redone on every one of the ~50
+    // frames/sec SceneObjectSet#sync calls it with, only the rare frame something on the board
+    // actually changed.
+    private final Map<WorldPoint, WorldPoint> interiorNpcSpawnPointCache = new HashMap<>();
+    private long interiorNpcSpawnPointCacheRevision = -1;
+
+    /** Where a purely-decorative NPC that "stands beside" a real course tile (Wise Old Man, the
+     * Item Shop keeper -- see WiseOldManNpcOverlay/ItemShopNpcOverlay, the only callers) should
+     * spawn -- one tile off to whichever side of the tile's own direction of travel sits closer to
+     * the whole course's own rough center, so the NPC reads as standing inside the loop looking out
+     * at a player walking past, regardless of which edge of the loop (or which winding direction)
+     * that tile happens to sit on. Replaces a single fixed "always one tile south" offset, which
+     * only ever happened to look right for whichever specific edge Standard Loop's own Wise Old
+     * Man/Item Shop tiles were originally placed on -- wrong (or merely coincidental) for any other
+     * position around the loop, and for any other host-built course entirely. Falls back to that
+     * same one-tile-south offset if `tilePoint` isn't a real course tile with a single,
+     * cardinal-direction outgoing edge (a dead end, a fork, or an off-path decorative marker) --
+     * there's no direction of travel to work from in that case. */
+    public WorldPoint findInteriorNpcSpawnPoint(WorldPoint tilePoint)
+    {
+        long revision = tileReducer.revision();
+        if (revision != interiorNpcSpawnPointCacheRevision)
+        {
+            interiorNpcSpawnPointCache.clear();
+            interiorNpcSpawnPointCacheRevision = revision;
+        }
+        return interiorNpcSpawnPointCache.computeIfAbsent(tilePoint, this::computeInteriorNpcSpawnPoint);
+    }
+
+    private WorldPoint computeInteriorNpcSpawnPoint(WorldPoint tilePoint)
+    {
+        int[] forward = courseForwardDirection(tilePoint);
+        WorldPoint centroid = forward != null ? courseCentroid() : null;
+        if (forward == null || centroid == null) return tilePoint.dy(-1);
+
+        // The two tiles directly beside tilePoint, perpendicular to its own direction of travel
+        // (rotating (dx,dy) +/-90 degrees) -- whichever sits closer to the course's own rough
+        // center is the one inside the loop.
+        WorldPoint left = tilePoint.dx(-forward[1]).dy(forward[0]);
+        WorldPoint right = tilePoint.dx(forward[1]).dy(-forward[0]);
+        return distanceSquared(left, centroid) <= distanceSquared(right, centroid) ? left : right;
+    }
+
+    /** `tilePoint`'s own single cardinal-direction step toward the next tile in the course's path
+     * -- null if `tilePoint` isn't a real course tile, has no outgoing edge (a dead end) or more
+     * than one (a fork, ambiguous which is "forward"), or its one edge isn't a plain adjacent
+     * cardinal step. */
+    private int[] courseForwardDirection(WorldPoint tilePoint)
+    {
+        Integer index = tileReducer.pathIndexAt(tilePoint);
+        if (index == null) return null;
+        TileReducer.TileEntry entry = tileReducer.tileAtIndex(index);
+        if (entry == null || entry.nextIndices.length != 1) return null;
+        TileReducer.TileEntry next = tileReducer.tileAtIndex(entry.nextIndices[0]);
+        if (next == null) return null;
+
+        int dx = Integer.signum(next.point.getX() - tilePoint.getX());
+        int dy = Integer.signum(next.point.getY() - tilePoint.getY());
+        if (dx != 0 && dy != 0) return null; // not a plain cardinal step
+        if (dx == 0 && dy == 0) return null; // same point -- degenerate
+        return new int[]{dx, dy};
+    }
+
+    // Cache for courseCentroid() below -- same revision-gated shape as
+    // interiorNpcSpawnPointCache above.
+    private WorldPoint courseCentroidCache;
+    private long courseCentroidCacheRevision = -1;
+
+    /** The average (x, y) of every real course tile (anything with a pathIndex) on the board -- a
+     * rough "center of the loop," cheap enough to tell which side of an edge tile faces the
+     * interior without needing the course's own actual winding direction. Null if no course tile
+     * is marked at all. */
+    private WorldPoint courseCentroid()
+    {
+        long revision = tileReducer.revision();
+        if (courseCentroidCache != null && revision == courseCentroidCacheRevision) return courseCentroidCache;
+
+        long sumX = 0, sumY = 0;
+        int count = 0;
+        int plane = 0;
+        for (TileReducer.TileEntry e : tileReducer.snapshot())
+        {
+            if (e.pathIndex == null) continue;
+            sumX += e.point.getX();
+            sumY += e.point.getY();
+            plane = e.point.getPlane();
+            count++;
+        }
+        courseCentroidCache = count > 0 ? new WorldPoint((int) (sumX / count), (int) (sumY / count), plane) : null;
+        courseCentroidCacheRevision = revision;
+        return courseCentroidCache;
+    }
+
+    private static long distanceSquared(WorldPoint a, WorldPoint b)
+    {
+        long dx = a.getX() - b.getX();
+        long dy = a.getY() - b.getY();
+        return dx * dx + dy * dy;
+    }
+
     /** Every currently-marked Crab Rave arena tile, if the board's actually swapped to it -- see
      * CrabRavePresentation#onDanceFinished (bounding-box "am I in the zone" check) and
      * CrabRaveNpcOverlay (crab spawn-point placement), the only readers. */
