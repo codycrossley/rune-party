@@ -11,7 +11,10 @@ import gay.runescape.runeparty.TrueOrFalseResult;
 import gay.runescape.runeparty.WheelEntry;
 import gay.runescape.runeparty.overlays.layout.Box;
 import gay.runescape.runeparty.overlays.layout.Layout;
+import gay.runescape.runeparty.overlays.layout.Line;
 import gay.runescape.runeparty.overlays.layout.Node;
+import gay.runescape.runeparty.overlays.layout.Segment;
+import gay.runescape.runeparty.overlays.layout.Table;
 import gay.runescape.runeparty.overlays.layout.Text;
 
 import java.awt.AlphaComposite;
@@ -34,11 +37,8 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
-import java.util.function.BiFunction;
-import java.util.function.Function;
 import gay.runescape.runeparty.items.Item;
 import gay.runescape.runeparty.items.Items;
 import gay.runescape.runeparty.minigames.Minigame;
@@ -237,12 +237,13 @@ public class AnnouncementOverlay extends Overlay
     // centerX/y position formula in this file (not just the wrap/shrink width) is anchored to
     // drawableWidth()/drawableHeight() for the same reason -- see their own doc. A composite line
     // built from several independently pre-measured segments (renderSpinHintSelf/Waiting,
-    // drawEmoteInstruction, drawPlayerRows' rank/name/stats columns, renderTrueOrFalseReveal's
-    // per-player rows) can't shrink itself that way -- see fitScale's own doc -- so those measure
-    // their own worst case up front and apply the same scale to every segment before laying anything
-    // out. Genuine multi-sentence content (mini-game instructions, True or False questions) still
-    // wraps onto multiple lines instead of shrinking -- see drawWrappedCenteredText -- since a whole
-    // paragraph squeezed onto one line would turn unreadable long before it ran out of room that way.
+    // an emote instruction, a Table's own rank/name/stats columns) can't shrink itself that way --
+    // see the layout package's own Line/Table, which jointly measure every segment/row up front and
+    // apply the same shared scale to all of them before painting anything, exactly like fitScale's
+    // own doc describes for a single line. Genuine multi-sentence content (mini-game instructions,
+    // True or False questions) still wraps onto multiple lines instead of shrinking -- see Text#wrap
+    // -- since a whole paragraph squeezed onto one line would turn unreadable long before it ran out
+    // of room that way.
     private static final int SCREEN_SAFE_MARGIN_PX = 24; // kept clear on both sides of the canvas edge
     private static final int MIN_SAFE_TEXT_WIDTH_PX = 240; // floor so a tiny/resized window can't force degenerate wrapping/shrinking
     private static final float MIN_FIT_SCALE = 0.5f; // never shrink a line past half its designed size
@@ -421,45 +422,22 @@ public class AnnouncementOverlay extends Overlay
         boolean hasItems = self != null && !plugin.isItemUsedThisTurn()
             && !plugin.getRosterReducer().getItems(self).isEmpty();
 
-        String prefix = "Use the ";
-        String spinWord = "SPIN";
         String suffix = hasItems ? " emote to roll the dice, or use an item in the panel." : " emote to roll the dice.";
 
         Font normalFont = FontManager.getRunescapeBoldFont().deriveFont(SPIN_HINT_SIZE);
         Font spinFont = MARIO_PARTY_FONT.deriveFont(SPIN_HINT_SIZE);
 
-        g.setFont(normalFont);
-        int prefixWidth = g.getFontMetrics().stringWidth(prefix);
-        int suffixWidth = g.getFontMetrics().stringWidth(suffix);
-        g.setFont(spinFont);
-        int spinWidth = g.getFontMetrics().stringWidth(spinWord);
+        // Shrunk together rather than left to overflow -- the "or use an item..." suffix is the
+        // longest text on screen during a normal turn, and the first to run off a small/resized
+        // client if it isn't checked.
+        Node line = Line.of(
+            Segment.plain("Use the ", normalFont, SPIN_HINT_COLOR),
+            Segment.rainbow("SPIN", spinFont, RAINBOW_LETTER_COLORS),
+            Segment.plain(suffix, normalFont, SPIN_HINT_COLOR));
 
-        // Shrunk together (see fitScale) rather than left to overflow -- the "or use an item..."
-        // suffix is the longest text on screen during a normal turn, and the first to run off a
-        // small/resized client if it isn't checked.
-        float scale = fitScale(prefixWidth + spinWidth + suffixWidth);
-        if (scale < 1f)
-        {
-            normalFont = normalFont.deriveFont(normalFont.getSize2D() * scale);
-            spinFont = spinFont.deriveFont(spinFont.getSize2D() * scale);
-            g.setFont(normalFont);
-            prefixWidth = g.getFontMetrics().stringWidth(prefix);
-            suffixWidth = g.getFontMetrics().stringWidth(suffix);
-            g.setFont(spinFont);
-            spinWidth = g.getFontMetrics().stringWidth(spinWord);
-        }
-
+        int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 4 + 40;
-        int x = drawableWidth() / 2 - (prefixWidth + spinWidth + suffixWidth) / 2;
-
-        g.setFont(normalFont);
-        x = drawLeftAlignedText(g, prefix, x, y, SPIN_HINT_COLOR, alpha);
-
-        g.setFont(spinFont);
-        x = drawLeftAlignedRainbowText(g, spinWord, RAINBOW_LETTER_COLORS, x, y, alpha);
-
-        g.setFont(normalFont);
-        drawLeftAlignedText(g, suffix, x, y, SPIN_HINT_COLOR, alpha);
+        Layout.renderCentered(g, line, centerX, y, safeTextWidth(), alpha);
     }
 
     /** The bystander half of the Spin hint -- "Waiting for &lt;player&gt; to roll the dice...". */
@@ -467,34 +445,18 @@ public class AnnouncementOverlay extends Overlay
     {
         float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), SPIN_HINT_PULSE_PERIOD_MS);
 
-        String prefix = "Waiting for ";
-        String suffix = " to roll the dice...";
-
         Font font = FontManager.getRunescapeBoldFont().deriveFont(SPIN_HINT_SIZE);
-        g.setFont(font);
-        int prefixWidth = g.getFontMetrics().stringWidth(prefix);
-        int nameWidth = g.getFontMetrics().stringWidth(rsn);
-        int suffixWidth = g.getFontMetrics().stringWidth(suffix);
-
-        float scale = fitScale(prefixWidth + nameWidth + suffixWidth);
-        if (scale < 1f)
-        {
-            font = font.deriveFont(font.getSize2D() * scale);
-            g.setFont(font);
-            prefixWidth = g.getFontMetrics().stringWidth(prefix);
-            nameWidth = g.getFontMetrics().stringWidth(rsn);
-            suffixWidth = g.getFontMetrics().stringWidth(suffix);
-        }
-
-        int y = drawableHeight() / 4 + 40;
-        int x = drawableWidth() / 2 - (prefixWidth + nameWidth + suffixWidth) / 2;
-
         RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
         Color nameColor = seatColor != null ? seatColor.awt : SPIN_HINT_COLOR;
 
-        x = drawLeftAlignedText(g, prefix, x, y, SPIN_HINT_COLOR, alpha);
-        x = drawLeftAlignedText(g, rsn, x, y, nameColor, alpha);
-        drawLeftAlignedText(g, suffix, x, y, SPIN_HINT_COLOR, alpha);
+        Node line = Line.of(
+            Segment.plain("Waiting for ", font, SPIN_HINT_COLOR),
+            Segment.plain(rsn, font, nameColor),
+            Segment.plain(" to roll the dice...", font, SPIN_HINT_COLOR));
+
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 4 + 40;
+        Layout.renderCentered(g, line, centerX, y, safeTextWidth(), alpha);
     }
 
     /** The on-screen text half of TileOverlay's own "Return Here!" arrow -- shown under the exact
@@ -570,116 +532,16 @@ public class AnnouncementOverlay extends Overlay
         {
             Font emoteFont = FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
             Font emoteWordFont = MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
-            drawEmoteInstruction(g, "BOW", " emote: bow to Jad!", emoteFont, emoteWordFont, centerX, y + 96, alpha);
+            Node emoteLine = Line.of(
+                Segment.plain("'", emoteFont, Color.LIGHT_GRAY),
+                Segment.rainbow("BOW", emoteWordFont, RAINBOW_LETTER_COLORS),
+                Segment.plain("' emote: bow to Jad!", emoteFont, Color.LIGHT_GRAY));
+            Layout.renderCentered(g, emoteLine, centerX, y + 96, safeTextWidth(), alpha);
         }
         else
         {
             g.setFont(FontManager.getRunescapeSmallFont());
             drawCenteredText(g, "Waiting for " + encounterRsn + " to bow...", centerX, y + 96, Color.LIGHT_GRAY, alpha);
-        }
-    }
-
-    /** Draws one emote instruction line -- {@code '<word>' emote: <suffix>} -- with the quoted
-     * emote name in the Mario Party rainbow font and the rest in plain bold. */
-    private void drawEmoteInstruction(Graphics2D g, String word, String suffix, Font plainFont, Font wordFont, int centerX, int y, float alpha)
-    {
-        String prefix = "'";
-        String quoteSuffix = "'" + suffix;
-
-        g.setFont(plainFont);
-        int prefixWidth = g.getFontMetrics().stringWidth(prefix);
-        int suffixWidth = g.getFontMetrics().stringWidth(quoteSuffix);
-        g.setFont(wordFont);
-        int wordWidth = g.getFontMetrics().stringWidth(word);
-
-        float scale = fitScale(prefixWidth + wordWidth + suffixWidth);
-        if (scale < 1f)
-        {
-            plainFont = plainFont.deriveFont(plainFont.getSize2D() * scale);
-            wordFont = wordFont.deriveFont(wordFont.getSize2D() * scale);
-            g.setFont(plainFont);
-            prefixWidth = g.getFontMetrics().stringWidth(prefix);
-            suffixWidth = g.getFontMetrics().stringWidth(quoteSuffix);
-            g.setFont(wordFont);
-            wordWidth = g.getFontMetrics().stringWidth(word);
-        }
-
-        int x = centerX - (prefixWidth + wordWidth + suffixWidth) / 2;
-
-        g.setFont(plainFont);
-        x = drawLeftAlignedText(g, prefix, x, y, Color.LIGHT_GRAY, alpha);
-        g.setFont(wordFont);
-        x = drawLeftAlignedRainbowText(g, word, RAINBOW_LETTER_COLORS, x, y, alpha);
-        g.setFont(plainFont);
-        drawLeftAlignedText(g, quoteSuffix, x, y, Color.LIGHT_GRAY, alpha);
-    }
-
-    /** Draws one standings row -- {@code <rank>  <name>   <stats>} -- as one centered line, name in
-     * the player's own seat color. */
-    private void drawStandingsLine(Graphics2D g, Font nameFont, Font statsFont, String rank, String name, Color nameColor, String stats, Color statsColor, int centerX, int y, float alpha)
-    {
-        g.setFont(nameFont);
-        int rankWidth = g.getFontMetrics().stringWidth(rank);
-        int nameWidth = g.getFontMetrics().stringWidth(name);
-        g.setFont(statsFont);
-        int statsWidth = g.getFontMetrics().stringWidth(stats);
-
-        int x = centerX - (rankWidth + nameWidth + statsWidth) / 2;
-
-        g.setFont(nameFont);
-        x = drawLeftAlignedText(g, rank, x, y, Color.LIGHT_GRAY, alpha);
-        x = drawLeftAlignedText(g, name, x, y, nameColor, alpha);
-        g.setFont(statsFont);
-        drawLeftAlignedText(g, stats, x, y, statsColor, alpha);
-    }
-
-    /** One drawStandingsLine per player, in list order. Shared by renderMinigameReadyCheck,
-     * renderTrueOrFalseQuestion, renderMinigameRewardsBanner, and renderRoundCompleteBanner, which
-     * differ only in sort order, rank prefix, and status text/color. {@code rankFn} receives the
-     * 1-based row index.
-     * <p>
-     * Every row is measured up front at {@code nameFont}/{@code statsFont}'s own design size, and if
-     * the widest one would overflow the viewer's own current screen (see fitScale), every row shrinks
-     * together by the same amount -- 8 seated players with long RSNs and a wordy stats string is
-     * exactly the kind of list that gets busy on a small/resized client, and letting each row shrink
-     * independently would leave the name column ragged instead of aligned. */
-    private void drawPlayerRows(Graphics2D g, List<RosterReducer.RosterEntry> players,
-        Font nameFont, Font statsFont, BiFunction<RosterReducer.RosterEntry, Integer, String> rankFn,
-        Function<RosterReducer.RosterEntry, String> statsFn,
-        Function<RosterReducer.RosterEntry, Color> statsColorFn,
-        int centerX, int startY, int lineHeight, float alpha)
-    {
-        FontMetrics nameFm = g.getFontMetrics(nameFont);
-        FontMetrics statsFm = g.getFontMetrics(statsFont);
-
-        List<String> ranks = new ArrayList<>();
-        List<String> stats = new ArrayList<>();
-        int widest = 0;
-        int i = 1;
-        for (RosterReducer.RosterEntry entry : players)
-        {
-            String rank = rankFn.apply(entry, i);
-            String stat = statsFn.apply(entry);
-            ranks.add(rank);
-            stats.add(stat);
-            widest = Math.max(widest, nameFm.stringWidth(rank) + nameFm.stringWidth(entry.rsn) + statsFm.stringWidth(stat));
-            i++;
-        }
-
-        float scale = fitScale(widest);
-        Font rowNameFont = scale < 1f ? nameFont.deriveFont(nameFont.getSize2D() * scale) : nameFont;
-        Font rowStatsFont = scale < 1f ? statsFont.deriveFont(statsFont.getSize2D() * scale) : statsFont;
-        int rowLineHeight = scale < 1f ? Math.round(lineHeight * scale) : lineHeight;
-
-        int y = startY;
-        for (int idx = 0; idx < players.size(); idx++)
-        {
-            RosterReducer.RosterEntry entry = players.get(idx);
-            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
-            Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
-            drawStandingsLine(g, rowNameFont, rowStatsFont, ranks.get(idx), entry.rsn, nameColor,
-                stats.get(idx), statsColorFn.apply(entry), centerX, y, alpha);
-            y += rowLineHeight;
         }
     }
 
@@ -1444,11 +1306,13 @@ public class AnnouncementOverlay extends Overlay
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 3;
 
+        int maxWidth = safeTextWidth();
+
         String displayName = plugin.getMinigameDisplayName();
         if (displayName != null)
         {
-            g.setFont(MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_TITLE_SIZE));
-            drawCenteredText(g, displayName, centerX, y, WELCOME_TITLE_COLOR, alpha);
+            Node title = Text.of(displayName).font(MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_TITLE_SIZE)).color(WELCOME_TITLE_COLOR);
+            Layout.renderCentered(g, title, centerX, y, maxWidth, alpha);
         }
 
         // Wrapped since a mini-game's instructions can run long; everything below is laid out
@@ -1457,14 +1321,22 @@ public class AnnouncementOverlay extends Overlay
         String instructions = plugin.getMinigameInstructions();
         if (instructions != null)
         {
-            g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE));
-            afterInstructionsY = drawWrappedCenteredText(g, instructions, centerX, y + 30,
-                Math.min(READY_CHECK_INSTRUCTIONS_MAX_WIDTH, safeTextWidth()), READY_CHECK_INSTRUCTIONS_LINE_HEIGHT, Color.WHITE, alpha) - READY_CHECK_INSTRUCTIONS_LINE_HEIGHT;
+            Text instructionsText = Text.of(instructions)
+                .font(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE))
+                .color(Color.WHITE)
+                .wrap(Math.min(READY_CHECK_INSTRUCTIONS_MAX_WIDTH, maxWidth))
+                .lineHeight(READY_CHECK_INSTRUCTIONS_LINE_HEIGHT);
+            Dimension size = Layout.renderCentered(g, instructionsText, centerX, y + 30, maxWidth, alpha);
+            afterInstructionsY = y + 30 + size.height - READY_CHECK_INSTRUCTIONS_LINE_HEIGHT;
         }
 
         Font emoteFont = FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
         Font emoteWordFont = MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
-        drawEmoteInstruction(g, "YES", " emote when you're ready!", emoteFont, emoteWordFont, centerX, afterInstructionsY + 36, alpha);
+        Node emoteLine = Line.of(
+            Segment.plain("'", emoteFont, Color.LIGHT_GRAY),
+            Segment.rainbow("YES", emoteWordFont, RAINBOW_LETTER_COLORS),
+            Segment.plain("' emote when you're ready!", emoteFont, Color.LIGHT_GRAY));
+        Layout.renderCentered(g, emoteLine, centerX, afterInstructionsY + 36, maxWidth, alpha);
 
         Set<String> ready = plugin.getMinigameReadyRsns();
         List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
@@ -1472,10 +1344,19 @@ public class AnnouncementOverlay extends Overlay
 
         Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(MINIGAME_READY_CHECK_LINE_SIZE);
         Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(MINIGAME_READY_CHECK_LINE_SIZE);
-        drawPlayerRows(g, players, nameFont, statsFont, (entry, i) -> "",
-            entry -> ready.contains(entry.rsn.toLowerCase()) ? "   Ready!" : "   Waiting...",
-            entry -> ready.contains(entry.rsn.toLowerCase()) ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR,
-            centerX, afterInstructionsY + 70, MINIGAME_READY_CHECK_LINE_HEIGHT, alpha);
+        Table table = Table.rows().rowHeight(MINIGAME_READY_CHECK_LINE_HEIGHT);
+        for (RosterReducer.RosterEntry entry : players)
+        {
+            boolean isReady = ready.contains(entry.rsn.toLowerCase());
+            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
+            Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
+            table.addRow(
+                Segment.plain("", nameFont, Color.LIGHT_GRAY),
+                Segment.plain(entry.rsn, nameFont, nameColor),
+                Segment.plain(isReady ? "   Ready!" : "   Waiting...", statsFont,
+                    isReady ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR));
+        }
+        Layout.renderCentered(g, table, centerX, afterInstructionsY + 70, maxWidth, alpha);
     }
 
     /** Draws the "3... 2... 1... BEGIN!" countdown once everyone's ready. Only a client watching
@@ -1499,15 +1380,10 @@ public class AnnouncementOverlay extends Overlay
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 2;
 
-        g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_COUNTDOWN_SIZE * scale));
-        if (number >= 1)
-        {
-            drawCenteredText(g, String.valueOf(number), centerX, y, MINIGAME_COUNTDOWN_NUMBER_COLOR, 1f);
-        }
-        else
-        {
-            drawCenteredRainbowText(g, "BEGIN!", RAINBOW_LETTER_COLORS, centerX, y, 1f);
-        }
+        Node message = number >= 1
+            ? Text.of(String.valueOf(number)).font(MARIO_PARTY_FONT.deriveFont(MINIGAME_COUNTDOWN_SIZE * scale)).color(MINIGAME_COUNTDOWN_NUMBER_COLOR)
+            : Text.rainbow("BEGIN!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(MINIGAME_COUNTDOWN_SIZE * scale));
+        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), 1f);
     }
 
     /** Replacement for renderMinigameCountdown for mini-games whose round starts once every player
@@ -1544,8 +1420,8 @@ public class AnnouncementOverlay extends Overlay
             text = "All players must stand within the arena!";
         }
 
-        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE));
-        drawCenteredText(g, text, centerX, y, Color.WHITE, alpha);
+        Node message = Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE)).color(Color.WHITE);
+        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
     }
 
     /** Rainbow Rush's own "get ready" beat, shown center-screen right where renderArrivalGatherMessage
@@ -1679,33 +1555,47 @@ public class AnnouncementOverlay extends Overlay
 
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 3 - 20;
+        int maxWidth = safeTextWidth();
 
-        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_ROUND_LABEL_SIZE));
-        drawCenteredText(g, "Round " + plugin.getTrueOrFalseRoundNumber() + "/5", centerX, y, Color.WHITE, 1f);
+        Node roundLabel = Text.of("Round " + plugin.getTrueOrFalseRoundNumber() + "/5")
+            .font(FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_ROUND_LABEL_SIZE)).color(Color.WHITE);
+        Layout.renderCentered(g, roundLabel, centerX, y, maxWidth, 1f);
 
-        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_QUESTION_SIZE));
-        int afterQuestionY = drawWrappedCenteredText(g, question, centerX, y + 34,
-            Math.min(TRUE_OR_FALSE_QUESTION_MAX_WIDTH, safeTextWidth()), TRUE_OR_FALSE_QUESTION_LINE_HEIGHT, Color.WHITE, 1f);
+        Text questionText = Text.of(question)
+            .font(FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_QUESTION_SIZE))
+            .color(Color.WHITE)
+            .wrap(Math.min(TRUE_OR_FALSE_QUESTION_MAX_WIDTH, maxWidth))
+            .lineHeight(TRUE_OR_FALSE_QUESTION_LINE_HEIGHT);
+        Dimension questionSize = Layout.renderCentered(g, questionText, centerX, y + 34, maxWidth, 1f);
+        int afterQuestionY = y + 34 + questionSize.height;
 
         long now = System.currentTimeMillis();
-        g.setFont(MARIO_PARTY_FONT.deriveFont(TRUE_OR_FALSE_COUNTDOWN_SIZE));
         if (now < plugin.getTrueOrFalseAnswerWindowStartsAt())
         {
-            g.setFont(FontManager.getRunescapeSmallFont());
-            drawCenteredText(g, "Get ready...", centerX, afterQuestionY + 34, Color.LIGHT_GRAY, 1f);
+            Node getReady = Text.of("Get ready...").font(FontManager.getRunescapeSmallFont()).color(Color.LIGHT_GRAY);
+            Layout.renderCentered(g, getReady, centerX, afterQuestionY + 34, maxWidth, 1f);
         }
         else
         {
             long remainingMs = plugin.getTrueOrFalseRoundEndsAt() - now;
             int secondsLeft = (int) Math.max(0, Math.ceil(remainingMs / 1000.0));
-            drawCenteredText(g, String.valueOf(secondsLeft), centerX, afterQuestionY + 40, TRUE_OR_FALSE_COUNTDOWN_COLOR, 1f);
+            Node countdown = Text.of(String.valueOf(secondsLeft)).font(MARIO_PARTY_FONT.deriveFont(TRUE_OR_FALSE_COUNTDOWN_SIZE)).color(TRUE_OR_FALSE_COUNTDOWN_COLOR);
+            Layout.renderCentered(g, countdown, centerX, afterQuestionY + 40, maxWidth, 1f);
         }
 
         Font emoteFont = FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
         Font emoteWordFont = MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
         int emoteY = afterQuestionY + 72;
-        drawEmoteInstruction(g, "YES", " = True", emoteFont, emoteWordFont, centerX - 100, emoteY, 1f);
-        drawEmoteInstruction(g, "NO", " = False", emoteFont, emoteWordFont, centerX + 100, emoteY, 1f);
+        Node yesLine = Line.of(
+            Segment.plain("'", emoteFont, Color.LIGHT_GRAY),
+            Segment.rainbow("YES", emoteWordFont, RAINBOW_LETTER_COLORS),
+            Segment.plain("' = True", emoteFont, Color.LIGHT_GRAY));
+        Layout.renderCentered(g, yesLine, centerX - 100, emoteY, maxWidth, 1f);
+        Node noLine = Line.of(
+            Segment.plain("'", emoteFont, Color.LIGHT_GRAY),
+            Segment.rainbow("NO", emoteWordFont, RAINBOW_LETTER_COLORS),
+            Segment.plain("' = False", emoteFont, Color.LIGHT_GRAY));
+        Layout.renderCentered(g, noLine, centerX + 100, emoteY, maxWidth, 1f);
 
         Set<String> answered = plugin.getTrueOrFalseAnsweredRsns();
         List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
@@ -1713,10 +1603,19 @@ public class AnnouncementOverlay extends Overlay
 
         Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
         Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
-        drawPlayerRows(g, players, nameFont, statsFont, (entry, i) -> "",
-            entry -> answered.contains(entry.rsn.toLowerCase()) ? "   Answered!" : "   Waiting...",
-            entry -> answered.contains(entry.rsn.toLowerCase()) ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR,
-            centerX, emoteY + 36, ROUND_COMPLETE_LINE_HEIGHT, 1f);
+        Table table = Table.rows().rowHeight(ROUND_COMPLETE_LINE_HEIGHT);
+        for (RosterReducer.RosterEntry entry : players)
+        {
+            boolean isAnswered = answered.contains(entry.rsn.toLowerCase());
+            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
+            Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
+            table.addRow(
+                Segment.plain("", nameFont, Color.LIGHT_GRAY),
+                Segment.plain(entry.rsn, nameFont, nameColor),
+                Segment.plain(isAnswered ? "   Answered!" : "   Waiting...", statsFont,
+                    isAnswered ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR));
+        }
+        Layout.renderCentered(g, table, centerX, emoteY + 36, maxWidth, 1f);
     }
 
     /** Crab Rave's own big centered countdown, ticking down from getCrabRaveEndsAt() -- same
@@ -1836,108 +1735,33 @@ public class AnnouncementOverlay extends Overlay
 
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 3;
+        int maxWidth = safeTextWidth();
 
         String title = "The answer was " + (correctAnswer ? "TRUE" : "FALSE") + "!";
         Color titleColor = correctAnswer ? TRUE_OR_FALSE_TRUE_COLOR : TRUE_OR_FALSE_FALSE_COLOR;
-        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_REVEAL_TITLE_SIZE));
-        drawCenteredText(g, title, centerX, y, titleColor, alpha);
+        Node titleNode = Text.of(title).font(FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_REVEAL_TITLE_SIZE)).color(titleColor);
+        Layout.renderCentered(g, titleNode, centerX, y, maxWidth, alpha);
 
         Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_REVEAL_LINE_SIZE);
         Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(TRUE_OR_FALSE_REVEAL_LINE_SIZE);
 
         List<TrueOrFalseResult> results = plugin.getTrueOrFalseLastResults();
-        List<String> statuses = new ArrayList<>();
-        FontMetrics nameFm = g.getFontMetrics(nameFont);
-        FontMetrics statsFm = g.getFontMetrics(statsFont);
-        int widest = 0;
+        Table table = Table.rows().rowHeight(TRUE_OR_FALSE_REVEAL_LINE_HEIGHT);
         for (TrueOrFalseResult result : results)
         {
             String answerText = result.answer == null ? "no answer" : (result.answer ? "True" : "False");
             String status = "   " + answerText + (result.correct ? " -- correct!" : " -- wrong");
-            statuses.add(status);
-            widest = Math.max(widest, nameFm.stringWidth(result.rsn) + statsFm.stringWidth(status));
-        }
-
-        // Same shared-scale treatment as drawPlayerRows -- see its own doc -- so every row shrinks
-        // together instead of drifting independently.
-        float scale = fitScale(widest);
-        Font rowNameFont = scale < 1f ? nameFont.deriveFont(nameFont.getSize2D() * scale) : nameFont;
-        Font rowStatsFont = scale < 1f ? statsFont.deriveFont(statsFont.getSize2D() * scale) : statsFont;
-        int rowLineHeight = scale < 1f ? Math.round(TRUE_OR_FALSE_REVEAL_LINE_HEIGHT * scale) : TRUE_OR_FALSE_REVEAL_LINE_HEIGHT;
-
-        int lineY = y + 36;
-        for (int idx = 0; idx < results.size(); idx++)
-        {
-            TrueOrFalseResult result = results.get(idx);
             Color statusColor = result.correct ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR;
-            drawStandingsLine(g, rowNameFont, rowStatsFont, "", result.rsn, Color.LIGHT_GRAY, statuses.get(idx), statusColor, centerX, lineY, alpha);
-            lineY += rowLineHeight;
+            table.addRow(
+                Segment.plain(result.rsn, nameFont, Color.LIGHT_GRAY),
+                Segment.plain(status, statsFont, statusColor));
         }
-    }
-
-    /** Word-wraps {@code text} onto as many lines as needed to stay within {@code maxWidth} pixels,
-     * each centered and drawn {@code lineHeight} apart. {@code g}'s font must already be set.
-     * Returns the y just past the last line drawn, so callers can lay out what comes next. */
-    // Memoizes wrapCenteredLines() below, keyed on the exact (text, maxWidth) pair its own line
-    // breaks depend on. Both current callers (renderMinigameReadyCheck/renderTrueOrFalseQuestion)
-    // redraw the same fixed instructions/question text on every one of the ~50 frames/sec their own
-    // banner stays up (only the pulsing alpha actually changes frame to frame -- see
-    // BannerAnim.pulse), so re-splitting and re-measuring that identical string that often for
-    // byte-identical line breaks was pure waste.
-    private String lastWrappedCenteredText = null;
-    private int lastWrappedCenteredMaxWidth = -1;
-    private List<String> lastWrappedCenteredLines = Collections.emptyList();
-
-    /** Greedy word-wrap against {@code maxWidth}, measured via {@code fm} -- same algorithm
-     * drawWrappedCenteredText always ran inline, just split out so the line-splitting itself (which
-     * never changes frame to frame for a fixed banner's own text) can be cached separately from the
-     * actual per-frame draw below (whose alpha/color legitimately can). */
-    private List<String> wrapCenteredLines(FontMetrics fm, String text, int maxWidth)
-    {
-        if (maxWidth == lastWrappedCenteredMaxWidth && Objects.equals(text, lastWrappedCenteredText))
-        {
-            return lastWrappedCenteredLines;
-        }
-
-        List<String> lines = new ArrayList<>();
-        String[] words = text.split(" ");
-        StringBuilder line = new StringBuilder();
-        for (String word : words)
-        {
-            String candidate = line.length() == 0 ? word : line + " " + word;
-            if (line.length() > 0 && fm.stringWidth(candidate) > maxWidth)
-            {
-                lines.add(line.toString());
-                line = new StringBuilder(word);
-            }
-            else
-            {
-                line = new StringBuilder(candidate);
-            }
-        }
-        if (line.length() > 0) lines.add(line.toString());
-
-        lastWrappedCenteredText = text;
-        lastWrappedCenteredMaxWidth = maxWidth;
-        lastWrappedCenteredLines = lines;
-        return lines;
-    }
-
-    private int drawWrappedCenteredText(Graphics2D g, String text, int centerX, int y, int maxWidth, int lineHeight, Color color, float alpha)
-    {
-        FontMetrics fm = g.getFontMetrics();
-        int lineY = y;
-        for (String line : wrapCenteredLines(fm, text, maxWidth))
-        {
-            drawCenteredText(g, line, centerX, lineY, color, alpha);
-            lineY += lineHeight;
-        }
-        return lineY;
+        Layout.renderCentered(g, table, centerX, y + 36, maxWidth, alpha);
     }
 
     /** Draws the mini-game final-score recap -- "FINAL SCORE", then every seated player with the
-     * score they earned this round, highest first, each name in its own seat color (see
-     * drawPlayerRows) so it reads like a personal standings list rather than a flat report.
+     * score they earned this round, highest first, each name in its own seat color so it reads
+     * like a personal standings list rather than a flat report.
      * Score's own meaning varies per mini-game (unique tiles clicked, anchovies caught, correct
      * answers, ...) -- this banner doesn't need to know which, it just shows the raw number every
      * mini-game's own pay_out/pay_out_flat/pay_out_top already produces in MINIGAME_ENDED's
@@ -1950,9 +1774,10 @@ public class AnnouncementOverlay extends Overlay
 
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 3;
+        int maxWidth = safeTextWidth();
 
-        g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_REWARDS_TITLE_SIZE));
-        drawCenteredRainbowText(g, "FINAL SCORE", RAINBOW_LETTER_COLORS, centerX, y, alpha);
+        Node title = Text.rainbow("FINAL SCORE", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(MINIGAME_REWARDS_TITLE_SIZE));
+        Layout.renderCentered(g, title, centerX, y, maxWidth, alpha);
 
         Map<String, Integer> scoreByRsn = new HashMap<>();
         for (MinigameScore score : plugin.getMinigameScores())
@@ -1968,10 +1793,17 @@ public class AnnouncementOverlay extends Overlay
 
         Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(MINIGAME_REWARDS_LINE_SIZE);
         Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(MINIGAME_REWARDS_LINE_SIZE);
-        drawPlayerRows(g, players, nameFont, statsFont, (entry, i) -> "",
-            entry -> "   " + scoreByRsn.getOrDefault(entry.rsn.toLowerCase(), 0) + " pts",
-            entry -> Color.LIGHT_GRAY,
-            centerX, y + 40, MINIGAME_REWARDS_LINE_HEIGHT, alpha);
+        Table table = Table.rows().rowHeight(MINIGAME_REWARDS_LINE_HEIGHT);
+        for (RosterReducer.RosterEntry entry : players)
+        {
+            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
+            Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
+            table.addRow(
+                Segment.plain("", nameFont, Color.LIGHT_GRAY),
+                Segment.plain(entry.rsn, nameFont, nameColor),
+                Segment.plain("   " + scoreByRsn.getOrDefault(entry.rsn.toLowerCase(), 0) + " pts", statsFont, Color.LIGHT_GRAY));
+        }
+        Layout.renderCentered(g, table, centerX, y + 40, maxWidth, alpha);
     }
 
     /** Draws the mini-game rewards recap -- "REWARDS", then every seated player with the coins they
@@ -1984,9 +1816,10 @@ public class AnnouncementOverlay extends Overlay
 
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 3;
+        int maxWidth = safeTextWidth();
 
-        g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_REWARDS_TITLE_SIZE));
-        drawCenteredRainbowText(g, "REWARDS", RAINBOW_LETTER_COLORS, centerX, y, alpha);
+        Node title = Text.rainbow("REWARDS", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(MINIGAME_REWARDS_TITLE_SIZE));
+        Layout.renderCentered(g, title, centerX, y, maxWidth, alpha);
 
         Map<String, Integer> rewardByRsn = new HashMap<>();
         for (MinigameReward reward : plugin.getMinigameRewards())
@@ -2002,10 +1835,19 @@ public class AnnouncementOverlay extends Overlay
 
         Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(MINIGAME_REWARDS_LINE_SIZE);
         Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(MINIGAME_REWARDS_LINE_SIZE);
-        drawPlayerRows(g, players, nameFont, statsFont, (entry, i) -> "",
-            entry -> rewardByRsn.get(entry.rsn.toLowerCase()) != null ? "   +" + rewardByRsn.get(entry.rsn.toLowerCase()) + " coins" : "   no reward",
-            entry -> rewardByRsn.get(entry.rsn.toLowerCase()) != null ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR,
-            centerX, y + 40, MINIGAME_REWARDS_LINE_HEIGHT, alpha);
+        Table table = Table.rows().rowHeight(MINIGAME_REWARDS_LINE_HEIGHT);
+        for (RosterReducer.RosterEntry entry : players)
+        {
+            Integer reward = rewardByRsn.get(entry.rsn.toLowerCase());
+            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
+            Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
+            table.addRow(
+                Segment.plain("", nameFont, Color.LIGHT_GRAY),
+                Segment.plain(entry.rsn, nameFont, nameColor),
+                Segment.plain(reward != null ? "   +" + reward + " coins" : "   no reward", statsFont,
+                    reward != null ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR));
+        }
+        Layout.renderCentered(g, table, centerX, y + 40, maxWidth, alpha);
     }
 
     /** Draws the post-round recap -- "ROUND x" (the upcoming round), "Current Standings", then every
@@ -2017,12 +1859,13 @@ public class AnnouncementOverlay extends Overlay
 
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 3;
+        int maxWidth = safeTextWidth();
 
-        g.setFont(MARIO_PARTY_FONT.deriveFont(ROUND_COMPLETE_TITLE_SIZE));
-        drawCenteredRainbowText(g, "ROUND " + plugin.getRoundCompleteRoundNumber(), RAINBOW_LETTER_COLORS, centerX, y, alpha);
+        Node title = Text.rainbow("ROUND " + plugin.getRoundCompleteRoundNumber(), RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(ROUND_COMPLETE_TITLE_SIZE));
+        Layout.renderCentered(g, title, centerX, y, maxWidth, alpha);
 
-        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(ROUND_COMPLETE_SUBTITLE_SIZE));
-        drawCenteredText(g, "Current Standings", centerX, y + 34, Color.WHITE, alpha);
+        Node subtitle = Text.of("Current Standings").font(FontManager.getRunescapeBoldFont().deriveFont(ROUND_COMPLETE_SUBTITLE_SIZE)).color(Color.WHITE);
+        Layout.renderCentered(g, subtitle, centerX, y + 34, maxWidth, alpha);
 
         List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
         players.sort(Comparator
@@ -2031,10 +1874,19 @@ public class AnnouncementOverlay extends Overlay
 
         Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
         Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
-        drawPlayerRows(g, players, nameFont, statsFont, (entry, i) -> "#" + i + "  ",
-            entry -> "   " + entry.goldenGnomeCount + " GG, " + entry.coins + " coins",
-            entry -> Color.LIGHT_GRAY,
-            centerX, y + 66, ROUND_COMPLETE_LINE_HEIGHT, alpha);
+        Table table = Table.rows().rowHeight(ROUND_COMPLETE_LINE_HEIGHT);
+        int rank = 1;
+        for (RosterReducer.RosterEntry entry : players)
+        {
+            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
+            Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
+            table.addRow(
+                Segment.plain("#" + rank + "  ", nameFont, Color.LIGHT_GRAY),
+                Segment.plain(entry.rsn, nameFont, nameColor),
+                Segment.plain("   " + entry.goldenGnomeCount + " GG, " + entry.coins + " coins", statsFont, Color.LIGHT_GRAY));
+            rank++;
+        }
+        Layout.renderCentered(g, table, centerX, y + 66, maxWidth, alpha);
     }
 
     /** The rainbow "GOLDEN GNOME AWARDS!" title -- the true first beat of the end-game ceremony
