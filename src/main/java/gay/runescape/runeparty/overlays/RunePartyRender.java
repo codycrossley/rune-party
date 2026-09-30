@@ -10,8 +10,10 @@ import net.runelite.api.coords.WorldPoint;
 
 /** Small rendering helpers shared across this package -- {@code withAlpha} and the "black shadow
  * offset one pixel, then the real color on top" idiom, previously duplicated at several call
- * sites (TileOverlay, PlayerOverlay, AnnouncementOverlay, ...). */
-final class RunePartyRender
+ * sites (TileOverlay, PlayerOverlay, AnnouncementOverlay, ...). {@code withAlpha(Color, float)} is
+ * also public so overlays.layout's Text node (a separate package, on purpose -- see that
+ * package's own doc) can reuse it for its own shadow draw. */
+public final class RunePartyRender
 {
     private RunePartyRender()
     {
@@ -127,7 +129,7 @@ final class RunePartyRender
 
     /** Clamped to [0, 255] before handing java.awt.Color a component value, in case a caller's
      * alpha arithmetic drifts fractionally outside [0f, 1f]. */
-    static Color withAlpha(Color c, float alpha)
+    public static Color withAlpha(Color c, float alpha)
     {
         int a = Math.max(0, Math.min(255, (int) (alpha * 255)));
         return new Color(c.getRed(), c.getGreen(), c.getBlue(), a);
