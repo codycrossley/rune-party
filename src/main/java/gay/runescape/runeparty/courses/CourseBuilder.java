@@ -403,9 +403,8 @@ public final class CourseBuilder
 
     /** The course tile (has its own pathIndex) at {@code point}, or null -- see TileEntry#pathIndex's
      * own doc for why a null pathIndex is exactly "not a course stop of its own" (a modifier).
-     * Scans TileReducer's live snapshot directly, same "the reducer is the one source of truth"
-     * reasoning RunePartyPlugin#findGoldenGnomeTilePoint already follows -- course sizes are small
-     * and this is only ever called from a menu-build callback, never a hot path. */
+     * Scans TileReducer's live snapshot directly, since it's the one source of truth -- course sizes
+     * are small and this is only ever called from a menu-build callback, never a hot path. */
     private TileReducer.TileEntry courseTileAt(WorldPoint point)
     {
         for (TileReducer.TileEntry entry : plugin.getTileReducer().snapshot())

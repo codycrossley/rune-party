@@ -140,7 +140,6 @@ public class AnnouncementOverlay extends Overlay
 
     private static final long ROUND_COMPLETE_FADE_MS = DEFAULT_FADE_MS;
     private static final float ROUND_COMPLETE_TITLE_SIZE = 46f; // "ROUND x"
-    private static final float ROUND_COMPLETE_SUBTITLE_SIZE = 20f; // "Current Standings"
     private static final float ROUND_COMPLETE_LINE_SIZE = 18f;
     private static final int ROUND_COMPLETE_LINE_HEIGHT = 24;
 
@@ -183,6 +182,17 @@ public class AnnouncementOverlay extends Overlay
     private static final long WINNER_REVEAL_FADE_MS = 700;
     private static final float WINNER_REVEAL_NAME_SIZE = 62f;
     private static final float WINNER_REVEAL_SUBTITLE_SIZE = 22f;
+
+    // The whole game's own true final beat, enqueued right behind "GAME OVER!" (see
+    // CeremonyPresentation#handleCeremonyTransitionToWinner) -- a scrolling credits block. Unlike
+    // every phase above, it doesn't fade in place; it scrolls continuously bottom-to-top across the
+    // full CEREMONY_CREDITS_DURATION_MS (RunePartyPlugin), so its own render method drives position
+    // off elapsed time directly instead of going through BannerAnim#fadeAlpha.
+    private static final float CEREMONY_CREDITS_TITLE_SIZE = 40f;
+    private static final float CEREMONY_CREDITS_HEADER_SIZE = 26f;
+    private static final float CEREMONY_CREDITS_NAME_SIZE = 22f;
+    private static final int CEREMONY_CREDITS_NAME_GAP = 10; // between names within one section
+    private static final int CEREMONY_CREDITS_SECTION_GAP = 50; // between the title/each section
 
     private static final Color SPIN_HINT_COLOR = new Color(255, 255, 255);
     private static final float SPIN_HINT_SIZE = 22f;
@@ -291,6 +301,7 @@ public class AnnouncementOverlay extends Overlay
         renderSpinHint(g);
         renderReturnToPositionHint(g);
         renderStartHereHint(g);
+        renderGoldenGnomeOffer(g);
         renderGoldenGnomeOutcome(g);
         renderChanceSpaceTitle(g);
         renderChanceSpaceIcons(g);
@@ -351,6 +362,7 @@ public class AnnouncementOverlay extends Overlay
         renderPlaceReveal(g);
         renderWinnerSuspenseBanner(g);
         renderWinnerReveal(g);
+        renderCeremonyCredits(g);
 
         return null;
     }
@@ -545,6 +557,49 @@ public class AnnouncementOverlay extends Overlay
         }
     }
 
+    /** Draws the Golden Gnome purchase offer -- "Would you like to buy a Golden Gnome?" plus the
+     * YES/NO emote instructions for the finder, "Waiting for &lt;Player&gt; to purchase a Golden
+     * Gnome..." for everyone else. Broadcast to everyone, duration-less so it pulses -- stops
+     * rendering the instant GOLDEN_GNOME_OFFER_RESOLVED clears offerRsn, handing off to
+     * renderGoldenGnomeOutcome. */
+    private void renderGoldenGnomeOffer(Graphics2D g)
+    {
+        String offerRsn = plugin.getGoldenGnomeOfferRsn();
+        if (offerRsn == null) return;
+
+        float alpha = GOLDEN_GNOME_OFFER_MIN_ALPHA + (1f - GOLDEN_GNOME_OFFER_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS);
+
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
+
+        boolean isLocal = isLocal(offerRsn);
+
+        String title = isLocal ? "Would you like to buy a Golden Gnome?" : offerRsn + " found a Golden Gnome!";
+        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_TITLE_SIZE));
+        drawCenteredText(g, title, centerX, y, Color.WHITE, alpha);
+
+        if (isLocal)
+        {
+            Font emoteFont = FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
+            Font emoteWordFont = MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
+            Node yesLine = Line.of(
+                Segment.plain("'", emoteFont, Color.LIGHT_GRAY),
+                Segment.rainbow("YES", emoteWordFont, RAINBOW_LETTER_COLORS),
+                Segment.plain("' to buy", emoteFont, Color.LIGHT_GRAY));
+            Node noLine = Line.of(
+                Segment.plain("'", emoteFont, Color.LIGHT_GRAY),
+                Segment.rainbow("NO", emoteWordFont, RAINBOW_LETTER_COLORS),
+                Segment.plain("' to decline", emoteFont, Color.LIGHT_GRAY));
+            Layout.renderCentered(g, yesLine, centerX, y + 32, safeTextWidth(), alpha);
+            Layout.renderCentered(g, noLine, centerX, y + 60, safeTextWidth(), alpha);
+        }
+        else
+        {
+            g.setFont(FontManager.getRunescapeSmallFont());
+            drawCenteredText(g, "Waiting for " + offerRsn + " to purchase a Golden Gnome...", centerX, y + 32, Color.LIGHT_GRAY, alpha);
+        }
+    }
+
     /** Draws the Golden Gnome purchase follow-up -- "You got a Golden Gnome!" -- addressed to
      * whoever the outcome belongs to. */
     private void renderGoldenGnomeOutcome(Graphics2D g)
@@ -563,10 +618,15 @@ public class AnnouncementOverlay extends Overlay
             text = isLocal ? "You got a Golden Gnome!" : rsn != null ? rsn + " got a Golden Gnome!" : null;
             color = WELCOME_TITLE_COLOR;
         }
-        else if ("failed".equals(outcome))
+        else if ("cant_afford".equals(outcome))
         {
             text = isLocal ? "You can't afford a Golden Gnome!" : rsn != null ? rsn + " can't afford a Golden Gnome!" : null;
             color = DICE_ROLL_BONUS_NEGATIVE_COLOR;
+        }
+        else if ("declined".equals(outcome))
+        {
+            text = isLocal ? "You declined the Golden Gnome!" : rsn != null ? rsn + " declined the Golden Gnome!" : null;
+            color = Color.LIGHT_GRAY;
         }
         else
         {
@@ -1864,9 +1924,8 @@ public class AnnouncementOverlay extends Overlay
         Node title = Text.rainbow("ROUND " + plugin.getRoundCompleteRoundNumber(), RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(ROUND_COMPLETE_TITLE_SIZE));
         Layout.renderCentered(g, title, centerX, y, maxWidth, alpha);
 
-        Node subtitle = Text.of("Current Standings").font(FontManager.getRunescapeBoldFont().deriveFont(ROUND_COMPLETE_SUBTITLE_SIZE)).color(Color.WHITE);
-        Layout.renderCentered(g, subtitle, centerX, y + 34, maxWidth, alpha);
-
+        // No "Current Standings" label here per user feedback -- the ranked list right below
+        // already makes clear what it's showing on its own.
         List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
         players.sort(Comparator
             .comparingInt((RosterReducer.RosterEntry e) -> e.goldenGnomeCount).reversed()
@@ -1886,7 +1945,7 @@ public class AnnouncementOverlay extends Overlay
                 Segment.plain("   " + entry.goldenGnomeCount + " GG, " + entry.coins + " coins", statsFont, Color.LIGHT_GRAY));
             rank++;
         }
-        Layout.renderCentered(g, table, centerX, y + 66, maxWidth, alpha);
+        Layout.renderCentered(g, table, centerX, y + 34, maxWidth, alpha);
     }
 
     /** The rainbow "GOLDEN GNOME AWARDS!" title -- the true first beat of the end-game ceremony
@@ -2080,6 +2139,64 @@ public class AnnouncementOverlay extends Overlay
         Layout.renderCentered(g, banner, centerX, y, safeTextWidth(), alpha);
     }
 
+    /** The whole game's own true last word -- see this file's own credits constants block above
+     * and CeremonyPresentation#handleCeremonyTransitionToWinner. Active window is
+     * [ceremonyCreditsStart, ceremonyCreditsUntil), read directly off the plugin rather than
+     * through BannerAnim#fadeAlpha: that helper only ever counts a fixed `until` down to a fade,
+     * with no notion of a scroll position, and this beat needs to know exactly how far through its
+     * own run it is on every frame to place the block. */
+    private void renderCeremonyCredits(Graphics2D g)
+    {
+        long start = plugin.getCeremonyCreditsStart();
+        long until = plugin.getCeremonyCreditsUntil();
+        if (start <= 0 || until <= start) return;
+        long now = System.currentTimeMillis();
+        if (now < start || now >= until) return;
+
+        Node credits = buildCeremonyCreditsTree();
+        int maxWidth = safeTextWidth();
+        Dimension size = credits.measure(g, maxWidth);
+
+        float progress = (now - start) / (float) (until - start);
+        // Travels from fully below the viewport's bottom edge to fully above its top edge -- the
+        // block's own height is part of the distance traveled both ways, not just its start/end
+        // position, so it's completely off-screen at both progress==0 and progress==1.
+        int travel = drawableHeight() + size.height;
+        int topY = drawableHeight() - Math.round(progress * travel);
+
+        int centerX = drawableWidth() / 2;
+        credits.paint(g, centerX - size.width / 2, topY, maxWidth, 1f);
+    }
+
+    /** Builds the credits' own content tree. Static content -- never varies per game -- so nothing
+     * here reads plugin state; only renderCeremonyCredits' own positioning does. */
+    private Node buildCeremonyCreditsTree()
+    {
+        Font titleFont = MARIO_PARTY_FONT.deriveFont(CEREMONY_CREDITS_TITLE_SIZE);
+        Font headerFont = FontManager.getRunescapeBoldFont().deriveFont(CEREMONY_CREDITS_HEADER_SIZE);
+        Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(CEREMONY_CREDITS_NAME_SIZE);
+
+        return Box.column(
+                Text.of("Thank you for playing <3").font(titleFont).color(WELCOME_TITLE_COLOR),
+                creditsSection(headerFont, nameFont, "Created by:", "Tree Twunk"),
+                creditsSection(headerFont, nameFont, "Developed by:", "Tree Twunk", "Zszima", "Cavatapi"),
+                creditsSection(headerFont, nameFont, "Special thanks to:", "SirShrekOSRS", "Mudscaper", "BeeingVee", "PaesChild"))
+            .gap(CEREMONY_CREDITS_SECTION_GAP);
+    }
+
+    /** One "<header>" + N centered name lines underneath it, e.g. "Developed by:" / Tree Twunk /
+     * Zszima / Cavatapi -- built as its own column so the whole section travels and centers as one
+     * unit within buildCeremonyCreditsTree's own outer column. */
+    private Node creditsSection(Font headerFont, Font nameFont, String header, String... names)
+    {
+        Box section = Box.column(Text.of(header).font(headerFont).color(Color.LIGHT_GRAY)).gap(CEREMONY_CREDITS_NAME_GAP);
+        for (String name : names)
+        {
+            section.add(Text.of(name).font(nameFont).color(Color.WHITE));
+        }
+        return section;
+    }
+
     /** "1st"/"2nd"/"3rd"/"4th"... with the 11-13 exception. */
     private static String ordinal(int n)
     {
@@ -2121,11 +2238,11 @@ public class AnnouncementOverlay extends Overlay
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 3;
 
-        Node banner = Box.column(
-                Text.rainbow("HERE WE GO!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(GAME_START_TITLE_SIZE)),
-                Text.of("Please stand on the Start Tile to begin.").font(FontManager.getRunescapeSmallFont()).color(Color.LIGHT_GRAY))
-            .gap(10);
-        Layout.renderCentered(g, banner, centerX, y, safeTextWidth(), alpha);
+        // No subtitle here -- renderStartHereHint's own larger, white, pulsing "Head to the Start
+        // Tile to begin!" already covers this, and having both onscreen at once was a needless
+        // duplicate (small/gray, easy to miss besides).
+        Node title = Text.rainbow("HERE WE GO!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(GAME_START_TITLE_SIZE));
+        Layout.renderCentered(g, title, centerX, y, safeTextWidth(), alpha);
     }
 
     /** The width every "centerX = drawableWidth() / N" position formula in this file is actually

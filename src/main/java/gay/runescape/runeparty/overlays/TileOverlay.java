@@ -865,23 +865,24 @@ public class TileOverlay extends Overlay
         }
     }
 
-    /** "Purchase!" arrow over the Golden Gnome's own current tile while the local player has a
-     * roll pending on their own turn. Local-only, same reasoning renderItemPlacementArrows gives:
-     * nobody but the current roller can actually act on the menu entry it's advertising. Gated on
-     * exactly the same conditions that menu entry itself checks (already-purchased-this-turn,
-     * reachability), so the arrow never advertises a purchase the menu entry wouldn't actually
-     * offer. Still doesn't re-check affordability -- purchase-golden-gnome is the real authority
-     * on that; showing the arrow for a purchase that turns out unaffordable just means an attempt
-     * from here 409s. Uses the Golden Gnome tile type's own served color, same reasoning
-     * renderStartArrow ties its own arrow back to START's own green. */
+    /** "PURCHASE!" hint arrow over the Golden Gnome's own current tile while the local player has a
+     * roll pending on their own turn and that tile is genuinely within this roll's reach. Purely a
+     * visual hint -- landing on or passing through the tile is what actually triggers the blocking
+     * offer (GOLDEN_GNOME_OFFERED, see RunePartyPlugin#isLocalPlayerAwaitingGoldenGnomeResponse),
+     * server-side, once confirm_arrival reports where the player really walked; this arrow doesn't
+     * gate or cause that in any way, it just tells the roller where to walk if they want it to. Local-
+     * only, same reasoning renderItemPlacementArrows gives: nobody but the current roller can do
+     * anything about it. Hidden once an offer is already open (renderGoldenGnomeOffer's own big
+     * banner takes over at that point). Uses the Golden Gnome tile type's own served color, same
+     * reasoning renderStartArrow ties its own arrow back to START's own green. */
     private void renderGoldenGnomePurchaseArrow(Graphics2D g)
     {
         if (!plugin.isPendingRoll()) return;
-        if (plugin.isGoldenGnomePurchasedThisTurn()) return;
+        if (plugin.getGoldenGnomeOfferRsn() != null) return;
         String moverRsn = plugin.getCurrentTurnRsn();
         if (moverRsn == null || !isLocalPlayer(moverRsn)) return;
 
-        WorldPoint goldenGnomePoint = plugin.findGoldenGnomeTilePoint();
+        WorldPoint goldenGnomePoint = plugin.findFirstTileByType("GOLDEN_GNOME_TILE");
         if (goldenGnomePoint == null) return;
 
         Integer goldenGnomePathIndex = tileReducer.pathIndexAt(goldenGnomePoint);

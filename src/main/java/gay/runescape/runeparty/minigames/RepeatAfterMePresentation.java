@@ -60,8 +60,23 @@ public final class RepeatAfterMePresentation implements MinigamePresentationFeat
     // committed for real from onRoundBegin() below; rounds 2/3 have no cosmetic banner to race
     // against (nothing gates the INTERMISSION_SECONDS gap between rounds), so they still apply
     // immediately, same as always. Null once there's nothing pending.
-    private volatile Integer pendingFirstRoundNumber;
-    private volatile List<Integer> pendingFirstRoundIndices;
+    //
+    // apply() runs on the WebSocket event-apply thread; onRoundBegin() runs on a separate
+    // uiTimerExec scheduled-executor thread (see RunePartyPlugin#scheduleAfterTurnEffects) -- with
+    // no synchronization between them, a real playtest caught round 1's own reveal silently never
+    // firing: onRoundBegin() happened to run first, saw nothing pending yet, and no-op'd -- since
+    // MINIGAME_ROUND_BEGIN only ever fires once per mini-game instance, nothing ever retried it.
+    // firstRoundLock/firstRoundBeginArrived turn this into a real two-directional handshake so
+    // whichever side runs first, the round still commits exactly once: apply() checks whether
+    // onRoundBegin() already arrived (and if so commits immediately instead of buffering);
+    // onRoundBegin() checks whether the data's already here (and if not, just records that it
+    // arrived, trusting apply() to commit immediately once it lands). Guarded by firstRoundLock,
+    // not volatile -- the lock is what now provides the needed visibility/atomicity across both
+    // fields together, a plain volatile per field never did for a two-field handoff like this.
+    private final Object firstRoundLock = new Object();
+    private boolean firstRoundBeginArrived = false;
+    private Integer pendingFirstRoundNumber;
+    private List<Integer> pendingFirstRoundIndices;
 
     public RepeatAfterMePresentation(RunePartyPlugin plugin)
     {
@@ -86,8 +101,21 @@ public final class RepeatAfterMePresentation implements MinigamePresentationFeat
             // round.
             if (round == 1 && !catchingUp)
             {
-                pendingFirstRoundNumber = round;
-                pendingFirstRoundIndices = indices;
+                synchronized (firstRoundLock)
+                {
+                    if (firstRoundBeginArrived)
+                    {
+                        // onRoundBegin() already fired and found nothing pending yet -- this is
+                        // that race resolving in the other direction, so commit immediately instead
+                        // of buffering for a call that's already happened and won't happen again.
+                        applyRoundStarted(round, indices);
+                    }
+                    else
+                    {
+                        pendingFirstRoundNumber = round;
+                        pendingFirstRoundIndices = indices;
+                    }
+                }
                 return;
             }
 
@@ -114,10 +142,14 @@ public final class RepeatAfterMePresentation implements MinigamePresentationFeat
     @Override
     public void onRoundBegin(boolean catchingUp)
     {
-        if (pendingFirstRoundNumber == null) return;
-        applyRoundStarted(pendingFirstRoundNumber, pendingFirstRoundIndices);
-        pendingFirstRoundNumber = null;
-        pendingFirstRoundIndices = null;
+        synchronized (firstRoundLock)
+        {
+            firstRoundBeginArrived = true;
+            if (pendingFirstRoundNumber == null) return; // apply() hasn't buffered round 1 yet -- it will commit immediately once it does, per the flag above
+            applyRoundStarted(pendingFirstRoundNumber, pendingFirstRoundIndices);
+            pendingFirstRoundNumber = null;
+            pendingFirstRoundIndices = null;
+        }
     }
 
     /** Called once per real game tick from RunePartyPlugin#onGameTick while this mini-game is
@@ -206,8 +238,12 @@ public final class RepeatAfterMePresentation implements MinigamePresentationFeat
         attemptedIndices.clear();
         roundStartAt = 0;
         submitted = false;
-        pendingFirstRoundNumber = null;
-        pendingFirstRoundIndices = null;
+        synchronized (firstRoundLock)
+        {
+            firstRoundBeginArrived = false;
+            pendingFirstRoundNumber = null;
+            pendingFirstRoundIndices = null;
+        }
         arrivalGate.reset();
     }
 
@@ -220,8 +256,12 @@ public final class RepeatAfterMePresentation implements MinigamePresentationFeat
         attemptedIndices.clear();
         roundStartAt = 0;
         submitted = false;
-        pendingFirstRoundNumber = null;
-        pendingFirstRoundIndices = null;
+        synchronized (firstRoundLock)
+        {
+            firstRoundBeginArrived = false;
+            pendingFirstRoundNumber = null;
+            pendingFirstRoundIndices = null;
+        }
         arrivalGate.reset();
     }
 

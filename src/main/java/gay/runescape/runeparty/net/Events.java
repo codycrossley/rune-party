@@ -137,10 +137,16 @@ public final class Events
     public static final String GAME_STARTED = "GAME_STARTED";
     public static final String GOLDEN_GNOME_LOST = "GOLDEN_GNOME_LOST";
     public static final String GOLDEN_GNOME_MOVED = "GOLDEN_GNOME_MOVED";
-    /** `player` tried to buy the board's own Golden Gnome but couldn't afford it -- see
-     * GoldenGnomePresentation, which folds this into the same outcome banner GOLDEN_GNOME_PURCHASED
-     * uses, just with a "can't afford" message instead of "got a Golden Gnome!". */
-    public static final String GOLDEN_GNOME_PURCHASE_FAILED = "GOLDEN_GNOME_PURCHASE_FAILED";
+    /** A roll walked over (landed on, or merely passed through) the board's own Golden Gnome --
+     * see GoldenGnomePresentation, which arms the "Would you like to buy a Golden Gnome?" offer
+     * banner/YES-NO emote instructions for the finder, and "Waiting for &lt;Player&gt;..." for
+     * everyone else, until GOLDEN_GNOME_OFFER_RESOLVED closes it. */
+    public static final String GOLDEN_GNOME_OFFERED = "GOLDEN_GNOME_OFFERED";
+    /** Closes a pending Golden Gnome offer -- outcome "purchased" (also followed by a separate
+     * GOLDEN_GNOME_PURCHASED, which carries the new running total this event doesn't), "cant_afford",
+     * or "declined" (a timeout defaults to this too). See GoldenGnomePresentation, which folds
+     * "cant_afford"/"declined" into the same outcome banner GOLDEN_GNOME_PURCHASED's own reveal uses. */
+    public static final String GOLDEN_GNOME_OFFER_RESOLVED = "GOLDEN_GNOME_OFFER_RESOLVED";
     public static final String GOLDEN_GNOME_PURCHASED = "GOLDEN_GNOME_PURCHASED";
     public static final String GOLDEN_GNOME_WON = "GOLDEN_GNOME_WON";
     public static final String HOME_TELEPORT_ARMED = "HOME_TELEPORT_ARMED";

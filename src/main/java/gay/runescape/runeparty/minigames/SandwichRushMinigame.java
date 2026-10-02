@@ -34,12 +34,7 @@ public class SandwichRushMinigame implements Minigame
     @Override
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
-        if (ICON == null) return;
-
-        Composite original = g.getComposite();
-        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, Math.min(1f, alpha))));
-        g.drawImage(ICON, x - size / 2, y - size / 2, size, size, null);
-        g.setComposite(original);
+        drawIconImage(g, ICON, x, y, size, alpha);
     }
 
     private static BufferedImage loadIcon()

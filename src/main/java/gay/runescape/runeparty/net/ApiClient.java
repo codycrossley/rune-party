@@ -14,8 +14,8 @@ import java.util.concurrent.TimeUnit;
 
 public class ApiClient
 {
-    // static final String BASE_URL = "http://localhost:8005/runeparty";
-    static final String BASE_URL = "https://runeparty.shrunk.studio/runeparty";
+    static final String BASE_URL = "http://localhost:8005/runeparty";
+    // static final String BASE_URL = "https://runeparty.shrunk.studio/runeparty";
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
@@ -453,23 +453,20 @@ public class ApiClient
         postPlayerAction("/v1/games/" + gameId + "/report-balloon-pop-pop", playerRsn, playerToken, "Report Balloon Pop pop");
     }
 
-    /** Buys the Golden Gnome standing at (x, y, plane). A free side-action during the local
-     * player's pending roll, triggered by a right-click menu entry rather than an emote -- doesn't
-     * touch pendingRoll or advance the turn, so confirmArrival is still a separate call afterward.
-     * 409s if it isn't the local player's turn, no roll is pending, the tile isn't reachable, one's
-     * already been bought this turn, or they can't afford it. */
-    public void purchaseGoldenGnome(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
+    /** Responds to a pending Golden Gnome offer via a YES/NO emote -- accept=true buys it (server
+     * re-checks affordability regardless of which emote was used), accept=false declines outright.
+     * Either way, this is what finally lets the tile the Golden Gnome was sitting on pay out its
+     * own effect and the turn advance. 409s if no offer is pending for this player. */
+    public void respondGoldenGnomeOffer(String gameId, String playerRsn, String playerToken, boolean accept) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
-        body.addProperty("x", x);
-        body.addProperty("y", y);
-        body.addProperty("plane", plane);
+        body.addProperty("accept", accept);
 
-        try (Response resp = post("/v1/games/" + gameId + "/purchase-golden-gnome", body, playerToken))
+        try (Response resp = post("/v1/games/" + gameId + "/respond-golden-gnome-offer", body, playerToken))
         {
             String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Purchase Golden Gnome failed (" + resp.code() + "): " + raw);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Respond to Golden Gnome offer failed (" + resp.code() + "): " + raw);
         }
     }
 

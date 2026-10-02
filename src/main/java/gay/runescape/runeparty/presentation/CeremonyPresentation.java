@@ -130,6 +130,12 @@ public final class CeremonyPresentation
     private final TimedBanner<String> winnerRevealBanner = new TimedBanner<>(); // payload: winner rsn
     private final TimedBanner<Void> confettiBanner = new TimedBanner<>();
     private final TimedBanner<Void> gameOverBanner = new TimedBanner<>(); // this sequence's own LAST beat, not its first
+    // The whole game's own true final beat, enqueued right behind gameOverBanner above -- a
+    // scrolling credits block. Both .start and .until matter here, unlike most banners in this
+    // class: AnnouncementOverlay#renderCeremonyCredits derives its own scroll progress from the
+    // full [start, until) window rather than counting down to a bare "until" the way BannerAnim#
+    // fadeAlpha does for every fade-based beat above.
+    private final TimedBanner<Void> ceremonyCreditsBanner = new TimedBanner<>();
 
     public CeremonyPresentation(RunePartyPlugin plugin)
     {
@@ -410,9 +416,17 @@ public final class CeremonyPresentation
             plugin.addChatMessage(winner.rsn + " won Rune Party Showdown!");
         });
 
-        // "GAME OVER!" -- the whole ceremony's own true last word.
+        // "GAME OVER!" -- the ceremony's own last word...
         enqueue(RunePartyPlugin.GAME_OVER_TITLE_DURATION_MS, () ->
             gameOverBanner.until = System.currentTimeMillis() + RunePartyPlugin.GAME_OVER_TITLE_DURATION_MS);
+
+        // ...and then the whole game's own true last word: rolling credits.
+        enqueue(RunePartyPlugin.CEREMONY_CREDITS_DURATION_MS, () ->
+        {
+            long now = System.currentTimeMillis();
+            ceremonyCreditsBanner.start = now;
+            ceremonyCreditsBanner.until = now + RunePartyPlugin.CEREMONY_CREDITS_DURATION_MS;
+        });
     }
 
     public void reset()
@@ -437,6 +451,7 @@ public final class CeremonyPresentation
         winnerRevealBanner.reset();
         confettiBanner.reset();
         gameOverBanner.reset();
+        ceremonyCreditsBanner.reset();
     }
 
     // ---- getters, mirrored 1:1 by RunePartyPlugin's own facade under their original names ----
@@ -465,6 +480,8 @@ public final class CeremonyPresentation
     public long getWinnerRevealUntil() { return winnerRevealBanner.until; }
     public String getWinnerRsn() { return winnerRevealBanner.payload; }
     public long getConfettiUntil() { return confettiBanner.until; }
+    public long getCeremonyCreditsStart() { return ceremonyCreditsBanner.start; }
+    public long getCeremonyCreditsUntil() { return ceremonyCreditsBanner.until; }
 
     /** Payload for one bonus Golden Gnome round's own objective announcement -- see
      * handleBonusObjectiveAnnounced. roundIndex is 1/2/... within this ceremony, purely for
