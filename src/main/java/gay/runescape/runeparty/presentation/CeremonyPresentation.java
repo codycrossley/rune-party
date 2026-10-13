@@ -282,6 +282,11 @@ public final class CeremonyPresentation
             bonusWinnerBanner.payload = winners;
             bonusWinnerBanner.until = System.currentTimeMillis() + RunePartyPlugin.CEREMONY_BONUS_REVEAL_DURATION_MS;
             triggerFlankingGnomeVanish(roundIndex, winners);
+            for (String rsn : winners)
+            {
+                plugin.triggerSpotAnimOnPlayer(RunePartyPlugin.GOLDEN_GNOME_ROUND_FIREWORKS_SPOTANIM_ID, rsn,
+                    RunePartyPlugin.GOLDEN_GNOME_ROUND_FIREWORKS_SPOTANIM_HEIGHT);
+            }
         });
     }
 

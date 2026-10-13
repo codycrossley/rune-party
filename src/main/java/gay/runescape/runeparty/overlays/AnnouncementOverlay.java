@@ -171,6 +171,12 @@ public class AnnouncementOverlay extends Overlay
 
     private static final long WINNER_INTRO_FADE_MS = 500;
     private static final float WINNER_INTRO_SIZE = 26f;
+    // The bonus-round Golden Gnome recipient's own name(s) -- bigger and rainbow-lettered (see
+    // renderBonusWinnerBanner) rather than the plain white WINNER_INTRO_SIZE every other bonus-round
+    // beat uses, so the actual payoff reads as a real moment instead of just another status line.
+    // Smaller than WINNER_REVEAL_NAME_SIZE on purpose -- the overall game winner's own reveal should
+    // still read as the bigger moment of the two.
+    private static final float BONUS_WINNER_NAME_SIZE = 46f;
 
     private static final long PLACE_REVEAL_FADE_MS = 500;
     private static final float PLACE_REVEAL_RANK_SIZE = 40f; // "In 4th place..."
@@ -2038,7 +2044,11 @@ public class AnnouncementOverlay extends Overlay
 
     /** "That player is... &lt;name(s)&gt;!" -- the reveal half of a bonus Golden Gnome round, see
      * CeremonyPresentation#handleBonusWinnerRevealed. More than one name means a tie -- everyone
-     * tied got their own gnome. */
+     * tied got their own gnome. Rainbow-lettered at BONUS_WINNER_NAME_SIZE, same MARIO_PARTY_FONT
+     * treatment renderWinnerReveal's own overall-winner name uses, played alongside the real
+     * GOLDEN_GNOME_ROUND_FIREWORKS_SPOTANIM_ID spotanim CeremonyPresentation fires on each winner's
+     * own actor at the exact same moment -- see that constant's own doc for why it's a notch below
+     * the overall winner's fireworks. */
     private void renderBonusWinnerBanner(Graphics2D g)
     {
         Float alpha = BannerAnim.fadeAlpha(plugin.getBonusWinnerBannerUntil(), WINNER_INTRO_FADE_MS);
@@ -2050,7 +2060,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 2;
 
         String names = String.join(" and ", winners);
-        Node message = Text.of(names + "!").font(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE)).color(Color.WHITE);
+        Node message = Text.rainbow(names + "!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(BONUS_WINNER_NAME_SIZE));
         Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
     }
 

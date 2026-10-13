@@ -845,17 +845,17 @@ public class RunePartyPlugin extends Plugin
      * practice, since the server deliberately waits a beat before firing it -- rather than
      * stomping over that recap. Must stay in lockstep with the server's own
      * ceremony.py#TITLE_DURATION_SECONDS. */
-    public static final long CEREMONY_TITLE_BANNER_DURATION_MS = 4000;
+    public static final long CEREMONY_TITLE_BANNER_DURATION_MS = 5000;
 
     /** How long each of the Gnome's own scripted CEREMONY_GNOME_LINE lines stays up -- purely
      * server-paced from here on (see CeremonyPresentation's own doc), no turnEffectGate chaining
      * needed. Must stay in lockstep with the server's own ceremony.py#GNOME_LINE_SECONDS. */
-    public static final long CEREMONY_GNOME_LINE_DURATION_MS = 4000;
+    public static final long CEREMONY_GNOME_LINE_DURATION_MS = 5000;
 
     /** How long a bonus Golden Gnome round's own objective announcement stays up before the
      * winner reveal lands -- must stay in lockstep with the server's own
      * ceremony.py#BONUS_ANNOUNCE_PAUSE_SECONDS. */
-    public static final long CEREMONY_BONUS_ANNOUNCE_DURATION_MS = 5000;
+    public static final long CEREMONY_BONUS_ANNOUNCE_DURATION_MS = 6500;
 
     /** How many bonus Golden Gnome rounds a ceremony can ever run -- matches the server's own
      * ceremony.py#BONUS_ROUND_COUNT. Used purely to size/index the two flanking Golden Gnome
@@ -873,7 +873,7 @@ public class RunePartyPlugin extends Plugin
      * just deliberately not saying so yet). ceremony.py's own BONUS_REVEAL_HOLD_SECONDS must stay
      * generous enough to cover this plus CEREMONY_BONUS_REVEAL_DURATION_MS plus
      * GOLDEN_GNOME_MOVE_VANISH_DELAY_MS -- see that constant's own doc. */
-    public static final long CEREMONY_BONUS_SUSPENSE_DURATION_MS = 4000;
+    public static final long CEREMONY_BONUS_SUSPENSE_DURATION_MS = 6500;
 
     /** How long a bonus Golden Gnome round's own winner reveal stays up, once it actually appears
      * (see CEREMONY_BONUS_SUSPENSE_DURATION_MS's own doc for the beat that now precedes it). No
@@ -882,7 +882,7 @@ public class RunePartyPlugin extends Plugin
      * chain (suspense + this + the flanking gnome's own GOLDEN_GNOME_MOVE_VANISH_DELAY_MS) before
      * advancing to the next beat, same "generous real duration" reasoning WINNER_SEQUENCE_SECONDS
      * already uses server-side. */
-    public static final long CEREMONY_BONUS_REVEAL_DURATION_MS = 4500;
+    public static final long CEREMONY_BONUS_REVEAL_DURATION_MS = 7000;
 
     /** How long AnnouncementOverlay's "GAME OVER!" title card stays up -- now the ceremony's own
      * true LAST step (see CeremonyPresentation#scheduleGameOverFinale), scheduled behind the
@@ -991,12 +991,13 @@ public class RunePartyPlugin extends Plugin
     public static final int BALLOON_POP_EXPLOSION_SPOTANIM_ID = SpotanimID.REGICIDE_BARRELFLIGHT_EXPLODING;
 
     /** Spotanim played on the game's own overall winner the instant their name is revealed (see
-     * CeremonyPresentation#scheduleWinnerReveal) -- the real "reached level 99" fireworks display,
-     * not a generic placeholder, played via Actor#createSpotAnim (see triggerSpotAnimOnPlayer) so
-     * it follows them the way ICE_BARRAGE_IMPACT_SPOTANIM_ID's own impact graphic does.
-     * SpotanimID.LEVELUP_MAX (the even bigger "reached max total level" version of this same
-     * fireworks display) is the natural escalation if this ever reads as too small for the whole
-     * game's own final moment. */
+     * CeremonyPresentation#scheduleWinnerReveal) -- the real "reached max total level" fireworks
+     * display (SpotanimID.LEVELUP_MAX), the biggest of the three LEVELUP_* tiers, reserved for the
+     * whole game's own final moment -- not a generic placeholder, played via Actor#createSpotAnim
+     * (see triggerSpotAnimOnPlayer) so it follows them the way ICE_BARRAGE_IMPACT_SPOTANIM_ID's own
+     * impact graphic does. See GOLDEN_GNOME_ROUND_FIREWORKS_SPOTANIM_ID for the smaller tier used on
+     * each individual Golden Gnome bonus round's own winner(s), so this one still reads as the
+     * bigger of the two moments. */
     public static final int WINNER_FIREWORKS_SPOTANIM_ID = SpotanimID.LEVELUP_MAX;
 
     /** Height offset (same units Actor#createSpotAnim itself takes) for
@@ -1005,6 +1006,19 @@ public class RunePartyPlugin extends Plugin
      * Not measured against the real effect in-client, same caveat every other un-measured
      * animation-hold/effect constant in this codebase already carries. */
     public static final int WINNER_FIREWORKS_SPOTANIM_HEIGHT = 150;
+
+    /** Spotanim played on each Golden Gnome bonus round's own winner(s) (ties get one each) the
+     * instant their name(s) are revealed (see CeremonyPresentation#handleBonusWinnerRevealed) -- the
+     * standard "level up" fireworks display (SpotanimID.LEVELUP_ANIM), one tier below
+     * WINNER_FIREWORKS_SPOTANIM_ID's own LEVELUP_MAX so the eventual overall-winner reveal still
+     * reads as the bigger of the two moments. Same follows-the-actor call shape, via
+     * triggerSpotAnimOnPlayer. */
+    public static final int GOLDEN_GNOME_ROUND_FIREWORKS_SPOTANIM_ID = SpotanimID.LEVELUP_ANIM;
+
+    /** Height offset for GOLDEN_GNOME_ROUND_FIREWORKS_SPOTANIM_ID -- same reasoning/caveat
+     * WINNER_FIREWORKS_SPOTANIM_HEIGHT's own doc gives, reused as-is rather than re-measured since
+     * both are the same family of effect just at a different LEVELUP_* tier. */
+    public static final int GOLDEN_GNOME_ROUND_FIREWORKS_SPOTANIM_HEIGHT = 150;
 
     /** How long after the "vanish" spotanim starts before the model actually disappears from its
      * old spot -- see TileOverlay#updateGoldenGnomeModels, which force-persists the old point past
