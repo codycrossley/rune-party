@@ -141,6 +141,11 @@ public class TileOverlay extends Overlay
     // SANDWICH_RUSH_ARENA_OUTLINE_COLOR's own doc gives (this is a plain gather-and-click floor,
     // never a walked path, so per-tile fill would be noise).
     private static final Color BALLOON_POP_ARENA_OUTLINE_COLOR = new Color(255, 111, 168, 190);
+    // Mage Arena's own arena outline -- a purple matching MageArenaTile's own served color_hex
+    // (#6A0DAD), same "merged outline, no per-tile fill" treatment BALLOON_POP_ARENA_OUTLINE_COLOR's
+    // own doc gives (the real per-cast danger highlight is renderMageArenaCastWarning, not a
+    // standing per-tile fill).
+    private static final Color MAGE_ARENA_ARENA_OUTLINE_COLOR = new Color(106, 13, 173, 190);
     // A bright gold fill for whichever cells the current round's own sneak peek is revealing (see
     // RunePartyPlugin#isRepeatAfterMePeekActive/getRepeatAfterMeTargetIndices) -- deliberately
     // eye-catching, since the whole point of the peek is to be easy to memorize at a glance.
@@ -168,6 +173,10 @@ public class TileOverlay extends Overlay
     // as a hit for the current round's own dash are unmistakable. See renderBrutusAttackCrashZone.
     private static final Color BRUTUS_CRASH_ZONE_FILL_COLOR = new Color(255, 140, 0, 170);
     private static final Color BRUTUS_CRASH_ZONE_OUTLINE_COLOR = new Color(255, 140, 0, 230);
+    // Mage Arena's own cast warning/danger outline -- see renderMageArenaCastWarning. Stays this
+    // same orange for the whole warning-then-danger window (alpha ramps up, the color itself never
+    // changes) -- the real Flames of Zamorak spotanim is what signals "now," not a color switch.
+    private static final Color MAGE_ARENA_WARNING_COLOR = new Color(255, 140, 0);
     // A small "club lighting" palette for Crab Rave's own randomly-flashing dance-floor cells (see
     // renderCrabRaveTile/computeCrabRaveLitColors) -- purely decorative, saturated neon colors
     // meant to read as disco lights rather than anything meaningful to click or avoid.
@@ -386,6 +395,7 @@ public class TileOverlay extends Overlay
             if ("HOT_POTATO_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- same "never change color, individual fill is just noise" reasoning as Sandwich Rush's own SANDWICH_RUSH_TILE
             if ("CEREMONY_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- same "never change color, individual fill is just noise" reasoning as Sandwich Rush's own SANDWICH_RUSH_TILE; this is a gather-and-idle floor, not a walked path
             if ("BALLOON_POP_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- same "never change color, individual fill is just noise" reasoning as Sandwich Rush's own SANDWICH_RUSH_TILE; this is a gather-and-click floor, not a walked path
+            if ("MAGE_ARENA_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- same "never change color, individual fill is just noise" reasoning as Sandwich Rush's own SANDWICH_RUSH_TILE; the per-cast danger highlight is renderMageArenaCastWarning, not a standing per-tile fill
             if ("REPEAT_AFTER_ME_TILE".equals(entry.tileType)) { renderRepeatAfterMeTile(g, entry, repeatAfterMeTiles); continue; } // fill only (peek/lit cells), no per-tile outline -- see renderRepeatAfterMeTile
             if ("CRAB_RAVE_TILE".equals(entry.tileType)) { renderCrabRaveTile(g, entry, crabRaveTiles, crabRaveLitColors); continue; } // fill only (randomly-flashing "club light" cells), no per-tile outline -- see renderCrabRaveTile
             if ("JADDY_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline per color instead, see renderColorGroupedOutlines below -- a Jad's own zone is a fixed-color area a huge model stands on top of, not a walked path, so a per-tile fill/outline would just be noise under it
@@ -420,6 +430,7 @@ public class TileOverlay extends Overlay
         if (plugin.isCrabRaveActive()) renderArenaOutline(g, entries, "CRAB_RAVE_TILE", CRAB_RAVE_ARENA_OUTLINE_COLOR);
         if (plugin.isRuneMatchActive()) renderArenaOutline(g, entries, "RUNE_MATCH_TILE", RUNE_MATCH_ARENA_OUTLINE_COLOR);
         if (plugin.isBalloonPopActive()) renderArenaOutline(g, entries, "BALLOON_POP_TILE", BALLOON_POP_ARENA_OUTLINE_COLOR);
+        if (plugin.isMageArenaActive()) renderArenaOutline(g, entries, "MAGE_ARENA_TILE", MAGE_ARENA_ARENA_OUTLINE_COLOR);
         // Gated on isCeremonyIntroRevealed() (not just phase/tile-presence like every other arena
         // outline above) -- the real board swap can land while the final mini-game's own rewards/
         // round-complete recap is still playing (see CeremonyPresentation's own doc), so without
@@ -431,6 +442,7 @@ public class TileOverlay extends Overlay
         if (plugin.isJaddyActive()) renderColorGroupedOutlines(g, entries, "JADDY_TILE");
         if (plugin.isBrutusAttackActive()) renderColorGroupedOutlines(g, entries, "BRUTUS_ATTACK_TILE");
         renderBrutusAttackCrashZone(g);
+        renderMageArenaCastWarning(g);
 
         // goldenGnomeModel/coinTrapModel are deliberately NOT gated below -- unlike the other three,
         // their own update() isn't a pure function of `entries` at all: each has its own wall-clock
@@ -601,6 +613,43 @@ public class TileOverlay extends Overlay
             g.setStroke(SOLID_STROKE);
             g.draw(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
         }
+    }
+
+    /** Highlights the current active Mage Arena cast's own target tile -- an orange outline (no
+     * fill) that ramps up in opacity from the moment the cast is broadcast
+     * (plugin.getMageArenaActiveCastWarningAt()) to the moment it detonates (...DetonateAt()), then
+     * stays at full opacity through the actual danger window up to ...ResolvedAt() -- gone entirely
+     * once that passes. Deliberately stays orange throughout rather than switching to red at
+     * detonation: the real Flames of Zamorak spotanim (see MageArenaPresentation#apply, fired at the
+     * same moment) is what makes "this is happening right now" obvious, so the ground marker itself
+     * doesn't need its own color change on top of that. Outline-only, no fill, so it doesn't fight
+     * the detonation's own spotanim for visual attention. Same per-point WorldPoint-driven lookup
+     * renderBrutusAttackCrashZone's own doc describes, since this is driven from a single
+     * plugin-supplied point, not anything in the reducer's own tile snapshot. */
+    private void renderMageArenaCastWarning(Graphics2D g)
+    {
+        if (!plugin.isMageArenaActive()) return;
+        WorldPoint wp = plugin.getMageArenaActiveCastPoint();
+        if (wp == null) return;
+
+        long now = System.currentTimeMillis();
+        long warningAt = plugin.getMageArenaActiveCastWarningAt();
+        long detonateAt = plugin.getMageArenaActiveCastDetonateAt();
+        long resolvedAt = plugin.getMageArenaActiveCastResolvedAt();
+        if (now >= resolvedAt) return;
+
+        LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), wp);
+        if (lp == null) return;
+        Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+        if (poly == null) return;
+
+        float progress = now < detonateAt && detonateAt > warningAt
+            ? (float) (now - warningAt) / (float) (detonateAt - warningAt) : 1f;
+        progress = Math.max(0f, Math.min(1f, progress));
+        int alpha = Math.round(90 + progress * (255 - 90));
+        g.setColor(new Color(MAGE_ARENA_WARNING_COLOR.getRed(), MAGE_ARENA_WARNING_COLOR.getGreen(), MAGE_ARENA_WARNING_COLOR.getBlue(), alpha));
+        g.setStroke(SOLID_STROKE);
+        g.draw(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
     }
 
     /** Shared geometry behind renderArenaOutline/renderColorGroupedOutlines: one merged

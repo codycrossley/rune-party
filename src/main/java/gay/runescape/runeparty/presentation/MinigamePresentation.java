@@ -18,6 +18,7 @@ import gay.runescape.runeparty.minigames.CrabRavePresentation;
 import gay.runescape.runeparty.minigames.DanceDanceRuneScapePresentation;
 import gay.runescape.runeparty.minigames.FishingContestPresentation;
 import gay.runescape.runeparty.minigames.HotPotatoPresentation;
+import gay.runescape.runeparty.minigames.MageArenaPresentation;
 import gay.runescape.runeparty.minigames.MinigamePresentationFeature;
 import gay.runescape.runeparty.minigames.RainbowRushPresentation;
 import gay.runescape.runeparty.minigames.RepeatAfterMePresentation;
@@ -142,6 +143,7 @@ public final class MinigamePresentation
     private final ArenaPresentation arena;
     private final RuneMatchPresentation runeMatch;
     private final BalloonPopPresentation balloonPop;
+    private final MageArenaPresentation mageArena;
     // Every feature above, keyed by its own RunePartyPlugin.*_KEY, for generic dispatch (apply's
     // default branch, onStarted/onRoundBegin/onEnded/showsFinalScore/reset).
     private final Map<String, MinigamePresentationFeature> features = new LinkedHashMap<>();
@@ -165,6 +167,7 @@ public final class MinigamePresentation
         this.arena = new ArenaPresentation(plugin);
         this.runeMatch = new RuneMatchPresentation(plugin);
         this.balloonPop = new BalloonPopPresentation(plugin);
+        this.mageArena = new MageArenaPresentation(plugin);
 
         features.put(RunePartyPlugin.COIN_RUSH_KEY, coinRush);
         features.put(RunePartyPlugin.SANDWICH_RUSH_KEY, sandwichRush);
@@ -182,6 +185,7 @@ public final class MinigamePresentation
         features.put(RunePartyPlugin.ARENA_KEY, arena);
         features.put(RunePartyPlugin.RUNE_MATCH_KEY, runeMatch);
         features.put(RunePartyPlugin.BALLOON_POP_KEY, balloonPop);
+        features.put(RunePartyPlugin.MAGE_ARENA_KEY, mageArena);
     }
 
     public void apply(ApiClient.EventOut e, boolean catchingUp)
@@ -552,6 +556,7 @@ public final class MinigamePresentation
     public CrabRavePresentation crabRave() { return crabRave; }
     public BrutusAttackPresentation brutusAttack() { return brutusAttack; }
     public ArenaPresentation arena() { return arena; }
+    public MageArenaPresentation mageArena() { return mageArena; }
     public RuneMatchPresentation runeMatch() { return runeMatch; }
     public BalloonPopPresentation balloonPop() { return balloonPop; }
 }

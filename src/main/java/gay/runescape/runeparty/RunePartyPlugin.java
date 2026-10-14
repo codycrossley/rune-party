@@ -483,6 +483,28 @@ public class RunePartyPlugin extends Plugin
      * ARRIVAL_GATHER_KEYS below. */
     public static final String BALLOON_POP_KEY = "balloon-pop";
 
+    /** Client-side key for the Mage Arena mini-game -- must match the server's own registration
+     * (minigames/mage_arena.py). One random seated PLAYER becomes the Mage -- picked and announced
+     * immediately when the round starts, same timing Brutus Attack's own PLAYER_TRANSFORMED role
+     * pick uses, so PlayerOverlay's own team-color split (TEAM_A_COLOR for the Mage, TEAM_B_COLOR
+     * for every dodger) reads correctly from the very start rather than only once arrival closes --
+     * and repeatedly casts fire spells at arena tiles (see MageArenaPresentation); everyone else
+     * dodges. Arrival-gated like Arena/Hot Potato/Rune Match/etc -- see ARRIVAL_GATHER_KEYS below --
+     * but unlike Brutus Attack, there's no separate "Mage's own zone" a client needs to know about
+     * before deciding where to walk, so the arrival gate itself doesn't care about role at all: every
+     * seated player, Mage included, just needs to reach the one shared arena. The Mage/dodger split
+     * currently only recolors player outlines/tokens -- a requested follow-up, not yet built, is some
+     * further visual callout around the Mage specifically (a flame ring or similar) on top of that
+     * plain color split. */
+    public static final String MAGE_ARENA_KEY = "mage-arena";
+
+    /** Spotanim played on an active cast's own target tile the instant its warning countdown
+     * expires (see MageArenaPresentation#apply, the only trigger site) -- the real Flames of Zamorak
+     * graphic, not a generic placeholder, played via Actor#createSpotAnim's own world-point variant
+     * (see triggerSpotAnimAtWorldPoint) so it lands exactly where the Mage targeted regardless of
+     * who's actually standing there. */
+    public static final int MAGE_ARENA_SPELL_SPOTANIM_ID = SpotanimID.ZAMORAK_FLAME;
+
     /** Backup ceiling on a Rune Match round if this client hasn't personally finished by then --
      * not a normal win condition, same "failsafe, not the real end condition" shape
      * RAINBOW_RUSH_MAX_DURATION_MS's own doc already gives. Must stay in lockstep with the
@@ -607,7 +629,7 @@ public class RunePartyPlugin extends Plugin
      * fit for this same "fire once, when the round begins" flash without its own separate handling
      * -- left out of scope here rather than half-wired. */
     public static final Set<String> ARRIVAL_GATHER_KEYS = Set.of(
-        ARENA_KEY, TURF_WARS_KEY, SANDWICH_RUSH_KEY, JADDY_KEY, HOT_POTATO_KEY, DANCE_DANCE_RUNESCAPE_KEY, REPEAT_AFTER_ME_KEY, RUNE_MATCH_KEY, BALLOON_POP_KEY);
+        ARENA_KEY, TURF_WARS_KEY, SANDWICH_RUSH_KEY, JADDY_KEY, HOT_POTATO_KEY, DANCE_DANCE_RUNESCAPE_KEY, REPEAT_AFTER_ME_KEY, RUNE_MATCH_KEY, BALLOON_POP_KEY, MAGE_ARENA_KEY);
 
     /** Mini-games whose own round doesn't start on the generic "3...2...1...BEGIN!" countdown --
      * AnnouncementOverlay's own render loop routes each of these to renderArrivalGatherMessage
@@ -638,7 +660,7 @@ public class RunePartyPlugin extends Plugin
      * for one would be dead configuration with nothing to ever read it. */
     public static final Set<String> BOARD_SWAPPING_MINIGAME_KEYS = Set.of(
         ARENA_KEY, TURF_WARS_KEY, SANDWICH_RUSH_KEY, JADDY_KEY, HOT_POTATO_KEY, DANCE_DANCE_RUNESCAPE_KEY,
-        REPEAT_AFTER_ME_KEY, CRAB_RAVE_KEY, BRUTUS_ATTACK_KEY, FISHING_CONTEST_KEY, RUNE_MATCH_KEY);
+        REPEAT_AFTER_ME_KEY, CRAB_RAVE_KEY, BRUTUS_ATTACK_KEY, FISHING_CONTEST_KEY, RUNE_MATCH_KEY, MAGE_ARENA_KEY);
 
     /** Matches the server's own ceremony.py CEREMONY_KEY exactly -- used only for the
      * minigameSpawnPoints/arena_offset override lookups the Golden Gnome Awards ceremony shares
@@ -2222,6 +2244,37 @@ public class RunePartyPlugin extends Plugin
             .onClick(me -> registerClickClickClickTile(point));
     }
 
+    /** Same "Walk here" -> custom RUNELITE entry idiom as addItemPlacementMenuEntries, offered only
+     * on a genuine MAGE_ARENA_TILE and only to the currently-assigned Mage (see onMenuEntryAdded's
+     * own gating) -- the server would 409 on anything else anyway, this just keeps the menu from
+     * offering a doomed option. */
+    private void addMageArenaCastMenuEntry()
+    {
+        Tile tile = client.getTopLevelWorldView().getSelectedSceneTile();
+        if (tile == null) return;
+        WorldPoint point = tile.getWorldLocation();
+        if (point == null) return;
+        if (!findMageArenaTiles().contains(point)) return;
+
+        client.createMenuEntry(-1)
+            .setOption("<col=00FF00>Cast Spell</col>")
+            .setTarget("")
+            .setType(MenuAction.RUNELITE)
+            .onClick(me -> castMageArenaSpellAt(point));
+    }
+
+    /** Fires the local Mage's own cast at {@code point} -- called from the synthetic "Cast Spell"
+     * menu entry (see addMageArenaCastMenuEntry). Re-checks isLocalPlayerMageArenaMage() here on top
+     * of that method's own gate, since the round could have ended (or the Mage could somehow have
+     * changed) in the moment between the menu opening and this entry actually being clicked. */
+    private void castMageArenaSpellAt(WorldPoint point)
+    {
+        if (!isMageArenaActive() || !isLocalPlayerMageArenaMage()) return;
+        String self = localRsn();
+        if (self == null) return;
+        minigamePresentation.mageArena().confirmCast(self, point);
+    }
+
     /** Records one Click, Click, Click tile click -- called from the synthetic "Click!" menu entry
      * (see addClickClickClickMenuEntry). Re-checks isClickClickClickActive()/
      * clickClickClickSubmitted here on top of that method's own gate, since the round could have
@@ -2645,6 +2698,15 @@ public class RunePartyPlugin extends Plugin
         return findTilesByType("ARENA_TILE");
     }
 
+    /** Every currently-marked Mage Arena floor tile -- see MageArenaPresentation#onTick, which
+     * self-checks the local player's own position against this set to fire its own one-shot
+     * confirm-mage-arena-arrival report, and the Mage's own cast-click handling, which checks a
+     * clicked point against this same set before ever submitting a cast. */
+    public List<WorldPoint> findMageArenaTiles()
+    {
+        return findTilesByType("MAGE_ARENA_TILE");
+    }
+
     /** Every currently-marked Sandwich Rush arena tile -- see SandwichRushPresentation#checkCollection,
      * which self-checks the local player's own position against this set to fire its own one-shot
      * confirm-sandwich-rush-arrival report. */
@@ -2877,6 +2939,16 @@ public class RunePartyPlugin extends Plugin
             minigamePresentation.arena().onTick(selfPlayer);
         }
 
+        // Also independent of the turn engine below -- Mage Arena's own one-shot
+        // confirm-mage-arena-arrival report and its reactive confirm-mage-arena-elimination
+        // self-check against the current active cast both live inside this one call (see
+        // MageArenaPresentation#onTick); the Mage's own cast is a direct menu-click action, not
+        // driven from here at all.
+        if (isMageArenaActive())
+        {
+            minigamePresentation.mageArena().onTick(selfPlayer);
+        }
+
         // Also independent of the turn engine below -- Rune Match's own one-shot
         // confirm-rune-match-arrival report, lazy board-building once the server's own seed lands,
         // and unmatched-pair reveal timer all live inside this one call (see
@@ -3021,6 +3093,10 @@ public class RunePartyPlugin extends Plugin
         if (phase == GamePhase.ACTIVE && isClickClickClickActive() && isMinigamePlayable())
         {
             addClickClickClickMenuEntry();
+        }
+        if (phase == GamePhase.ACTIVE && isMageArenaActive() && isMinigamePlayable() && isLocalPlayerMageArenaMage())
+        {
+            addMageArenaCastMenuEntry();
         }
     }
 
@@ -4376,6 +4452,9 @@ public class RunePartyPlugin extends Plugin
             case Events.BRUTUS_ARRIVAL_PENDING:
             case Events.BRUTUS_DASH_MISSED:
             case Events.BRUTUS_DASH_REPORTED:
+            case Events.MAGE_ARENA_ROUND_STARTED:
+            case Events.MAGE_ARENA_SPELL_CAST:
+            case Events.MAGE_ARENA_PLAYER_ELIMINATED:
             {
                 if (Events.MINIGAME_STARTED.equals(type))
                 {
@@ -4815,6 +4894,7 @@ public class RunePartyPlugin extends Plugin
 
     public boolean isBrutusAttackActive() { return minigamePresentation.isKeyActive(BRUTUS_ATTACK_KEY); }
     public boolean isArenaActive() { return minigamePresentation.isKeyActive(ARENA_KEY); }
+    public boolean isMageArenaActive() { return minigamePresentation.isKeyActive(MAGE_ARENA_KEY); }
     public boolean isRuneMatchActive() { return minigamePresentation.isKeyActive(RUNE_MATCH_KEY); }
     /** This round's own still-hidden Rune Match card tiles -- see TileOverlay's own per-tile
      * rendering, the only consumer. */
@@ -4891,6 +4971,36 @@ public class RunePartyPlugin extends Plugin
         String brutusRsn = getBrutusAttackBrutusRsn();
         String self = getLocalRsn();
         return brutusRsn != null && self != null && brutusRsn.equalsIgnoreCase(self);
+    }
+
+    /** The rsn currently assigned as the Mage this round -- null before MAGE_ARENA_ROUND_STARTED
+     * lands (which only happens once the arrival gate has already closed, see MAGE_ARENA_KEY's own
+     * doc). */
+    public String getMageArenaMageRsn() { return minigamePresentation.mageArena().getMageRsn(); }
+    /** When the round's own clock runs out -- 0 if no round is active yet. See AnnouncementOverlay's
+     * own Mage Arena round-timer rendering, the only reader. */
+    public long getMageArenaRoundEndsAt() { return minigamePresentation.mageArena().getRoundEndsAt(); }
+    /** Lowercase rsns eliminated so far this round -- see PlayerOverlay's own reuse of Hot
+     * Potato/Brutus Attack's own skull indicator, the only reader. */
+    public Set<String> getMageArenaEliminatedRsns() { return minigamePresentation.mageArena().getEliminatedRsns(); }
+    /** The most recently broadcast cast's own target tile -- null until the round's first cast
+     * lands. See TileOverlay#renderMageArenaCastWarning, the only reader. */
+    public WorldPoint getMageArenaActiveCastPoint() { return minigamePresentation.mageArena().getActiveCastPoint(); }
+    public long getMageArenaActiveCastWarningAt() { return minigamePresentation.mageArena().getActiveCastWarningAt(); }
+    public long getMageArenaActiveCastDetonateAt() { return minigamePresentation.mageArena().getActiveCastDetonateAt(); }
+    public long getMageArenaActiveCastResolvedAt() { return minigamePresentation.mageArena().getActiveCastResolvedAt(); }
+    /** When the current "&lt;rsn&gt; was eliminated!" flash should disappear -- 0 if none is armed.
+     * Drives AnnouncementOverlay's own renderMageArenaElimination. */
+    public long getMageArenaEliminationBannerUntil() { return minigamePresentation.mageArena().getEliminationBannerUntil(); }
+    public String getMageArenaEliminationBannerRsn() { return minigamePresentation.mageArena().getEliminationBannerRsn(); }
+    /** Whether the local player is the one currently assigned as the Mage this round -- gates the
+     * "Cast Spell" menu entry (see addMageArenaCastMenuEntry) and AnnouncementOverlay's own
+     * role-aware gather/round messaging. */
+    public boolean isLocalPlayerMageArenaMage()
+    {
+        String mageRsn = getMageArenaMageRsn();
+        String self = getLocalRsn();
+        return mageRsn != null && self != null && mageRsn.equalsIgnoreCase(self);
     }
 
     /** Whether the local player has personally stood on the course tile at {@code pathIndex} yet

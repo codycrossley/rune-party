@@ -352,6 +352,7 @@ public class AnnouncementOverlay extends Overlay
         renderCrabRaveCountdown(g);
         renderBrutusAttackDashCountdown(g);
         renderBrutusAttackDashResult(g);
+        renderMageArenaElimination(g);
         renderMinigameOverBanner(g);
         renderMinigameScoreBanner(g);
         renderMinigameRewardsBanner(g);
@@ -1786,6 +1787,27 @@ public class AnnouncementOverlay extends Overlay
 
         String text = plugin.isBrutusAttackDashResultHit() ? "HIT!" : "MISS!";
         Node message = Text.rainbow(text, RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
+        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+    }
+
+    /** Mage Arena's own "&lt;rsn&gt; was eliminated!" flash -- fires once per elimination, plain
+     * text rather than Brutus Attack's own rainbow "HIT!"/"MISS!" treatment, since a single round
+     * can have several eliminations in quick succession (one per dodger caught by any of the Mage's
+     * many casts) rather than at most one per round. */
+    private void renderMageArenaElimination(Graphics2D g)
+    {
+        if (!plugin.isMageArenaActive()) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.getMageArenaEliminationBannerUntil(), DEFAULT_FADE_MS);
+        if (alpha == null) return;
+        String rsn = plugin.getMageArenaEliminationBannerRsn();
+        if (rsn == null) return;
+
+        int centerX = drawableWidth() / 2;
+        int y = drawableHeight() / 3;
+
+        boolean isLocal = isLocal(rsn);
+        String text = (isLocal ? "You were" : rsn + " was") + " eliminated!";
+        Node message = Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE)).color(DICE_ROLL_BONUS_NEGATIVE_COLOR);
         Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
     }
 

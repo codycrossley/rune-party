@@ -171,6 +171,17 @@ public class PlayerOverlay extends Overlay
                 // revealed which mini-game was picked.
                 c = rsn.equalsIgnoreCase(plugin.getBrutusAttackBrutusRsn()) ? RunePartyPlugin.TEAM_A_COLOR : RunePartyPlugin.TEAM_B_COLOR;
             }
+            else if (plugin.isMageArenaActive() && plugin.isMinigamePlayable())
+            {
+                // Same 1vX fixed-pairing idea as Brutus Attack just above: the Mage in
+                // TEAM_A_COLOR (magenta), every dodger in TEAM_B_COLOR (cyan), for the whole round
+                // regardless of elimination -- an eliminated dodger's own outline stays cyan, they
+                // were still on that team. No separate marker (bullseye-equivalent, flame ring,
+                // etc.) yet -- just the team-color outline/token for now, see MAGE_ARENA_KEY's own
+                // doc for that follow-up. Also requires isMinigamePlayable(), same "don't spoil the
+                // wheel's own reveal" reasoning the Brutus Attack branch's own doc gives.
+                c = rsn.equalsIgnoreCase(plugin.getMageArenaMageRsn()) ? RunePartyPlugin.TEAM_A_COLOR : RunePartyPlugin.TEAM_B_COLOR;
+            }
             modelOutlineRenderer.drawOutline(p, OUTLINE_WIDTH,
                 new Color(c.getRed(), c.getGreen(), c.getBlue(), OUTLINE_ALPHA), OUTLINE_FEATHER);
 

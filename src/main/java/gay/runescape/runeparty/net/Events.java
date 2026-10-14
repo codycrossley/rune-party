@@ -174,6 +174,30 @@ public final class Events
      * here, the server's own arrival gate/duel-resolution read is what actually reacts to it (see
      * minigames/whos_your_jaddy.py). Same treatment ARENA_ARRIVAL_CONFIRMED already gets. */
     public static final String JADDY_ZONE_CHANGED = "JADDY_ZONE_CHANGED";
+    /** Server-only echo of this client's (or another seated player's) own one-shot
+     * confirm-mage-arena-arrival call -- never dispatched on here, the server's own arrival-and-
+     * assign-the-Mage gate is what actually reacts to it (see minigames/mage_arena.py). Same
+     * treatment ARENA_ARRIVAL_CONFIRMED already gets. */
+    public static final String MAGE_ARENA_ARRIVAL_CONFIRMED = "MAGE_ARENA_ARRIVAL_CONFIRMED";
+    /** A dodger's own client independently determined its own real position matched an active
+     * spell's own target tile during that cast's local danger window -- see
+     * MageArenaPresentation#onTick, the check that fires the confirming confirm-mage-arena-
+     * elimination call in the first place. Dispatched on directly for a one-shot cosmetic reveal
+     * (chat message) and folded into eliminatedRsns, the set every other client reads to know who's
+     * still actually a threat to the Mage. */
+    public static final String MAGE_ARENA_PLAYER_ELIMINATED = "MAGE_ARENA_PLAYER_ELIMINATED";
+    /** Fires once, the instant Mage Arena's own arrival gate closes -- names the randomly-assigned
+     * Mage for this round. Gives the client a fresh moment to start its own local round-duration
+     * countdown from, same role BRUTUS_ROUND_STARTED already plays for Brutus Attack's own dash
+     * countdown -- no timestamp is carried, since the round's own real end is decided server-side
+     * regardless of what any client's local countdown shows. */
+    public static final String MAGE_ARENA_ROUND_STARTED = "MAGE_ARENA_ROUND_STARTED";
+    /** The current Mage's own one-shot confirm-mage-arena-cast report, broadcast to every seated
+     * client same as any other event -- see MageArenaPresentation#apply/onTick, which independently
+     * starts a local warning-then-danger countdown from the instant this is received and self-
+     * checks the local player's own position against it, same "client starts its own clock on
+     * receipt" shape BRUTUS_DASH_REPORTED already establishes for Brutus Attack's own dash window. */
+    public static final String MAGE_ARENA_SPELL_CAST = "MAGE_ARENA_SPELL_CAST";
     /** Server-only bookkeeping fired alongside the TILES_UNMARKED/TILES_MARKED pair a board swap
      * actually renders as, so the server can restore the real course later. Never dispatched on by
      * any handler here. */

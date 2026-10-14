@@ -14,8 +14,8 @@ import java.util.concurrent.TimeUnit;
 
 public class ApiClient
 {
-    // static final String BASE_URL = "http://localhost:8005/runeparty";
-    static final String BASE_URL = "https://runeparty.shrunk.studio/runeparty";
+    static final String BASE_URL = "http://localhost:8005/runeparty";
+    // static final String BASE_URL = "https://runeparty.shrunk.studio/runeparty";
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
@@ -272,6 +272,43 @@ public class ApiClient
     public void confirmBrutusOutOfBounds(String gameId, String playerRsn, String playerToken) throws IOException
     {
         postPlayerAction("/v1/games/" + gameId + "/confirm-brutus-out-of-bounds", playerRsn, playerToken, "Confirm Brutus out-of-bounds");
+    }
+
+    /** One-shot, position-free "I'm on the arena" report for Mage Arena -- fired once, the instant
+     * the local client detects standing on any MAGE_ARENA_TILE this round, rather than a continuous
+     * per-tick heartbeat. See MageArenaPresentation#onTick, the only caller. */
+    public void confirmMageArenaArrival(String gameId, String playerRsn, String playerToken) throws IOException
+    {
+        postPlayerAction("/v1/games/" + gameId + "/confirm-mage-arena-arrival", playerRsn, playerToken, "Confirm Mage Arena arrival");
+    }
+
+    /** One-shot "I just cast a spell" report for Mage Arena -- fired only by whichever client is
+     * currently the Mage, carrying the real target tile. Broadcast back out to every other seated
+     * client, which each independently start their own local warning-then-danger countdown from the
+     * instant it's received and self-check their own position against it -- see
+     * MageArenaPresentation#apply (the check on the receiving end) and confirmMageArenaElimination
+     * below (what a hit actually reports). */
+    public void confirmMageArenaCast(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("x", x);
+        body.addProperty("y", y);
+        body.addProperty("plane", plane);
+
+        try (Response resp = post("/v1/games/" + gameId + "/confirm-mage-arena-cast", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Mage Arena cast failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** A dodger's own one-shot self-report that an active spell's danger window just caught it --
+     * fired only when this client's own local check (MageArenaPresentation#onTick, reacting to
+     * confirmMageArenaCast's own broadcasted report) found a match against its own real position. */
+    public void confirmMageArenaElimination(String gameId, String playerRsn, String playerToken) throws IOException
+    {
+        postPlayerAction("/v1/games/" + gameId + "/confirm-mage-arena-elimination", playerRsn, playerToken, "Confirm Mage Arena elimination");
     }
 
     /** Submits the local player's final Fishing Contest catch tally. Fired once per round, when

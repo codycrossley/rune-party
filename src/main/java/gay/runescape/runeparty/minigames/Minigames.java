@@ -32,6 +32,7 @@ public final class Minigames
         REGISTRY.register(new BrutusAttackMinigame());
         REGISTRY.register(new RuneMatchMinigame());
         REGISTRY.register(new BalloonPopMinigame());
+        REGISTRY.register(new MageArenaMinigame());
     }
 
     public static Minigame get(String key)
