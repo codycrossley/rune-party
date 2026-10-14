@@ -35,6 +35,16 @@ public final class Json
         catch (Exception ignored) { return null; }
     }
 
+    /** Same shape as {@link #safeInt}, but a plain primitive with a {@code false} default rather
+     * than a boxed null -- every current caller just wants "was this flag set," never "was this
+     * field present at all," so there's no three-state case worth a Boolean return here the way
+     * safeInt's own nullable int sometimes matters for. */
+    public static boolean safeBool(JsonObject o, String key)
+    {
+        try { return o != null && o.has(key) && !o.get(key).isJsonNull() && o.get(key).getAsBoolean(); }
+        catch (Exception ignored) { return false; }
+    }
+
     /** Same as {@link #safeStr}, but logs a warning if {@code key} is missing/null -- use this at
      * a read the existing code already treats as required (a null-guard right after the read). */
     public static String requiredStr(JsonObject o, String eventType, String key)
