@@ -615,17 +615,20 @@ public class TileOverlay extends Overlay
         }
     }
 
-    /** Highlights the current active Mage Arena cast's own target tile -- an orange outline (no
+    /** Highlights every tile the current active Mage Arena cast actually threatens -- its own center
+     * plus the four diagonal neighbors forming an "X" with it (see RunePartyPlugin#
+     * computeMageArenaCastTiles, shared with MageArenaPresentation's own elimination self-check so
+     * what's drawn and what's actually dangerous can never drift apart) -- each an orange outline (no
      * fill) that ramps up in opacity from the moment the cast is broadcast
      * (plugin.getMageArenaActiveCastWarningAt()) to the moment it detonates (...DetonateAt()), then
      * stays at full opacity through the actual danger window up to ...ResolvedAt() -- gone entirely
      * once that passes. Deliberately stays orange throughout rather than switching to red at
      * detonation: the real Flames of Zamorak spotanim (see MageArenaPresentation#apply, fired at the
-     * same moment) is what makes "this is happening right now" obvious, so the ground marker itself
-     * doesn't need its own color change on top of that. Outline-only, no fill, so it doesn't fight
-     * the detonation's own spotanim for visual attention. Same per-point WorldPoint-driven lookup
-     * renderBrutusAttackCrashZone's own doc describes, since this is driven from a single
-     * plugin-supplied point, not anything in the reducer's own tile snapshot. */
+     * same moment, on the center tile only) is what makes "this is happening right now" obvious, so
+     * the ground markers themselves don't need their own color change on top of that. Outline-only,
+     * no fill, so it doesn't fight the detonation's own spotanim for visual attention. Same per-point
+     * WorldPoint-driven lookup renderBrutusAttackCrashZone's own doc describes, since this is driven
+     * from a single plugin-supplied point, not anything in the reducer's own tile snapshot. */
     private void renderMageArenaCastWarning(Graphics2D g)
     {
         if (!plugin.isMageArenaActive()) return;
@@ -638,18 +641,21 @@ public class TileOverlay extends Overlay
         long resolvedAt = plugin.getMageArenaActiveCastResolvedAt();
         if (now >= resolvedAt) return;
 
-        LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), wp);
-        if (lp == null) return;
-        Polygon poly = Perspective.getCanvasTilePoly(client, lp);
-        if (poly == null) return;
-
         float progress = now < detonateAt && detonateAt > warningAt
             ? (float) (now - warningAt) / (float) (detonateAt - warningAt) : 1f;
         progress = Math.max(0f, Math.min(1f, progress));
         int alpha = Math.round(90 + progress * (255 - 90));
         g.setColor(new Color(MAGE_ARENA_WARNING_COLOR.getRed(), MAGE_ARENA_WARNING_COLOR.getGreen(), MAGE_ARENA_WARNING_COLOR.getBlue(), alpha));
         g.setStroke(SOLID_STROKE);
-        g.draw(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
+
+        for (WorldPoint threatened : plugin.computeMageArenaCastTiles(wp))
+        {
+            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), threatened);
+            if (lp == null) continue;
+            Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+            if (poly == null) continue;
+            g.draw(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
+        }
     }
 
     /** Shared geometry behind renderArenaOutline/renderColorGroupedOutlines: one merged

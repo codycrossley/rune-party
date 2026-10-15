@@ -353,6 +353,7 @@ public class AnnouncementOverlay extends Overlay
         renderBrutusAttackDashCountdown(g);
         renderBrutusAttackDashResult(g);
         renderMageArenaElimination(g);
+        renderArenaElimination(g);
         renderMinigameOverBanner(g);
         renderMinigameScoreBanner(g);
         renderMinigameRewardsBanner(g);
@@ -1180,11 +1181,12 @@ public class AnnouncementOverlay extends Overlay
     }
 
     /** Draws the Item Shop purchase follow-up -- "You/&lt;rsn&gt; purchased &lt;item&gt;!",
-     * "You/&lt;rsn&gt; can't afford &lt;item&gt;!", or "You/&lt;rsn&gt; can't afford any items!" --
-     * addressed to whoever the outcome belongs to, shown to every player same as
-     * renderGoldenGnomeOutcome's own doc describes for its own purchased/failed pair. No banner at
-     * all for a decline/timeout -- only a real purchase attempt (successful or not), or saying
-     * "Yes" to browsing with nothing actually affordable, is announced. */
+     * "You/&lt;rsn&gt; can't afford &lt;item&gt;!", "You/&lt;rsn&gt; don't have room for
+     * &lt;item&gt;!", or "You/&lt;rsn&gt; can't afford any items!" -- addressed to whoever the
+     * outcome belongs to, shown to every player same as renderGoldenGnomeOutcome's own doc
+     * describes for its own purchased/failed pair. No banner at all for a decline/timeout -- only a
+     * real purchase attempt (successful or not), or saying "Yes" to browsing with nothing actually
+     * affordable, is announced. */
     private void renderItemShopOutcome(Graphics2D g)
     {
         Float alpha = BannerAnim.fadeAlpha(plugin.getItemShopOutcomeBannerUntil(), ITEM_SHOP_OUTCOME_FADE_MS);
@@ -1209,6 +1211,13 @@ public class AnnouncementOverlay extends Overlay
             text = itemDisplayName == null ? null
                 : isLocal ? "You can't afford " + itemDisplayName + "!"
                 : rsn != null ? rsn + " can't afford " + itemDisplayName + "!" : null;
+            color = DICE_ROLL_BONUS_NEGATIVE_COLOR;
+        }
+        else if ("no_room".equals(outcome))
+        {
+            text = itemDisplayName == null ? null
+                : isLocal ? "You don't have room for " + itemDisplayName + "!"
+                : rsn != null ? rsn + " doesn't have room for " + itemDisplayName + "!" : null;
             color = DICE_ROLL_BONUS_NEGATIVE_COLOR;
         }
         else if ("no_affordable_items".equals(outcome))
@@ -1790,25 +1799,65 @@ public class AnnouncementOverlay extends Overlay
         Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
     }
 
-    /** Mage Arena's own "&lt;rsn&gt; was eliminated!" flash -- fires once per elimination, plain
-     * text rather than Brutus Attack's own rainbow "HIT!"/"MISS!" treatment, since a single round
-     * can have several eliminations in quick succession (one per dodger caught by any of the Mage's
-     * many casts) rather than at most one per round. */
+    // Vertical gap between the local "You were eliminated!" line and the "<rsn> was eliminated!"
+    // line for everyone else's eliminations, when both happen to be showing at once -- see
+    // renderEliminationLines, shared by both Flame Field and Mage Arena below.
+    private static final int ELIMINATION_LINE_STRIDE_PX = 40;
+
+    /** Mage Arena's own elimination flash -- fires once per elimination, plain text rather than
+     * Brutus Attack's own rainbow "HIT!"/"MISS!" treatment, since a single round can have several
+     * eliminations in quick succession (one per dodger caught by any of the Mage's many casts,
+     * possibly even from the same cast now that it's an "X"-shaped blast) rather than at most one per
+     * round. Local and others' eliminations are tracked in two entirely independent slots on
+     * MageArenaPresentation (see its own armEliminationBanner doc) specifically so a bystander's own
+     * elimination can never stomp the one message that matters most to the player it's actually
+     * about -- renderEliminationLines stacks both if they happen to be showing at the same time
+     * rather than ever picking just one to display. */
     private void renderMageArenaElimination(Graphics2D g)
     {
         if (!plugin.isMageArenaActive()) return;
-        Float alpha = BannerAnim.fadeAlpha(plugin.getMageArenaEliminationBannerUntil(), DEFAULT_FADE_MS);
-        if (alpha == null) return;
-        String rsn = plugin.getMageArenaEliminationBannerRsn();
-        if (rsn == null) return;
+        renderEliminationLines(g, plugin.getMageArenaLocalEliminationBannerUntil(),
+            plugin.getMageArenaOthersEliminationBannerUntil(), plugin.getMageArenaOthersEliminationBannerRsn());
+    }
 
+    /** Flame Field's own elimination flash -- same shape/pacing/local-vs-others split as
+     * renderMageArenaElimination just above (per playtest feedback: the existing chat message alone
+     * was easy to miss mid-round, especially for the eliminated player themselves, and a second
+     * player's own elimination landing moments later must never silently steal that message). */
+    private void renderArenaElimination(Graphics2D g)
+    {
+        if (!plugin.isArenaActive()) return;
+        renderEliminationLines(g, plugin.getArenaLocalEliminationBannerUntil(),
+            plugin.getArenaOthersEliminationBannerUntil(), plugin.getArenaOthersEliminationBannerRsn());
+    }
+
+    /** Shared by renderMageArenaElimination/renderArenaElimination: draws the local viewer's own
+     * "You were eliminated!" line (if {@code localUntil} hasn't faded) and the "&lt;rsn&gt; was
+     * eliminated!" line for someone else's elimination (if {@code othersUntil} hasn't faded and
+     * {@code othersRsn} is non-null) -- both independently, since the two are armed from entirely
+     * separate state and can be showing at the same time. When both are up, the "others" line is
+     * pushed down by ELIMINATION_LINE_STRIDE_PX so neither ever overlaps the other; when only one
+     * is up, it gets the usual centered slot. */
+    private void renderEliminationLines(Graphics2D g, long localUntil, long othersUntil, String othersRsn)
+    {
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 3;
+        Font font = FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE);
 
-        boolean isLocal = isLocal(rsn);
-        String text = (isLocal ? "You were" : rsn + " was") + " eliminated!";
-        Node message = Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE)).color(DICE_ROLL_BONUS_NEGATIVE_COLOR);
-        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+        Float localAlpha = BannerAnim.fadeAlpha(localUntil, DEFAULT_FADE_MS);
+        if (localAlpha != null)
+        {
+            Node message = Text.of("You were eliminated!").font(font).color(DICE_ROLL_BONUS_NEGATIVE_COLOR);
+            Layout.renderCentered(g, message, centerX, y, safeTextWidth(), localAlpha);
+        }
+
+        Float othersAlpha = othersRsn != null ? BannerAnim.fadeAlpha(othersUntil, DEFAULT_FADE_MS) : null;
+        if (othersAlpha != null)
+        {
+            int othersY = localAlpha != null ? y + ELIMINATION_LINE_STRIDE_PX : y;
+            Node message = Text.of(othersRsn + " was eliminated!").font(font).color(DICE_ROLL_BONUS_NEGATIVE_COLOR);
+            Layout.renderCentered(g, message, centerX, othersY, safeTextWidth(), othersAlpha);
+        }
     }
 
     /** Draws the previous True or False round's reveal -- the correct answer, plus every player's
@@ -2211,8 +2260,8 @@ public class AnnouncementOverlay extends Overlay
         return Box.column(
                 Text.of("Thank you for playing <3").font(titleFont).color(WELCOME_TITLE_COLOR),
                 creditsSection(headerFont, nameFont, "Created by:", "Tree Twunk"),
-                creditsSection(headerFont, nameFont, "Developed by:", "Tree Twunk", "Zszima", "Cavatapi"),
-                creditsSection(headerFont, nameFont, "Special thanks to:", "SirShrekOSRS", "Mudscaper", "BeeingVee", "PaesChild"))
+                creditsSection(headerFont, nameFont, "Developed by:", "Tree Twunk", "Zszima", "Cavatapi", "SirShrekOSRS"),
+                creditsSection(headerFont, nameFont, "Special thanks to:", "Mudscaper", "BeeingVee", "PaesChild"))
             .gap(CEREMONY_CREDITS_SECTION_GAP);
     }
 

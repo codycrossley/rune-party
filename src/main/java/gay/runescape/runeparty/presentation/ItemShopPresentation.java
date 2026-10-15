@@ -90,8 +90,15 @@ public final class ItemShopPresentation
                     String itemKey = Json.requiredStr(e.payload, type, "itemKey");
                     Item item = Items.get(itemKey);
                     String itemDisplayName = item != null ? item.getDisplayName() : itemKey;
+                    // "cant_afford" (default, for an older event missing this field entirely) or
+                    // "no_room" -- see item_shop_purchase_failed's own doc for why "no_room" needs
+                    // its own banner text rather than reusing "can't afford", which would be
+                    // actively wrong for a player who has the coins but is already holding
+                    // ItemTile.ITEM_CAP items.
+                    String reason = Json.safeStr(e.payload, "reason");
+                    String outcomeKey = "no_room".equals(reason) ? "no_room" : "failed";
                     plugin.armBanner(outcome, RunePartyPlugin.ITEM_SHOP_OUTCOME_BANNER_DURATION_MS,
-                        () -> new OutcomePayload("failed", rsn, itemDisplayName, null), true);
+                        () -> new OutcomePayload(outcomeKey, rsn, itemDisplayName, null), true);
                 }
                 break;
             }
@@ -138,11 +145,12 @@ public final class ItemShopPresentation
     public Integer getOutcomePrice() { return outcome.payload != null ? outcome.payload.price : null; }
     public long getOutcomeBannerUntil() { return outcome.until; }
 
-    /** Payload for the "You/<rsn> purchased/can't afford <item>/can't afford any items!" outcome
-     * banner -- see the ITEM_SHOP_PURCHASED/ITEM_SHOP_PURCHASE_FAILED/ITEM_SHOP_NO_AFFORDABLE_ITEMS
-     * handlers above. outcome is "purchased", "failed", or "no_affordable_items"; price is only
-     * meaningful for "purchased"; itemDisplayName is null for "no_affordable_items" (there's no
-     * single item to name). */
+    /** Payload for the "You/<rsn> purchased/can't afford/don't have room for <item>/can't afford
+     * any items!" outcome banner -- see the
+     * ITEM_SHOP_PURCHASED/ITEM_SHOP_PURCHASE_FAILED/ITEM_SHOP_NO_AFFORDABLE_ITEMS handlers above.
+     * outcome is "purchased", "failed" (not enough coins), "no_room" (already holding
+     * ItemTile.ITEM_CAP items), or "no_affordable_items"; price is only meaningful for "purchased";
+     * itemDisplayName is null for "no_affordable_items" (there's no single item to name). */
     private static final class OutcomePayload
     {
         final String outcome;

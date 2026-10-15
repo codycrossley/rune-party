@@ -79,9 +79,9 @@ public class PlayerOverlay extends Overlay
     private static final int GOLDEN_GNOME_POPUP_CLEARANCE = 46;
     private static final int GOLDEN_GNOME_POPUP_MAX_RISE = 16;
 
-    // Hot Potato's own elimination marker -- a persistent skull hovering above an eliminated
-    // player's token for the rest of the round (see drawHotPotatoEliminatedIcon), not a fading
-    // popup like the coin/Golden Gnome ones above.
+    // Originally Hot Potato's own elimination marker, now shared by Flame Field/Mage Arena too -- a
+    // persistent skull hovering above an eliminated player's token for the rest of the round (see
+    // drawEliminatedSkullIcon), not a fading popup like the coin/Golden Gnome ones above.
     private static final int HOT_POTATO_SKULL_ICON_SIZE = 18;
     private static final int HOT_POTATO_SKULL_ICON_CLEARANCE = 12; // gap above the token's own top edge
 
@@ -220,7 +220,25 @@ public class PlayerOverlay extends Overlay
             if (phase == GamePhase.ACTIVE && plugin.isHotPotatoActive()
                 && plugin.getHotPotatoEliminatedRsns().contains(rsn.toLowerCase(Locale.ROOT)))
             {
-                drawHotPotatoEliminatedIcon(g, p);
+                drawEliminatedSkullIcon(g, p);
+            }
+
+            // Same persistent treatment for Flame Field -- per playtest feedback, this is deliberately
+            // NOT just a transient flash (see AnnouncementOverlay#renderArenaElimination): a skull
+            // that stays above an eliminated player's head for the rest of the round means missing
+            // the flash's own short window is never the only way to notice someone's out.
+            if (phase == GamePhase.ACTIVE && plugin.isArenaActive()
+                && plugin.getArenaEliminatedRsns().contains(rsn.toLowerCase(Locale.ROOT)))
+            {
+                drawEliminatedSkullIcon(g, p);
+            }
+
+            // Same again for Mage Arena -- a dodger caught in a cast's own "X" blast gets the same
+            // durable marker, not just the transient flash.
+            if (phase == GamePhase.ACTIVE && plugin.isMageArenaActive()
+                && plugin.getMageArenaEliminatedRsns().contains(rsn.toLowerCase(Locale.ROOT)))
+            {
+                drawEliminatedSkullIcon(g, p);
             }
 
             RunePartyPlugin.CoinPopup coinPopup = phase == GamePhase.ACTIVE ? plugin.getCoinPopup(rsn) : null;
@@ -389,11 +407,14 @@ public class PlayerOverlay extends Overlay
 
     /** Hovers hotPotatoSkullIcon just above an eliminated player's own (normal-size, no-longer-
      * flashing) token, for as long as they stay eliminated -- unlike every popup above, this has no
-     * fade/rise of its own, it's a plain persistent marker for the rest of the round. Anchored the
-     * same "TOKEN_RADIUS + TOKEN_HEAD_CLEARANCE" clearance drawCoinPopup's own yOffset uses, plus
+     * fade/rise of its own, it's a plain persistent marker for the rest of the round. Originally Hot
+     * Potato-only (hence the field's own name), now shared by Flame Field and Mage Arena's own
+     * eliminated-dodger markers too -- see render()'s own three gated call sites -- since all three
+     * want the identical "durable, can't-miss-it, never just a transient flash" treatment. Anchored
+     * the same "TOKEN_RADIUS + TOKEN_HEAD_CLEARANCE" clearance drawCoinPopup's own yOffset uses, plus
      * this icon's own small gap on top, then drawn upward from that point (image bottom at the
      * anchor) the same way text grows upward from its own baseline there. */
-    private void drawHotPotatoEliminatedIcon(Graphics2D g, Player p)
+    private void drawEliminatedSkullIcon(Graphics2D g, Player p)
     {
         if (hotPotatoSkullIcon == null) return;
 

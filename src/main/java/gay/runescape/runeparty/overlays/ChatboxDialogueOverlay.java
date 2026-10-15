@@ -4,6 +4,8 @@ import gay.runescape.runeparty.GamePhase;
 import gay.runescape.runeparty.RosterReducer;
 import gay.runescape.runeparty.RunePartyPlugin;
 
+import lombok.extern.slf4j.Slf4j;
+
 import net.runelite.api.Client;
 import net.runelite.api.Model;
 import net.runelite.api.gameval.InterfaceID;
@@ -66,6 +68,7 @@ import java.util.Objects;
  * the box open (getEncounterRsn/getRevealAt), and everything drawn below the name (drawBody) --
  * typically ending in a call to drawOptionRows (plain single-line rows), which publishes into the
  * optionBounds/optionCallbacks this class's own click handling reads. */
+@Slf4j
 public abstract class ChatboxDialogueOverlay extends Overlay
 {
     protected static final int CHATHEAD_SIZE = 130;
@@ -133,6 +136,22 @@ public abstract class ChatboxDialogueOverlay extends Overlay
     // the client thread.
     private volatile Runnable pendingClick;
 
+    // Diagnostic for a prod report (Item Shop, 2026-10): a player described clicking repeatedly on
+    // what looked like a real option row with nothing ever happening, and the server-side event log
+    // confirmed zero requests of any kind -- including "decline", which needs no server validation
+    // at all -- ever went out for that entire encounter. Static analysis couldn't pin the exact
+    // cause (ruled out: the Crab Rave mute button's own MouseManager listener, which structurally
+    // can't have bounds overlapping a dialogue since Crab Rave and a tile encounter can never be
+    // active at once; the carousel layout math itself looks sound). This counts consecutive clicks
+    // that land inside the dialogue's own outer box but don't match any drawn option row, and logs
+    // once a run of them crosses MISSED_CLICK_LOG_THRESHOLD -- a single off-row miss-click is
+    // completely normal and stays silent, but a sustained run matching this exact symptom gets a
+    // real log line with the click point/bounds/option rects to actually diagnose it next time
+    // instead of guessing. Reset on every genuinely new encounter and on any click that DOES match
+    // (see resetForNextEncounter/mousePressed).
+    private static final int MISSED_CLICK_LOG_THRESHOLD = 3;
+    private volatile int consecutiveMissedClicks = 0;
+
     // This NPC's own chathead portrait, rendered once and cached forever -- its model never
     // changes, unlike a custom composed appearance that can animate its own jaw mid-line (see
     // ChatheadRenderer's own doc for why the plugin this was adapted from can't just do this).
@@ -148,13 +167,28 @@ public abstract class ChatboxDialogueOverlay extends Overlay
 
             Rectangle[] rects = optionBounds;
             Runnable[] callbacks = optionCallbacks;
+            Runnable matched = null;
             for (int i = 0; i < rects.length; i++)
             {
                 if (rects[i] != null && rects[i].contains(event.getPoint()) && callbacks[i] != null)
                 {
-                    pendingClick = callbacks[i];
+                    matched = callbacks[i];
                     break;
                 }
+            }
+
+            if (matched != null)
+            {
+                consecutiveMissedClicks = 0;
+                pendingClick = matched;
+            }
+            else if (++consecutiveMissedClicks == MISSED_CLICK_LOG_THRESHOLD)
+            {
+                // See consecutiveMissedClicks' own doc -- this is the diagnostic that report needs.
+                log.warn("{}: {} consecutive clicks landed inside the dialogue box but matched no "
+                        + "option row -- point={}, bounds={}, optionBounds={}",
+                    getClass().getSimpleName(), consecutiveMissedClicks, event.getPoint(), bounds,
+                    java.util.Arrays.toString(rects));
             }
 
             // Consumed either way -- the whole box is a dead zone for the game's own click-to-walk
@@ -219,6 +253,7 @@ public abstract class ChatboxDialogueOverlay extends Overlay
         pendingClick = null;
         optionBounds = new Rectangle[0];
         optionCallbacks = new Runnable[0];
+        consecutiveMissedClicks = 0;
     }
 
     @Override

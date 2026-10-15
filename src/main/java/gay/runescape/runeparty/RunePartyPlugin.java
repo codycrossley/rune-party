@@ -59,6 +59,7 @@ import gay.runescape.runeparty.overlays.WiseOldManDialogueOverlay;
 import gay.runescape.runeparty.overlays.GnomeNpcOverlay;
 import gay.runescape.runeparty.overlays.WiseOldManNpcOverlay;
 import java.awt.Color;
+import java.awt.event.KeyEvent;
 import java.io.BufferedInputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -2271,10 +2272,40 @@ public class RunePartyPlugin extends Plugin
             .onClick(me -> castMageArenaSpellAt(point));
     }
 
+    /** Mage Arena's own Shift+Click-to-cast directly on another player -- unlike
+     * addMageArenaCastMenuEntry (which hooks "Walk here", only ever offered on open ground), OSRS
+     * never offers a "Walk here" entry while the cursor is over another player, only player-specific
+     * options like "Follow" -- so this hooks that instead, same "Follow" is always present" idiom
+     * addToGameMenuEntry/addItemTargetMenuEntry already rely on. Gated on Shift actually being held
+     * (client.isKeyPressed) so it never hijacks a dodger's own ordinary "Follow" as some plain click's
+     * new default action -- only an explicit Shift+Click instantly casts at whatever tile the hovered
+     * player currently stands on, the same quick-action convention live OSRS itself uses for
+     * shift-click spellcasting. Per playtest feedback: the ground-tile-only cast made it awkward to
+     * hit a moving dodger precisely, since clicking directly on their own model never offered a
+     * "Walk here" entry to hook at all. */
+    private void addMageArenaShiftCastMenuEntry(MenuEntryAdded event)
+    {
+        if (!client.isKeyPressed(KeyEvent.VK_SHIFT)) return;
+        if (!(event.getMenuEntry().getActor() instanceof Player)) return;
+
+        Player target = (Player) event.getMenuEntry().getActor();
+        if (target == null) return;
+        WorldPoint point = target.getWorldLocation();
+        if (point == null || !findMageArenaTiles().contains(point)) return;
+
+        client.createMenuEntry(-1)
+            .setOption("<col=00FF00>Cast Spell</col>")
+            .setTarget(event.getTarget())
+            .setType(MenuAction.RUNELITE_PLAYER)
+            .setIdentifier(event.getIdentifier())
+            .onClick(me -> castMageArenaSpellAt(point));
+    }
+
     /** Fires the local Mage's own cast at {@code point} -- called from the synthetic "Cast Spell"
-     * menu entry (see addMageArenaCastMenuEntry). Re-checks isLocalPlayerMageArenaMage() here on top
-     * of that method's own gate, since the round could have ended (or the Mage could somehow have
-     * changed) in the moment between the menu opening and this entry actually being clicked. */
+     * menu entry (see addMageArenaCastMenuEntry/addMageArenaShiftCastMenuEntry). Re-checks
+     * isLocalPlayerMageArenaMage() here on top of those methods' own gate, since the round could have
+     * ended (or the Mage could somehow have changed) in the moment between the menu opening and this
+     * entry actually being clicked. */
     private void castMageArenaSpellAt(WorldPoint point)
     {
         if (!isMageArenaActive() || !isLocalPlayerMageArenaMage()) return;
@@ -2715,6 +2746,31 @@ public class RunePartyPlugin extends Plugin
         return findTilesByType("MAGE_ARENA_TILE");
     }
 
+    // The four diagonal neighbors of a Mage Arena cast's own center tile, forming an "X" shape with
+    // it (five tiles total) -- see computeMageArenaCastTiles, the only user. Per playtest feedback:
+    // a single-tile blast was too easy to dodge, even reflexively.
+    private static final int[][] MAGE_ARENA_CAST_X_OFFSETS = {{0, 0}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+
+    /** The full set of tiles a Mage Arena cast at {@code center} actually threatens -- {@code center}
+     * plus its four diagonal neighbors (see MAGE_ARENA_CAST_X_OFFSETS). Filtered down to tiles that
+     * are actually part of the current arena grid: a cast near the arena's own edge simply threatens
+     * fewer real tiles rather than ever returning an out-of-bounds point neither
+     * MageArenaPresentation's own elimination self-check nor TileOverlay's own warning highlight
+     * should treat as real. Shared by both of those so the "what's actually dangerous" and "what's
+     * actually drawn" logic can never drift apart. */
+    public List<WorldPoint> computeMageArenaCastTiles(WorldPoint center)
+    {
+        if (center == null) return Collections.emptyList();
+        List<WorldPoint> arenaTiles = findMageArenaTiles();
+        List<WorldPoint> out = new ArrayList<>(MAGE_ARENA_CAST_X_OFFSETS.length);
+        for (int[] offset : MAGE_ARENA_CAST_X_OFFSETS)
+        {
+            WorldPoint candidate = new WorldPoint(center.getX() + offset[0], center.getY() + offset[1], center.getPlane());
+            if (arenaTiles.contains(candidate)) out.add(candidate);
+        }
+        return out;
+    }
+
     /** Every currently-marked Sandwich Rush arena tile -- see SandwichRushPresentation#checkCollection,
      * which self-checks the local player's own position against this set to fire its own one-shot
      * confirm-sandwich-rush-arrival report. */
@@ -3091,6 +3147,10 @@ public class RunePartyPlugin extends Plugin
         {
             addToGameMenuEntry(event);
             addItemTargetMenuEntry(event);
+            if (phase == GamePhase.ACTIVE && isMageArenaActive() && isMinigamePlayable() && isLocalPlayerMageArenaMage())
+            {
+                addMageArenaShiftCastMenuEntry(event);
+            }
             return;
         }
 
@@ -4310,8 +4370,10 @@ public class RunePartyPlugin extends Plugin
                 // No fold needed -- unlike BRUTUS_PLAYER_ELIMINATED's own eliminatedRsns skull
                 // tracking, Flame Field already shows elimination visually (the tile itself turns
                 // fully red before/as this fires), so this is purely a one-shot cosmetic reveal:
-                // the Voidwaker spec spotanim on the eliminated player's own actor, plus a chat
-                // message for parity with every other elimination case in this switch.
+                // the Voidwaker spec spotanim on the eliminated player's own actor, a chat message,
+                // and (per playtest feedback: the chat line alone was easy to miss) a prominent
+                // on-screen "You were/<rsn> was eliminated!" flash -- see ArenaPresentation#
+                // armEliminationBanner.
                 if (!catchingUp)
                 {
                     String eliminatedRsn = Json.requiredStr(e.payload, type, "player");
@@ -4319,6 +4381,7 @@ public class RunePartyPlugin extends Plugin
                     {
                         triggerSpotAnimOnPlayer(ARENA_ELIMINATION_SPOTANIM_ID, eliminatedRsn, 0);
                         addChatMessage(eliminatedRsn + " was consumed by the flames! They're eliminated from this round.");
+                        minigamePresentation.arena().armEliminationBanner(eliminatedRsn);
                     }
                 }
                 break;
@@ -5111,10 +5174,23 @@ public class RunePartyPlugin extends Plugin
     public long getMageArenaActiveCastWarningAt() { return minigamePresentation.mageArena().getActiveCastWarningAt(); }
     public long getMageArenaActiveCastDetonateAt() { return minigamePresentation.mageArena().getActiveCastDetonateAt(); }
     public long getMageArenaActiveCastResolvedAt() { return minigamePresentation.mageArena().getActiveCastResolvedAt(); }
-    /** When the current "&lt;rsn&gt; was eliminated!" flash should disappear -- 0 if none is armed.
-     * Drives AnnouncementOverlay's own renderMageArenaElimination. */
-    public long getMageArenaEliminationBannerUntil() { return minigamePresentation.mageArena().getEliminationBannerUntil(); }
-    public String getMageArenaEliminationBannerRsn() { return minigamePresentation.mageArena().getEliminationBannerRsn(); }
+    /** When the local viewer's own "You were eliminated!" flash should disappear -- 0 if none is
+     * armed. Independent of getMageArenaOthersEliminationBannerUntil() so a bystander's own
+     * elimination can never stomp this one -- see MageArenaPresentation#armEliminationBanner's own
+     * doc. Drives AnnouncementOverlay's own renderMageArenaElimination. */
+    public long getMageArenaLocalEliminationBannerUntil() { return minigamePresentation.mageArena().getLocalEliminationBannerUntil(); }
+    /** Same idea, for the "&lt;rsn&gt; was eliminated!" flash shown for everyone ELSE'S eliminations. */
+    public long getMageArenaOthersEliminationBannerUntil() { return minigamePresentation.mageArena().getOthersEliminationBannerUntil(); }
+    public String getMageArenaOthersEliminationBannerRsn() { return minigamePresentation.mageArena().getOthersEliminationBannerRsn(); }
+    /** Same split pair, for Flame Field's own "You were/&lt;rsn&gt; was eliminated!" flash -- see
+     * ArenaPresentation#armEliminationBanner and AnnouncementOverlay#renderArenaElimination. */
+    public long getArenaLocalEliminationBannerUntil() { return minigamePresentation.arena().getLocalEliminationBannerUntil(); }
+    public long getArenaOthersEliminationBannerUntil() { return minigamePresentation.arena().getOthersEliminationBannerUntil(); }
+    public String getArenaOthersEliminationBannerRsn() { return minigamePresentation.arena().getOthersEliminationBannerRsn(); }
+    /** Lowercase rsns eliminated so far this round -- see PlayerOverlay's own persistent skull icon,
+     * the only reader. Same "Hot Potato" treatment HotPotatoPresentation's own eliminatedRsns
+     * already established. */
+    public Set<String> getArenaEliminatedRsns() { return minigamePresentation.arena().getEliminatedRsns(); }
     /** Whether the local player is the one currently assigned as the Mage this round -- gates the
      * "Cast Spell" menu entry (see addMageArenaCastMenuEntry) and AnnouncementOverlay's own
      * role-aware gather/round messaging. */

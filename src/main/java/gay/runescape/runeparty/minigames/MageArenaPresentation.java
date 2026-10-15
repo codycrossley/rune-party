@@ -80,8 +80,13 @@ public final class MageArenaPresentation implements MinigamePresentationFeature
     // reset the instant a new cast lands, not once per round (see this class's own doc).
     private volatile boolean castProcessedForElimination = false;
 
-    private volatile long eliminationBannerUntil = 0;
-    private volatile String eliminationBannerRsn = null;
+    // Split into two independent slots so a second dodger's own elimination (now plausible within
+    // the same window, given a single cast's own "X" blast can catch several at once) can never
+    // stomp the local player's own "You were eliminated!" flash -- see armEliminationBanner's own
+    // doc, same reasoning ArenaPresentation's identical pair now uses.
+    private volatile long localEliminationBannerUntil = 0;
+    private volatile long othersEliminationBannerUntil = 0;
+    private volatile String othersEliminationBannerRsn = null;
 
     public MageArenaPresentation(RunePartyPlugin plugin)
     {
@@ -151,8 +156,7 @@ public final class MageArenaPresentation implements MinigamePresentationFeature
                 if (rsn != null) eliminatedRsns.add(rsn.toLowerCase(Locale.ROOT));
                 if (!catchingUp && rsn != null)
                 {
-                    eliminationBannerRsn = rsn;
-                    eliminationBannerUntil = System.currentTimeMillis() + ELIMINATION_BANNER_DURATION_MS;
+                    armEliminationBanner(rsn);
                     plugin.addChatMessage(rsn + " was eliminated!");
                 }
                 break;
@@ -189,7 +193,10 @@ public final class MageArenaPresentation implements MinigamePresentationFeature
 
         long now = System.currentTimeMillis();
         if (now < activeCastDetonateAt || now >= activeCastResolvedAt) return;
-        if (!pos.equals(activeCastPoint)) return;
+        // The cast's own full "X" blast, not just its center tile -- see RunePartyPlugin#
+        // computeMageArenaCastTiles, shared with TileOverlay's own warning highlight so what's
+        // actually dangerous and what's actually drawn can never drift apart.
+        if (!plugin.computeMageArenaCastTiles(activeCastPoint).contains(pos)) return;
 
         castProcessedForElimination = true;
         confirmElimination(self);
@@ -261,8 +268,9 @@ public final class MageArenaPresentation implements MinigamePresentationFeature
         activeCastDetonateAt = 0;
         activeCastResolvedAt = 0;
         castProcessedForElimination = false;
-        eliminationBannerUntil = 0;
-        eliminationBannerRsn = null;
+        localEliminationBannerUntil = 0;
+        othersEliminationBannerUntil = 0;
+        othersEliminationBannerRsn = null;
     }
 
     /** The rsn currently assigned as the Mage -- null before MAGE_ARENA_ROUND_STARTED lands. */
@@ -287,10 +295,37 @@ public final class MageArenaPresentation implements MinigamePresentationFeature
      * again until the next cast. */
     public long getActiveCastResolvedAt() { return activeCastResolvedAt; }
 
-    /** When the current "<rsn> was eliminated!" flash should disappear -- 0 if none is armed. See
-     * AnnouncementOverlay#renderMageArenaElimination, the only reader. */
-    public long getEliminationBannerUntil() { return eliminationBannerUntil; }
-    /** Whoever the most recent elimination flash is for -- only meaningful while
-     * getEliminationBannerUntil() hasn't passed yet. */
-    public String getEliminationBannerRsn() { return eliminationBannerRsn; }
+    /** Routes a fresh elimination into one of two completely independent banner slots depending on
+     * whether {@code rsn} is the local viewer -- see ArenaPresentation#armEliminationBanner's own
+     * doc for the full reasoning (identical here): a bystander's own elimination can never stomp the
+     * one message that matters most to the player it's actually about, since the two slots share
+     * nothing. Only the caller (this class' own apply(), the MAGE_ARENA_PLAYER_ELIMINATED case)
+     * decides whether to call this at all -- gated there on !catchingUp, same as every other
+     * one-shot cosmetic reveal in this codebase. */
+    private void armEliminationBanner(String rsn)
+    {
+        String local = plugin.getLocalRsn();
+        long until = System.currentTimeMillis() + ELIMINATION_BANNER_DURATION_MS;
+        if (local != null && local.equalsIgnoreCase(rsn))
+        {
+            localEliminationBannerUntil = until;
+        }
+        else
+        {
+            othersEliminationBannerRsn = rsn;
+            othersEliminationBannerUntil = until;
+        }
+    }
+
+    /** When the local viewer's own "You were eliminated!" flash should disappear -- 0 if none is
+     * armed. Always about the local viewer by construction, so there's no accompanying rsn getter
+     * the way {@link #getOthersEliminationBannerRsn()} needs one. */
+    public long getLocalEliminationBannerUntil() { return localEliminationBannerUntil; }
+    /** Same idea, for the "&lt;rsn&gt; was eliminated!" flash shown for everyone ELSE'S
+     * eliminations -- independent of {@link #getLocalEliminationBannerUntil()} so the two can never
+     * stomp each other (see armEliminationBanner's own doc). */
+    public long getOthersEliminationBannerUntil() { return othersEliminationBannerUntil; }
+    /** Only meaningful while a caller has already confirmed via
+     * {@link #getOthersEliminationBannerUntil()} that the banner's own fade hasn't passed yet. */
+    public String getOthersEliminationBannerRsn() { return othersEliminationBannerRsn; }
 }
