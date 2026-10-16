@@ -271,5 +271,63 @@ public final class HardcodedCourse
 
     public static final HardcodedCourse COW_TOWN_COURSE = buildCowTownCourse();
 
-    public static final List<HardcodedCourse> ALL = List.of(FALLY_PARK_COURSE, VARROCK_SQUARE_COURSE, COW_TOWN_COURSE);
+    /** Captured from a real, host-built course (28 tiles) via Dev Mode's local-only authoring tool
+     * (see CourseBuilder#saveCurrentCourseAs) -- unlike FALLY_PARK/VARROCK_SQUARE/COW_TOWN above,
+     * none of which went through that tool (it didn't exist yet when they were captured), this one
+     * was saved as a CoursePreset-shaped relative-dx/dy file, not absolute coordinates -- see
+     * CoursePreset#fromTiles's own doc for why that capture carries every tile's nextIndices over
+     * unchanged from whatever the original board's own (possibly non-contiguous, post-tile-removal)
+     * pathIndex values were. This one had exactly that gap: simulating the forward walk from index 0
+     * (same check buildVarrockSquareCourse/buildCowTownCourse's own docs describe) found tiles at
+     * relative (-5,3)/(-7,2)/(-9,1) all unreachable, and the walk dead-ending at (-3,3) instead of
+     * closing back to START. Each tile's own dx/dy made the intended continuation geometrically
+     * obvious -- a single westward arc hugging the loop's own southwest corner back to START -- but
+     * the captured data had it backward and broken: (-3,3) carried no outgoing edge at all, (-5,3)
+     * pointed backward instead of being pointed at, and (-7,2)'s second edge referenced a pathIndex
+     * that didn't exist in this 28-tile course at all (a stale leftover from a tile deleted during
+     * building). Fixed by rewiring that whole segment forward and dropping both stale edges;
+     * verified the same way as Varrock Square/Cow Town -- the full forward walk from index 0 now
+     * visits all 28 tiles exactly once and returns to 0 -- before converting the fixed relative
+     * layout to the absolute coordinates below, anchored so START lands exactly on the real-world
+     * point the host confirmed they actually built it at. */
+    private static HardcodedCourse buildEdgevilleCourse()
+    {
+        WorldPoint start = new WorldPoint(3092, 3501, 0);
+        List<ApiClient.TileSpec> tiles = List.of(
+            t(3092, 3501, "START", 0, 1),
+            t(3092, 3499, "PATH", 1, 2),
+            t(3092, 3497, "PENALTY_TILE", 2, 3),
+            t(3094, 3496, "PENALTY_TILE", 3, 4),
+            t(3096, 3496, "PATH", 4, 5),
+            t(3098, 3496, "ITEM_TILE", 5, 6),
+            t(3100, 3496, "ITEM_SHOP_TILE", 6, 7),
+            t(3102, 3496, "JAD_TILE", 7, 8),
+            t(3103, 3498, "PATH", 8, 10, 9),
+            t(3105, 3499, "PATH", 9, 12),
+            t(3103, 3500, "CHANCE_TILE", 10, 11),
+            t(3103, 3502, "PENALTY_TILE", 11, 14),
+            t(3107, 3499, "WISE_OLD_MAN_TILE", 12, 13),
+            t(3108, 3501, "PATH", 13, 16),
+            t(3105, 3503, "PATH", 14, 15),
+            t(3107, 3503, "ITEM_TILE", 15, 16),
+            t(3109, 3504, "PENALTY_TILE", 16, 17),
+            t(3110, 3506, "ITEM_TILE", 17, 18),
+            t(3110, 3508, "PATH", 18, 19),
+            t(3108, 3509, "CHANCE_TILE", 19, 20),
+            t(3106, 3509, "PENALTY_TILE", 20, 21),
+            t(3104, 3508, "PATH", 21, 25),
+            t(3100, 3505, "PATH", 22, 26),
+            t(3096, 3505, "PATH", 23, 24),
+            t(3094, 3504, "PENALTY_TILE", 24, 27),
+            t(3102, 3506, "ITEM_TILE", 25, 22),
+            t(3098, 3505, "ITEM_TILE", 26, 23),
+            t(3092, 3503, "ITEM_SHOP_TILE", 27, 0),
+            new ApiClient.TileSpec(start.getX(), start.getY(), start.getPlane(), "GOLDEN_GNOME_TILE", null, null, null, new int[0])
+        );
+        return new HardcodedCourse("Edgeville", "edgeville", start, tiles);
+    }
+
+    public static final HardcodedCourse EDGEVILLE_COURSE = buildEdgevilleCourse();
+
+    public static final List<HardcodedCourse> ALL = List.of(FALLY_PARK_COURSE, VARROCK_SQUARE_COURSE, COW_TOWN_COURSE, EDGEVILLE_COURSE);
 }
