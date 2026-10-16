@@ -7,6 +7,7 @@ import java.awt.*;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.io.File;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -65,19 +66,27 @@ public class RunePartyPanel extends PluginPanel
     // Host controls (grouping card -- visible to host only, LOBBY or ACTIVE)
     private final JPanel hostControlsCard = new JPanel();
 
-    // Host course tools (LOBBY only)
+    // Host course tools (LOBBY only). presetDropdown/placeBtn/clearCourseBtn stay available to
+    // every host regardless of Dev Mode -- picking and placing an already-finished course is an
+    // everyday action, not a dev-only one. devToolsPanel (buildCustomBtn + saveCourseBtn) is the
+    // actual authoring tool and is the only part gated on Dev Mode -- grouped into its own
+    // sub-panel so hiding it collapses cleanly instead of leaving a stray empty gap in the
+    // surrounding BoxLayout (see refreshCourseBuildButton).
     private final JPanel courseToolsPanel = new JPanel();
     private final JComboBox<CoursePreset> presetDropdown = new JComboBox<>();
     private final JButton placeBtn = new JButton("Place");
     private final JButton clearCourseBtn = new JButton("Clear Course");
+    private final JPanel devToolsPanel = new JPanel();
     private final JButton buildCustomBtn = new JButton("Build Custom Course");
+    private final JButton saveCourseBtn = new JButton("Save Current Course");
 
-    // Host mini-game spawn placement (LOBBY only) -- unlike courseToolsPanel above, deliberately
-    // NOT hidden once the course is a locked Standard Course (see RunePartyPlugin#
-    // enterMinigameSpawnPlacementMode's own doc for why this is a different, orthogonal concern
-    // from editing the course itself). minigameSpawnStatusLabel/clearMinigameSpawnBtn's own
-    // enabled-state track whichever mini-game the dropdown currently has selected, refreshed by
-    // refreshMinigameSpawnPanel() below.
+    // Host mini-game spawn placement (LOBBY only, Dev Mode gated -- see refresh()). Unlike
+    // courseToolsPanel above, NOT hidden once the course is a locked Standard Course (see
+    // RunePartyPlugin#enterMinigameSpawnPlacementMode's own doc for why this is a different,
+    // orthogonal concern from editing the course itself) -- it IS still gated on Dev Mode, though,
+    // same authoring-tool reasoning CourseBuilder's own class doc gives for Build Custom Course.
+    // minigameSpawnStatusLabel/clearMinigameSpawnBtn's own enabled-state track whichever mini-game
+    // the dropdown currently has selected, refreshed by refreshMinigameSpawnPanel() below.
     private final JPanel minigameSpawnPanel = new JPanel();
     private final JComboBox<Minigame> minigameSpawnDropdown = new JComboBox<>();
     private final JLabel minigameSpawnStatusLabel = new JLabel(" ");
@@ -135,13 +144,8 @@ public class RunePartyPanel extends PluginPanel
         add(buildTopPanel(), BorderLayout.NORTH);
         add(buildCardPanel(), BorderLayout.CENTER);
 
-        for (CoursePreset preset : CoursePreset.ALL) presetDropdown.addItem(preset);
         presetDropdown.addActionListener(e -> plugin.selectPreset((CoursePreset) presetDropdown.getSelectedItem()));
-        if (presetDropdown.getItemCount() > 0)
-        {
-            presetDropdown.setSelectedIndex(0);
-            plugin.selectPreset((CoursePreset) presetDropdown.getSelectedItem());
-        }
+        refreshPresetDropdown(null);
 
         List<Minigame> boardSwappingMinigames = new java.util.ArrayList<>();
         for (Minigame m : Minigames.all())
@@ -539,26 +543,78 @@ public class RunePartyPanel extends PluginPanel
             else plugin.enterCustomCourseBuildMode();
         });
 
+        // Captures whatever's currently on the board (see CourseBuilder#saveCurrentCourseAs) to a
+        // local JSON file, then refreshes the dropdown so the new entry shows up and gets selected
+        // immediately -- no restart needed.
+        saveCourseBtn.setAlignmentX(LEFT_ALIGNMENT);
+        saveCourseBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        saveCourseBtn.addActionListener(e -> {
+            String name = JOptionPane.showInputDialog(this, "Course name:", "Save Current Course", JOptionPane.PLAIN_MESSAGE);
+            if (name == null) return; // cancelled
+            File saved = plugin.saveCurrentCourse(name);
+            if (saved == null)
+            {
+                JOptionPane.showMessageDialog(this,
+                    "Could not save -- enter a name and place at least one course tile first.",
+                    "Save Current Course", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            refreshPresetDropdown(name.trim());
+        });
+
+        devToolsPanel.setLayout(new BoxLayout(devToolsPanel, BoxLayout.Y_AXIS));
+        devToolsPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        devToolsPanel.setAlignmentX(LEFT_ALIGNMENT);
+        devToolsPanel.setBorder(BorderFactory.createEmptyBorder());
+        devToolsPanel.add(buildCustomBtn);
+        devToolsPanel.add(Box.createVerticalStrut(4));
+        devToolsPanel.add(saveCourseBtn);
+
         courseToolsPanel.add(caption);
         courseToolsPanel.add(Box.createVerticalStrut(4));
         courseToolsPanel.add(presetDropdown);
         courseToolsPanel.add(Box.createVerticalStrut(4));
         courseToolsPanel.add(placeBtn);
         courseToolsPanel.add(Box.createVerticalStrut(4));
-        courseToolsPanel.add(buildCustomBtn);
+        courseToolsPanel.add(devToolsPanel);
         courseToolsPanel.add(Box.createVerticalStrut(4));
         courseToolsPanel.add(clearCourseBtn);
     }
 
+    /** Repopulates presetDropdown from plugin.getAvailablePresets() (built-ins plus every
+     * locally-saved course) -- called once at construction and again after a successful Save so a
+     * freshly-saved course appears immediately, no restart needed. If selectName is non-null,
+     * selects whichever entry's own name matches it (the course just saved); otherwise preserves
+     * index 0 as the default selection. */
+    private void refreshPresetDropdown(String selectName)
+    {
+        presetDropdown.removeAllItems();
+        for (CoursePreset preset : plugin.getAvailablePresets()) presetDropdown.addItem(preset);
+        if (presetDropdown.getItemCount() == 0) return;
+
+        int selectedIndex = 0;
+        if (selectName != null)
+        {
+            for (int i = 0; i < presetDropdown.getItemCount(); i++)
+            {
+                if (presetDropdown.getItemAt(i).name.equals(selectName)) { selectedIndex = i; break; }
+            }
+        }
+        presetDropdown.setSelectedIndex(selectedIndex);
+        plugin.selectPreset((CoursePreset) presetDropdown.getSelectedItem());
+    }
+
     /** Keeps buildCustomBtn's label/the preset controls' enabled-state in sync with whichever
      * course-building mode (if any) is actually armed -- see RunePartyPlugin#customCourseBuildMode/
-     * coursePlacementMode's own mutual-exclusion doc. Called from refresh(). */
+     * coursePlacementMode's own mutual-exclusion doc -- and keeps devToolsPanel (the actual
+     * authoring tools) hidden whenever Dev Mode is off. Called from refresh(). */
     private void refreshCourseBuildButton()
     {
         boolean building = plugin.isCustomCourseBuildMode();
         buildCustomBtn.setText(building ? "Stop Building" : "Build Custom Course");
         presetDropdown.setEnabled(!building);
         placeBtn.setEnabled(!building);
+        devToolsPanel.setVisible(plugin.isDevModeEnabled());
     }
 
     /** Lets the host pin a specific board-swapping mini-game's own arena to an exact world point
@@ -690,7 +746,7 @@ public class RunePartyPanel extends PluginPanel
         hostControlsCard.setVisible(isHost && (phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE));
         courseToolsPanel.setVisible(isHost && phase == GamePhase.LOBBY && !plugin.isStandardCourseLocked());
         refreshCourseBuildButton();
-        minigameSpawnPanel.setVisible(isHost && phase == GamePhase.LOBBY);
+        minigameSpawnPanel.setVisible(isHost && phase == GamePhase.LOBBY && plugin.isDevModeEnabled());
         refreshMinigameSpawnPanel();
         gameSettingsRow.setVisible(isHost && phase == GamePhase.LOBBY);
         startGameBtn.setVisible(isHost && phase == GamePhase.LOBBY);

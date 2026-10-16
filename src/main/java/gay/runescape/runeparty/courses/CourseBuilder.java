@@ -6,14 +6,24 @@ import gay.runescape.runeparty.minigames.Minigame;
 import gay.runescape.runeparty.minigames.Minigames;
 import gay.runescape.runeparty.net.ApiClient;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonParseException;
+import lombok.extern.slf4j.Slf4j;
+
 import net.runelite.api.Menu;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.Tile;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.client.RuneLite;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -23,14 +33,36 @@ import java.util.Set;
  * enter Place mode, then right-click a ground tile to commit its footprint there (there's no
  * per-preset removal -- clearCourse() below is the host's one "start over" tool); or, as a
  * free-form alternative, place/retype/remove one custom tile at a time and wire up its
- * connect-graph edges by hand. Owns its own fields, folds no server events of its own (every
- * action here is a synchronous request the server either accepts or rejects, mirrored back into
- * TileReducer's own live board the same way any other tiles_marked update is), and clears itself
- * via reset(); RunePartyPlugin still exposes every getter/action under its original name, just
+ * connect-graph edges by hand.
+ * <p>
+ * Placement (commitPreset)/clearCourse/mini-game spawn placement are real, synchronous requests
+ * the server either accepts or rejects, mirrored back into TileReducer's own live board the same
+ * way any other tiles_marked update is -- these set up the REAL board every lobby member sees, so
+ * they stay server-backed regardless of Dev Mode. The free-form tile-by-tile editing methods
+ * (setCustomTileAt/removeCustomTileAt/connectCustomTiles/removeCustomConnection/
+ * removeAllConnectionsAt), by contrast, are Dev-Mode-only (see enterCustomCourseBuildMode) and
+ * write directly into TileReducer via its own markLocal/unmarkLocal -- no server round-trip, no
+ * event of any kind, invisible to every other lobby member -- so a host can privately iterate on a
+ * new course design without mutating the shared board live in front of everyone, then capture the
+ * result to a local JSON file via saveCurrentCourseAs ("Save Current Course" in the panel) once
+ * it's done. Owns its own fields, folds no server events of its own, and clears itself via
+ * reset(); RunePartyPlugin still exposes every getter/action under its original name, just
  * delegating here. */
+@Slf4j
 public final class CourseBuilder
 {
+    // Pretty-printed on purpose -- a saved course file is meant to be human-readable/diffable
+    // (e.g. to hand-port into a new HardcodedCourse entry later), unlike the plugin's own injected
+    // Gson, which is tuned for compact wire payloads. A dedicated instance keeps that choice local
+    // to the one class that owns the file format.
+    private static final Gson FILE_GSON = new GsonBuilder().setPrettyPrinting().create();
+
     private final RunePartyPlugin plugin;
+
+    // Built-in CoursePreset.ALL plus every course loaded from coursesDir() -- see
+    // getAvailablePresets/reloadLocalPresets. Reloaded once at construction and again after every
+    // successful saveCurrentCourseAs.
+    private volatile List<CoursePreset> localPresets = List.of();
 
     private volatile boolean coursePlacementMode = false;
     private volatile CoursePreset selectedPreset = null;
@@ -59,6 +91,7 @@ public final class CourseBuilder
     public CourseBuilder(RunePartyPlugin plugin)
     {
         this.plugin = plugin;
+        reloadLocalPresets();
     }
 
     public void selectPreset(CoursePreset preset)
@@ -95,7 +128,7 @@ public final class CourseBuilder
 
     public void enterCustomCourseBuildMode()
     {
-        if (!plugin.isHost() || plugin.isStandardCourseLocked()) return;
+        if (!plugin.isHost() || plugin.isStandardCourseLocked() || !plugin.isDevModeEnabled()) return;
         coursePlacementMode = false; // mutually exclusive -- see customCourseBuildMode's own doc
         minigameSpawnPlacementKey = null;
         customCourseBuildMode = true;
@@ -120,14 +153,15 @@ public final class CourseBuilder
         return minigameSpawnPlacementKey;
     }
 
-    /** Arms "Place Minigame" -- unlike enterCoursePlacementMode/enterCustomCourseBuildMode, NOT
-     * refused once the course is a locked Standard Course: this isn't editing the course itself,
-     * just configuring where one mini-game's own arena goes for this specific game, which is just
-     * as meaningful on a locked Fally Park/Varrock Square as on a freeform course (see the
-     * server's own set_minigame_spawn_point doc). */
+    /** Arms "Place Minigame" -- unlike enterCoursePlacementMode, NOT refused once the course is a
+     * locked Standard Course: this isn't editing the course itself, just configuring where one
+     * mini-game's own arena goes for this specific game, which is just as meaningful on a locked
+     * Fally Park/Varrock Square as on a freeform course (see the server's own
+     * set_minigame_spawn_point doc). IS Dev-Mode-gated, though, same reasoning
+     * enterCustomCourseBuildMode's own guard has: this whole panel is an authoring tool. */
     public void enterMinigameSpawnPlacementMode(String minigameKey)
     {
-        if (!plugin.isHost() || !RunePartyPlugin.BOARD_SWAPPING_MINIGAME_KEYS.contains(minigameKey)) return;
+        if (!plugin.isHost() || !plugin.isDevModeEnabled() || !RunePartyPlugin.BOARD_SWAPPING_MINIGAME_KEYS.contains(minigameKey)) return;
         coursePlacementMode = false; // mutually exclusive -- see minigameSpawnPlacementKey's own doc
         customCourseBuildMode = false;
         courseConnectFromIndex = null;
@@ -191,16 +225,26 @@ public final class CourseBuilder
             () -> plugin.apiClient.clearMinigameSpawnPoint(gid, wk, minigameKey));
     }
 
-    /** Unmarks every currently-committed course tile -- the host's "start over" button. */
+    /** Unmarks every currently-committed course tile -- the host's "start over" button. Stays a
+     * real server call unconditionally (Clear Course is always visible, Dev Mode or not -- see
+     * this class's own doc), but ALSO clears every point locally first, synchronously: if any
+     * Dev-Mode-only local tiles (see setCustomTileAt et al.) are staged alongside/on top of the
+     * real board, the server was never told about them, so its own unmark response for them is a
+     * harmless no-op that would otherwise leave them stuck on screen forever (nothing else ever
+     * touches them again). Clearing locally too guarantees this button always fully clears
+     * whatever's on screen, real or local, and happens instantly rather than waiting on the
+     * server round-trip even for the ordinary (no local tiles) case. */
     public void clearCourse()
     {
-        final String gid = plugin.gameId;
-        final String wk = plugin.writeKey;
-        if (gid == null || wk == null) return;
-
         Set<WorldPoint> uniquePoints = new HashSet<>();
         for (TileReducer.TileEntry entry : plugin.getTileReducer().snapshot()) uniquePoints.add(entry.point);
         if (uniquePoints.isEmpty()) return;
+
+        for (WorldPoint wp : uniquePoints) plugin.getTileReducer().unmarkLocal(wp, null);
+
+        final String gid = plugin.gameId;
+        final String wk = plugin.writeKey;
+        if (gid == null || wk == null) return;
 
         List<ApiClient.PointSpec> pointSpecs = new ArrayList<>(uniquePoints.size());
         for (WorldPoint wp : uniquePoints)
@@ -438,17 +482,11 @@ public final class CourseBuilder
      * left a gap -- courseLength() naturally reuses the freed slot on its own. */
     private void setCustomTileAt(WorldPoint point, String tileTypeKey)
     {
-        final String gid = plugin.gameId;
-        final String wk = plugin.writeKey;
-        if (gid == null || wk == null) return;
-
         TileReducer.TileEntry existing = courseTileAt(point);
         Integer pathIndex = existing != null ? existing.pathIndex : plugin.getTileReducer().courseLength();
         int[] nextIndices = existing != null ? existing.nextIndices : new int[0];
 
-        ApiClient.TileSpec spec = new ApiClient.TileSpec(point.getX(), point.getY(), point.getPlane(),
-            tileTypeKey, null, null, pathIndex, nextIndices);
-        plugin.submitAction("Set tile", () -> plugin.apiClient.markTiles(gid, wk, Collections.singletonList(spec)));
+        plugin.getTileReducer().markLocal(point, tileTypeKey, null, null, pathIndex, nextIndices);
     }
 
     /** Unmarks a single course tile -- called from the "Remove Tile" menu entry. Deliberately
@@ -459,12 +497,7 @@ public final class CourseBuilder
      * target. */
     private void removeCustomTileAt(WorldPoint point, String tileTypeKey)
     {
-        final String gid = plugin.gameId;
-        final String wk = plugin.writeKey;
-        if (gid == null || wk == null) return;
-
-        plugin.submitAction("Remove tile", () -> plugin.apiClient.unmarkTiles(gid, wk,
-            Collections.singletonList(new ApiClient.PointSpec(point.getX(), point.getY(), point.getPlane(), tileTypeKey))));
+        plugin.getTileReducer().unmarkLocal(point, tileTypeKey);
     }
 
     /** Bulk version of removeCustomConnection -- clears {@code point}'s own nextIndices back to
@@ -473,16 +506,10 @@ public final class CourseBuilder
      * once nextIndices is actually non-empty). */
     private void removeAllConnectionsAt(WorldPoint point)
     {
-        final String gid = plugin.gameId;
-        final String wk = plugin.writeKey;
-        if (gid == null || wk == null) return;
-
         TileReducer.TileEntry existing = courseTileAt(point);
         if (existing == null || existing.pathIndex == null) return;
 
-        ApiClient.TileSpec spec = new ApiClient.TileSpec(existing.point.getX(), existing.point.getY(), existing.point.getPlane(),
-            existing.tileType, existing.color, existing.orientation, existing.pathIndex, new int[0]);
-        plugin.submitAction("Remove all connections", () -> plugin.apiClient.markTiles(gid, wk, Collections.singletonList(spec)));
+        plugin.getTileReducer().markLocal(existing.point, existing.tileType, existing.color, existing.orientation, existing.pathIndex, new int[0]);
     }
 
     /** Adds {@code targetIndex} to {@code source}'s own outgoing edges -- called from "Connect To"
@@ -493,19 +520,15 @@ public final class CourseBuilder
      * cancelItemPlacement follows. */
     private void connectCustomTiles(TileReducer.TileEntry source, int targetIndex)
     {
-        final String gid = plugin.gameId;
-        final String wk = plugin.writeKey;
         courseConnectFromIndex = null;
         plugin.refreshPanel();
-        if (gid == null || wk == null || source.pathIndex == null) return;
+        if (source.pathIndex == null) return;
 
         List<Integer> edges = new ArrayList<>();
         for (int idx : plugin.getTileReducer().resolveNextIndices(source)) edges.add(idx);
         if (!edges.contains(targetIndex)) edges.add(targetIndex);
 
-        ApiClient.TileSpec spec = new ApiClient.TileSpec(source.point.getX(), source.point.getY(), source.point.getPlane(),
-            source.tileType, source.color, source.orientation, source.pathIndex, toIntArray(edges));
-        plugin.submitAction("Connect tiles", () -> plugin.apiClient.markTiles(gid, wk, Collections.singletonList(spec)));
+        plugin.getTileReducer().markLocal(source.point, source.tileType, source.color, source.orientation, source.pathIndex, toIntArray(edges));
     }
 
     /** Removes {@code targetIndex} from {@code source}'s own outgoing edges -- called from
@@ -515,18 +538,14 @@ public final class CourseBuilder
      * removeAllConnectionsAt's bulk version of this. */
     private void removeCustomConnection(TileReducer.TileEntry source, int targetIndex)
     {
-        final String gid = plugin.gameId;
-        final String wk = plugin.writeKey;
         courseConnectFromIndex = null;
         plugin.refreshPanel();
-        if (gid == null || wk == null || source.pathIndex == null) return;
+        if (source.pathIndex == null) return;
 
         List<Integer> edges = new ArrayList<>();
         for (int idx : plugin.getTileReducer().resolveNextIndices(source)) if (idx != targetIndex) edges.add(idx);
 
-        ApiClient.TileSpec spec = new ApiClient.TileSpec(source.point.getX(), source.point.getY(), source.point.getPlane(),
-            source.tileType, source.color, source.orientation, source.pathIndex, toIntArray(edges));
-        plugin.submitAction("Remove connection", () -> plugin.apiClient.markTiles(gid, wk, Collections.singletonList(spec)));
+        plugin.getTileReducer().markLocal(source.point, source.tileType, source.color, source.orientation, source.pathIndex, toIntArray(edges));
     }
 
     private static int[] toIntArray(List<Integer> list)
@@ -549,4 +568,96 @@ public final class CourseBuilder
     public boolean isCoursePlacementMode() { return coursePlacementMode; }
     public CoursePreset getSelectedPreset() { return selectedPreset; }
     public int getPresetRotationSteps() { return presetRotationSteps; }
+
+    /** Built-in CoursePreset.ALL plus every course previously saved via saveCurrentCourseAs --
+     * for RunePartyPanel's presetDropdown. Available regardless of Dev Mode: placing an
+     * already-saved course is an everyday "Place" action for any host, not a dev-only one -- only
+     * the authoring tool that PRODUCES a saved course is Dev-Mode-gated (see this class's own
+     * doc). */
+    public List<CoursePreset> getAvailablePresets()
+    {
+        List<CoursePreset> all = new ArrayList<>(CoursePreset.ALL);
+        all.addAll(localPresets);
+        return all;
+    }
+
+    private File coursesDir()
+    {
+        return new File(new File(RuneLite.RUNELITE_DIR, "rune-party"), "courses");
+    }
+
+    /** (Re)scans coursesDir() for every *.json file and deserializes it into a CoursePreset,
+     * populating localPresets -- called once at construction and again after every successful
+     * saveCurrentCourseAs so a freshly-saved course shows up in the dropdown immediately, no
+     * restart needed. A file that fails to parse is logged and skipped rather than aborting the
+     * whole load -- one corrupt/hand-edited file shouldn't hide every other saved course. */
+    private void reloadLocalPresets()
+    {
+        File[] files = coursesDir().listFiles((dir, name) -> name.endsWith(".json"));
+        List<CoursePreset> loaded = new ArrayList<>();
+        if (files != null)
+        {
+            Arrays.sort(files, Comparator.comparing(File::getName));
+            for (File f : files)
+            {
+                try (var reader = Files.newBufferedReader(f.toPath(), StandardCharsets.UTF_8))
+                {
+                    SavedCourseFile dto = FILE_GSON.fromJson(reader, SavedCourseFile.class);
+                    if (dto != null) loaded.add(dto.toCoursePreset());
+                }
+                catch (IOException | JsonParseException e)
+                {
+                    log.warn("Failed to load saved course file {}", f.getName(), e);
+                }
+            }
+        }
+        localPresets = loaded;
+    }
+
+    /** "Save Current Course" button's action -- captures whatever's currently on the board (local
+     * edits and/or previously-placed real tiles, merged, since both live in the same TileReducer)
+     * via the existing CoursePreset.fromTiles, and writes it to coursesDir() as a local JSON file
+     * (see SavedCourseFile). Dev-Mode-gated, same as every other authoring entry point in this
+     * class, even though the only caller (the panel button) is already hidden otherwise. Returns
+     * the file written, or null on a blank name, an empty board (nothing worth saving), or a write
+     * failure. Overwrites any existing file with the same sanitized name -- an ordinary, expected
+     * "Save" overwrite, not a bug (see sanitizeFileName's own doc on same-sanitized-name
+     * collisions between differently-named courses). */
+    public File saveCurrentCourseAs(String rawName)
+    {
+        if (!plugin.isDevModeEnabled()) return null;
+        String name = rawName == null ? "" : rawName.trim();
+        if (name.isEmpty()) return null;
+
+        CoursePreset preset = CoursePreset.fromTiles(name, plugin.getTileReducer().snapshot());
+        if (preset.tiles.isEmpty()) return null;
+
+        File dir = coursesDir();
+        if (!dir.exists() && !dir.mkdirs()) return null;
+        File file = new File(dir, sanitizeFileName(name) + ".json");
+
+        try (var writer = Files.newBufferedWriter(file.toPath(), StandardCharsets.UTF_8))
+        {
+            FILE_GSON.toJson(SavedCourseFile.from(preset), writer);
+        }
+        catch (IOException e)
+        {
+            log.warn("Failed to save course {}", name, e);
+            return null;
+        }
+
+        reloadLocalPresets();
+        return file;
+    }
+
+    /** Strips a course's display name down to a safe filename -- note that two different display
+     * names can sanitize to the same result (e.g. "My Course!" and "My Course?" both become
+     * "My_Course"), in which case saving the second silently overwrites the first's file, same as
+     * saving under the exact same name does. An accepted tradeoff, not something this needs to
+     * guard against. */
+    private static String sanitizeFileName(String name)
+    {
+        String sanitized = name.replaceAll("[^a-zA-Z0-9 _-]", "").trim().replaceAll("\\s+", "_");
+        return sanitized.isEmpty() ? "course" : sanitized;
+    }
 }

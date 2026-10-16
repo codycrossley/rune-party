@@ -61,6 +61,7 @@ import gay.runescape.runeparty.overlays.WiseOldManNpcOverlay;
 import java.awt.Color;
 import java.awt.event.KeyEvent;
 import java.io.BufferedInputStream;
+import java.io.File;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -113,6 +114,7 @@ import net.runelite.api.gameval.SpotanimID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.game.SpriteManager;
 import net.runelite.client.input.MouseManager;
 import net.runelite.client.plugins.Plugin;
@@ -1642,6 +1644,27 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
+    /** Dev Mode gates panel VISIBILITY (see isDevModeEnabled's own doc), which -- unlike every
+     * other config boolean here, each read live by some overlay's own render() every frame -- is
+     * only ever recomputed inside RunePartyPanel#refresh(). Without this, flipping Dev Mode in
+     * RuneLite's own config panel mid-session would only take visible effect whenever some
+     * unrelated event happened to trigger the next refresh(), not immediately. Also cancels
+     * "Build Custom Course"/"Place Minigame" mode the instant Dev Mode turns off, so a host can't
+     * get stuck mid-placement with no panel button left to cancel from -- doesn't touch
+     * coursePlacementMode, since placing an already-finished course stays available regardless of
+     * Dev Mode. */
+    @Subscribe
+    public void onConfigChanged(ConfigChanged event)
+    {
+        if (!"runeparty".equals(event.getGroup())) return;
+        if (!isDevModeEnabled())
+        {
+            courseBuilder.exitCustomCourseBuildMode();
+            courseBuilder.cancelMinigameSpawnPlacementMode();
+        }
+        refreshPanel();
+    }
+
     @Override
     protected void shutDown()
     {
@@ -2182,6 +2205,11 @@ public class RunePartyPlugin extends Plugin
     public boolean isCustomCourseBuildMode() { return courseBuilder.isCustomCourseBuildMode(); }
     public void enterCustomCourseBuildMode() { courseBuilder.enterCustomCourseBuildMode(); }
     public void exitCustomCourseBuildMode() { courseBuilder.exitCustomCourseBuildMode(); }
+    /** Built-in presets plus every locally-saved course -- see CourseBuilder#getAvailablePresets,
+     * the only reader besides RunePartyPanel's own presetDropdown. */
+    public List<CoursePreset> getAvailablePresets() { return courseBuilder.getAvailablePresets(); }
+    /** "Save Current Course" button's action -- see CourseBuilder#saveCurrentCourseAs's own doc. */
+    public File saveCurrentCourse(String name) { return courseBuilder.saveCurrentCourseAs(name); }
     /** The world point of the tile currently armed via "Connect From" -- see
      * TileOverlay#renderConnectFromIndicator, the only reader. */
     public WorldPoint getCourseConnectFromPoint() { return courseBuilder.getCourseConnectFromPoint(); }
@@ -4900,6 +4928,11 @@ public class RunePartyPlugin extends Plugin
     public String getJoinCode() { return sessionManager.getJoinCode(); }
     public String getHostRsn() { return sessionManager.getHostRsn(); }
     public boolean isHost() { return writeKey != null; }
+    /** Gates the "Build Custom Course"/"Save Current Course" authoring tools in Host Controls --
+     * see CourseBuilder's own class doc. Does NOT gate the preset dropdown/"Place"/"Clear Course",
+     * which stay available to every host regardless (picking and placing an already-finished
+     * course is an everyday action, not a dev-only one). */
+    public boolean isDevModeEnabled() { return config.devMode(); }
     /** True once this game has been permanently locked to a Standard Course -- see
      * standardCourseKey's own field doc. Course-building tools (RunePartyPanel's own
      * courseToolsPanel) stay hidden for the rest of this game's life once this flips true. */

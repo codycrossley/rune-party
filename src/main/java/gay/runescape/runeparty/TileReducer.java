@@ -100,9 +100,7 @@ public class TileReducer
         Integer pathIndex = Json.safeInt(tile, "pathIndex");
         int[] nextIndices = Json.safeIntArray(tile, "nextIndices");
 
-        tiles.put(key(x, y, plane, tileType),
-            new TileEntry(new WorldPoint(x, y, plane), tileType, color, orientation, pathIndex, nextIndices));
-        revision.incrementAndGet();
+        markLocal(new WorldPoint(x, y, plane), tileType, color, orientation, pathIndex, nextIndices);
     }
 
     private void applyUnmark(JsonObject tile)
@@ -113,13 +111,36 @@ public class TileReducer
         if (x == null || y == null || plane == null) return;
 
         String tileType = Json.safeStr(tile, "tileType");
+        unmarkLocal(new WorldPoint(x, y, plane), tileType);
+    }
+
+    /** The actual tile-set mutation behind applyMark, factored out so course-authoring tools (see
+     * CourseBuilder's own Dev Mode doc) can write a tile directly -- client-local, no server
+     * round-trip, no JSON involved -- and have it render identically to a server-committed one,
+     * since every renderer (TileOverlay/RunePartyMapOverlay) only ever reads this same map back
+     * out via snapshot()/tileAtIndex()/etc. with no notion of where an entry came from. */
+    public void markLocal(WorldPoint point, String tileType, String color, Integer orientation, Integer pathIndex, int[] nextIndices)
+    {
+        if (point == null || tileType == null) return;
+        tiles.put(key(point.getX(), point.getY(), point.getPlane(), tileType),
+            new TileEntry(point, tileType, color, orientation, pathIndex, nextIndices));
+        revision.incrementAndGet();
+    }
+
+    /** The actual tile-set mutation behind applyUnmark, factored out for the same reason
+     * markLocal is -- see that method's own doc. {@code tileType} null means "strip every type
+     * at this x/y/plane" (same semantics applyUnmark's own null-tileType branch already had --
+     * CourseBuilder#clearCourse relies on exactly this to clear a tile regardless of its type). */
+    public void unmarkLocal(WorldPoint point, String tileType)
+    {
+        if (point == null) return;
         if (tileType != null)
         {
-            tiles.remove(key(x, y, plane, tileType));
+            tiles.remove(key(point.getX(), point.getY(), point.getPlane(), tileType));
         }
         else
         {
-            String prefix = x + ":" + y + ":" + plane + ":";
+            String prefix = point.getX() + ":" + point.getY() + ":" + point.getPlane() + ":";
             tiles.keySet().removeIf(k -> k.startsWith(prefix));
         }
         revision.incrementAndGet();
