@@ -5533,18 +5533,25 @@ public class RunePartyPlugin extends Plugin
      * action is "buy_item"/"decline", itemKey is required for "buy_item" (see
      * ApiClient#itemShopChoose). Called only by ItemShopDialogueOverlay's own click handling.
      * <p>
-     * No chat-message failure callback -- an insufficient-funds/no-room 409 (the only reachable
-     * rejection for "buy_item", since ItemShopDialogueOverlay always shows the full catalog
-     * regardless of affordability, per this feature's own confirmed design) now also fires
-     * ITEM_SHOP_PURCHASE_FAILED, which ItemShopPresentation turns into a proper "You/&lt;rsn&gt;
-     * can't afford &lt;item&gt;!" on-screen announcement instead -- a raw 409 chat line on top of
-     * that would just be redundant noise. Any other, genuinely unexpected failure still gets logged (see
-     * submitAction's own doc), just not surfaced to chat. Critically, a failed "buy_item" does NOT
-     * fire ITEM_SHOP_DISMISSED -- itemShopEncounterPending is left open server-side so the player
-     * can try a different item (see item_shop_choose's own doc) -- so ItemShopDialogueOverlay must
-     * NOT optimistically close itself the way declining does; see that class's own submitPurchase
-     * for why {@code onComplete} exists here (clearing its own in-flight guard regardless of
-     * outcome) rather than this method closing anything itself. */
+     * DOES pass a chat-message failure callback -- an earlier version of this deliberately didn't,
+     * reasoning that an insufficient-funds/no-room 409 (the only reachable REJECTION for "buy_item",
+     * since ItemShopDialogueOverlay always shows the full catalog regardless of affordability, per
+     * this feature's own confirmed design) already fires ITEM_SHOP_PURCHASE_FAILED, which
+     * ItemShopPresentation turns into a proper "You/&lt;rsn&gt; can't afford &lt;item&gt;!"
+     * on-screen announcement, so a raw 409 chat line on top felt like redundant noise. That
+     * reasoning only covers requests that actually REACH the server, though -- a prod report
+     * (2026-10) traced to exactly the gap it left: a genuine client-side/network failure (the
+     * request never reaching item_shop_choose at all, so no event, no banner, nothing server-side
+     * could ever produce) used to get zero feedback through ANY channel with {@code onFailure}
+     * null here, matching a player's report of clicking repeatedly on the purchase row -- hover
+     * correctly highlighting it, ruling out a misclick -- with nothing ever visibly happening. A
+     * little redundancy with the banner on an ordinary 409 is a far better trade than silence on a
+     * genuine network hiccup. Critically, a failed "buy_item" does NOT fire ITEM_SHOP_DISMISSED --
+     * itemShopEncounterPending is left open server-side so the player can try a different item (see
+     * item_shop_choose's own doc) -- so ItemShopDialogueOverlay must NOT optimistically close itself
+     * the way declining does; see that class's own submitPurchase for why {@code onComplete} exists
+     * here (clearing its own in-flight guard regardless of outcome) rather than this method closing
+     * anything itself. */
     public void submitItemShopChoice(String action, String itemKey, Runnable onComplete)
     {
         String self = localRsn();
@@ -5556,6 +5563,7 @@ public class RunePartyPlugin extends Plugin
             return;
         }
 
-        submitAction("Item Shop choice", () -> apiClient.itemShopChoose(gid, self, token, action, itemKey), null, onComplete);
+        submitAction("Item Shop choice", () -> apiClient.itemShopChoose(gid, self, token, action, itemKey),
+            e -> addChatMessage("Failed to respond to the Item Clerk: " + e.getMessage()), onComplete);
     }
 }
