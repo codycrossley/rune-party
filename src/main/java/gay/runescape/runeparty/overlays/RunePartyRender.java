@@ -127,6 +127,34 @@ public final class RunePartyRender
         return new Color(c.getRed(), c.getGreen(), c.getBlue(), alpha);
     }
 
+    /** The width any "center this box on the game view" calculation should actually measure
+     * against -- the real 3D game viewport, not the full RuneLite canvas (client.getCanvasWidth()).
+     * In OSRS's Fixed layout (and some Resizable ones), the viewport is a sub-rectangle of the
+     * canvas: the inventory/minimap/chat widgets occupy the rest of it. Centering a panel on the
+     * raw canvas puts it off-center toward those widgets -- originally found (and fixed) in
+     * AnnouncementOverlay, whose own banners used to drift the same way; RunePartyMapOverlay's own
+     * board panel had the identical bug (left/top padding looked right since the viewport sits
+     * flush against the canvas's own top-left corner, but the panel crept flush against the
+     * bottom-right, where the widgets eat into the canvas instead).
+     * <p>
+     * {@code client.getViewportXOffset()} is normally just a handful of px -- doubling it here
+     * builds a "virtual canvas" exactly the size the real viewport would need to be centered
+     * within, so {@code origin = (drawableWidth(client) - boxWidth) / 2} lands the box exactly on
+     * the real viewport's own center (equivalently: {@code xOffset + (viewportWidth - boxWidth) /
+     * 2}, i.e. the viewport's own left edge plus however far the box should be inset to center
+     * within just the viewport's own width) -- dramatically simpler than threading an explicit
+     * origin offset through every centering call site individually. */
+    static int drawableWidth(Client client)
+    {
+        return client.getViewportWidth() + 2 * client.getViewportXOffset();
+    }
+
+    /** Vertical counterpart to drawableWidth(Client) -- see its own doc. */
+    static int drawableHeight(Client client)
+    {
+        return client.getViewportHeight() + 2 * client.getViewportYOffset();
+    }
+
     /** Clamped to [0, 255] before handing java.awt.Color a component value, in case a caller's
      * alpha arithmetic drifts fractionally outside [0f, 1f]. */
     public static Color withAlpha(Color c, float alpha)

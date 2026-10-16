@@ -8,43 +8,10 @@ import net.runelite.client.config.ConfigItem;
 public interface RunePartyConfig extends Config
 {
     @ConfigItem(
-        keyName = "showOverlay",
-        name = "Show player overlays",
-        description = "Show player overlays above player heads",
-        position = 0
-    )
-    default boolean showOverlay()
-    {
-        return true;
-    }
-
-    @ConfigItem(
-        keyName = "showTileOverlay",
-        name = "Show board overlay",
-        description = "Highlight the shared course/board tiles on the ground",
-        position = 1
-    )
-    default boolean showTileOverlay()
-    {
-        return true;
-    }
-
-    @ConfigItem(
-        keyName = "showDiceOverlay",
-        name = "Show dice roll overlay",
-        description = "Show whose turn it is and the rolled number",
-        position = 2
-    )
-    default boolean showDiceOverlay()
-    {
-        return true;
-    }
-
-    @ConfigItem(
         keyName = "showStatsOverlay",
         name = "Show stats overlay",
         description = "Show each player's coin count and Golden Gnome count",
-        position = 3
+        position = 0
     )
     default boolean showStatsOverlay()
     {
@@ -55,7 +22,7 @@ public interface RunePartyConfig extends Config
         keyName = "playMinigameMusic",
         name = "Play minigame music",
         description = "Play audio clips during certain minigames (currently just Crab Rave)",
-        position = 4
+        position = 1
     )
     default boolean playMinigameMusic()
     {
@@ -66,7 +33,7 @@ public interface RunePartyConfig extends Config
         keyName = "devMode",
         name = "Dev Mode",
         description = "Enable local, server-free course-authoring tools in Host Controls",
-        position = 5
+        position = 2
     )
     default boolean devMode()
     {

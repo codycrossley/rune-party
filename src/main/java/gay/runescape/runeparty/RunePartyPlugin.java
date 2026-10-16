@@ -1542,7 +1542,7 @@ public class RunePartyPlugin extends Plugin
         courseBuilder = new CourseBuilder(this);
         sessionManager = new SessionManager(this);
 
-        tileOverlay = new TileOverlay(client, config, this, tileReducer);
+        tileOverlay = new TileOverlay(client, this, tileReducer);
         overlayManager.add(tileOverlay);
 
         statsOverlay = new StatsOverlay(config, this);
@@ -1551,10 +1551,10 @@ public class RunePartyPlugin extends Plugin
         coinRushScoreboardOverlay = new CoinRushScoreboardOverlay(this);
         overlayManager.add(coinRushScoreboardOverlay);
 
-        playerOverlay = new PlayerOverlay(client, config, this, rosterReducer, modelOutlineRenderer);
+        playerOverlay = new PlayerOverlay(client, this, rosterReducer, modelOutlineRenderer);
         overlayManager.add(playerOverlay);
 
-        announcementOverlay = new AnnouncementOverlay(client, config, this);
+        announcementOverlay = new AnnouncementOverlay(client, this);
         overlayManager.add(announcementOverlay);
 
         confettiOverlay = new ConfettiOverlay(client, this);

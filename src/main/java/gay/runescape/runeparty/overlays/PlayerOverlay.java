@@ -3,7 +3,6 @@ package gay.runescape.runeparty.overlays;
 import gay.runescape.runeparty.GamePhase;
 import gay.runescape.runeparty.RosterReducer;
 import gay.runescape.runeparty.RunePartyColor;
-import gay.runescape.runeparty.RunePartyConfig;
 import gay.runescape.runeparty.RunePartyPlugin;
 import gay.runescape.runeparty.RunePartyRole;
 
@@ -94,16 +93,14 @@ public class PlayerOverlay extends Overlay
     private static final Stroke BRUTUS_TARGET_TOKEN_RING_STROKE = new BasicStroke(2f);
 
     private final Client client;
-    private final RunePartyConfig config;
     private final RunePartyPlugin plugin;
     private final RosterReducer roster;
     private final ModelOutlineRenderer modelOutlineRenderer;
     private final BufferedImage hotPotatoSkullIcon;
 
-    public PlayerOverlay(Client client, RunePartyConfig config, RunePartyPlugin plugin, RosterReducer roster, ModelOutlineRenderer modelOutlineRenderer)
+    public PlayerOverlay(Client client, RunePartyPlugin plugin, RosterReducer roster, ModelOutlineRenderer modelOutlineRenderer)
     {
         this.client = client;
-        this.config = config;
         this.plugin = plugin;
         this.roster = roster;
         this.modelOutlineRenderer = modelOutlineRenderer;
@@ -116,7 +113,6 @@ public class PlayerOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (!config.showOverlay()) return null;
         GamePhase phase = plugin.getPhase();
         if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE) return null;
 

@@ -4,7 +4,6 @@ import gay.runescape.runeparty.net.ApiClient;
 import gay.runescape.runeparty.courses.CoursePreset;
 import gay.runescape.runeparty.GamePhase;
 import gay.runescape.runeparty.RunePartyColor;
-import gay.runescape.runeparty.RunePartyConfig;
 import gay.runescape.runeparty.RunePartyPlugin;
 import gay.runescape.runeparty.SceneObjectSet;
 import gay.runescape.runeparty.TileReducer;
@@ -201,7 +200,6 @@ public class TileOverlay extends Overlay
     private static final Color COLOR_MINIGAME_SPAWN_ARROW = new Color(180, 0, 255);
 
     private final Client client;
-    private final RunePartyConfig config;
     private final RunePartyPlugin plugin;
     private final TileReducer tileReducer;
 
@@ -237,10 +235,9 @@ public class TileOverlay extends Overlay
     private long lastModelSyncRevision = -1;
     private boolean lastModelSyncPending = false;
 
-    public TileOverlay(Client client, RunePartyConfig config, RunePartyPlugin plugin, TileReducer tileReducer)
+    public TileOverlay(Client client, RunePartyPlugin plugin, TileReducer tileReducer)
     {
         this.client = client;
-        this.config = config;
         this.plugin = plugin;
         this.tileReducer = tileReducer;
 
@@ -261,20 +258,6 @@ public class TileOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (!config.showTileOverlay())
-        {
-            clearGoldenGnomeModels();
-            clearCoinTrapModels();
-            clearCoinRushModels();
-            clearArenaFireModels();
-            clearPondModels();
-            clearTableModels();
-            clearSandwichItemModels();
-            clearRuneMatchModels();
-            clearBalloonModels();
-            lastModelSyncRevision = -1; // force a real resync once rendering resumes -- see that field's own doc
-            return null;
-        }
         GamePhase phase = plugin.getPhase();
         if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE)
         {

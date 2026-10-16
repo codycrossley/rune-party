@@ -5,7 +5,6 @@ import gay.runescape.runeparty.net.MinigameReward;
 import gay.runescape.runeparty.net.MinigameScore;
 import gay.runescape.runeparty.RosterReducer;
 import gay.runescape.runeparty.RunePartyColor;
-import gay.runescape.runeparty.RunePartyConfig;
 import gay.runescape.runeparty.RunePartyPlugin;
 import gay.runescape.runeparty.TrueOrFalseResult;
 import gay.runescape.runeparty.WheelEntry;
@@ -267,7 +266,6 @@ public class AnnouncementOverlay extends Overlay
     private static final Font MARIO_PARTY_FONT = RunePartyFonts.MARIO_PARTY;
 
     private final Client client;
-    private final RunePartyConfig config;
     private final RunePartyPlugin plugin;
 
     // The item drawn above the Chance Tile arrow -- see drawChanceSpaceArrow. Placeholder art for
@@ -276,10 +274,9 @@ public class AnnouncementOverlay extends Overlay
     private final BufferedImage chanceSpaceCoinIcon;
     private final BufferedImage chanceSpaceGnomeIcon;
 
-    public AnnouncementOverlay(Client client, RunePartyConfig config, RunePartyPlugin plugin)
+    public AnnouncementOverlay(Client client, RunePartyPlugin plugin)
     {
         this.client = client;
-        this.config = config;
         this.plugin = plugin;
         this.chanceSpaceCoinIcon = ImageUtil.loadImageResource(getClass(), "chance_space/coin-icon.png");
         this.chanceSpaceGnomeIcon = ImageUtil.loadImageResource(getClass(), "chance_space/golden-gnome-icon.png");
@@ -294,7 +291,6 @@ public class AnnouncementOverlay extends Overlay
         // Hide every banner while the full-screen course map is up -- nothing here has a "missed
         // it" state, so skipping frames is safe.
         if (plugin.isMapShowing()) return null;
-        if (!config.showOverlay()) return null;
         GamePhase phase = plugin.getPhase();
         // ENDED is included so the end-game awards ceremony can still render past the instant the
         // phase flips; every other render* call below is still gated on its own until-timestamp.
