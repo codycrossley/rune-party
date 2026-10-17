@@ -7,11 +7,8 @@ import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 
-import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
-import java.awt.Font;
-import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 
@@ -54,41 +51,8 @@ public class DanceDanceRuneScapeHudOverlay extends Overlay
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
-        Font titleFont = FontManager.getRunescapeSmallFont().deriveFont(TITLE_SIZE);
-        Font scoreFont = FontManager.getRunescapeBoldFont().deriveFont(SCORE_SIZE);
-
-        String scoreText = String.valueOf(plugin.getDanceDanceRuneScapeScore());
-
-        g.setFont(scoreFont);
-        FontMetrics scoreFm = g.getFontMetrics();
-        int scoreWidth = scoreFm.stringWidth(scoreText);
-
-        g.setFont(titleFont);
-        FontMetrics titleFm = g.getFontMetrics();
-        int titleWidth = titleFm.stringWidth(TITLE);
-
-        int width = PADDING_X * 2 + Math.max(scoreWidth, titleWidth);
-        int height = PADDING_Y * 2 + titleFm.getHeight() + TITLE_ROW_GAP + scoreFm.getHeight();
-
-        g.setColor(BACKGROUND);
-        g.fillRoundRect(0, 0, width, height, CORNER_RADIUS, CORNER_RADIUS);
-        g.setStroke(new BasicStroke(2f));
-        g.setColor(BORDER);
-        g.drawRoundRect(1, 1, width - 2, height - 2, CORNER_RADIUS, CORNER_RADIUS);
-
-        g.setFont(titleFont);
-        g.setColor(TITLE_COLOR);
-        int titleY = PADDING_Y + titleFm.getAscent();
-        g.drawString(TITLE, (width - titleWidth) / 2, titleY);
-
-        g.setFont(scoreFont);
-        int scoreY = titleY + titleFm.getDescent() + TITLE_ROW_GAP + scoreFm.getAscent();
-        int scoreX = (width - scoreWidth) / 2;
-        g.setColor(Color.BLACK);
-        g.drawString(scoreText, scoreX + 1, scoreY + 1);
-        g.setColor(TEXT_COLOR);
-        g.drawString(scoreText, scoreX, scoreY);
-
-        return new Dimension(width, height);
+        return RunePartyRender.drawTitledStatPanel(g, PADDING_X, PADDING_Y, TITLE_ROW_GAP, CORNER_RADIUS,
+            BACKGROUND, BORDER, FontManager.getRunescapeSmallFont().deriveFont(TITLE_SIZE), TITLE, TITLE_COLOR,
+            FontManager.getRunescapeBoldFont().deriveFont(SCORE_SIZE), String.valueOf(plugin.getDanceDanceRuneScapeScore()), TEXT_COLOR);
     }
 }

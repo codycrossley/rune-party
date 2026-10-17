@@ -17,7 +17,6 @@ public final class Minigames
     static
     {
         REGISTRY.register(new CoinRushMinigame());
-        REGISTRY.register(new TrueOrFalseMinigame());
         REGISTRY.register(new ArenaMinigame());
         REGISTRY.register(new FishingContestMinigame());
         REGISTRY.register(new TurfWarsMinigame());

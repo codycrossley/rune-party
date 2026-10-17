@@ -255,9 +255,6 @@ public final class Events
     public static final String TILE_UNMARKED = "TILE_UNMARKED";
     public static final String TILES_MARKED = "TILES_MARKED";
     public static final String TILES_UNMARKED = "TILES_UNMARKED";
-    public static final String TRUE_OR_FALSE_ANSWERED = "TRUE_OR_FALSE_ANSWERED";
-    public static final String TRUE_OR_FALSE_ROUND_ENDED = "TRUE_OR_FALSE_ROUND_ENDED";
-    public static final String TRUE_OR_FALSE_ROUND_STARTED = "TRUE_OR_FALSE_ROUND_STARTED";
     /** Server-only echo of this client's own one-shot confirm-turf-wars-arrival call -- never
      * dispatched on here, the server's own arrival gate is what actually reacts to it (see
      * minigames/turf_wars.py). Same treatment ARENA_ARRIVAL_CONFIRMED already gets. */

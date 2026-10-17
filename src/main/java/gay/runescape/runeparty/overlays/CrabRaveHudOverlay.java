@@ -7,11 +7,8 @@ import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 
-import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
-import java.awt.Font;
-import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 
@@ -58,41 +55,8 @@ public class CrabRaveHudOverlay extends Overlay
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
-        Font titleFont = FontManager.getRunescapeSmallFont().deriveFont(TITLE_SIZE);
-        Font countFont = FontManager.getRunescapeBoldFont().deriveFont(COUNT_SIZE);
-
-        String countText = String.valueOf(plugin.getCrabRaveDanceCount());
-
-        g.setFont(countFont);
-        FontMetrics countFm = g.getFontMetrics();
-        int countWidth = countFm.stringWidth(countText);
-
-        g.setFont(titleFont);
-        FontMetrics titleFm = g.getFontMetrics();
-        int titleWidth = titleFm.stringWidth(TITLE);
-
-        int width = PADDING_X * 2 + Math.max(countWidth, titleWidth);
-        int height = PADDING_Y * 2 + titleFm.getHeight() + TITLE_ROW_GAP + countFm.getHeight();
-
-        g.setColor(BACKGROUND);
-        g.fillRoundRect(0, 0, width, height, CORNER_RADIUS, CORNER_RADIUS);
-        g.setStroke(new BasicStroke(2f));
-        g.setColor(BORDER);
-        g.drawRoundRect(1, 1, width - 2, height - 2, CORNER_RADIUS, CORNER_RADIUS);
-
-        g.setFont(titleFont);
-        g.setColor(TITLE_COLOR);
-        int titleY = PADDING_Y + titleFm.getAscent();
-        g.drawString(TITLE, (width - titleWidth) / 2, titleY);
-
-        g.setFont(countFont);
-        int countY = titleY + titleFm.getDescent() + TITLE_ROW_GAP + countFm.getAscent();
-        int countX = (width - countWidth) / 2;
-        g.setColor(Color.BLACK);
-        g.drawString(countText, countX + 1, countY + 1);
-        g.setColor(TEXT_COLOR);
-        g.drawString(countText, countX, countY);
-
-        return new Dimension(width, height);
+        return RunePartyRender.drawTitledStatPanel(g, PADDING_X, PADDING_Y, TITLE_ROW_GAP, CORNER_RADIUS,
+            BACKGROUND, BORDER, FontManager.getRunescapeSmallFont().deriveFont(TITLE_SIZE), TITLE, TITLE_COLOR,
+            FontManager.getRunescapeBoldFont().deriveFont(COUNT_SIZE), String.valueOf(plugin.getCrabRaveDanceCount()), TEXT_COLOR);
     }
 }

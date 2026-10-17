@@ -1,9 +1,7 @@
 package gay.runescape.runeparty.net;
 
 import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import gay.runescape.runeparty.TrueOrFalseResult;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.coords.WorldPoint;
 
@@ -168,32 +166,6 @@ public final class Json
                 String rsn = safeStr(entry, "player");
                 Integer score = safeInt(entry, "score");
                 if (rsn != null && score != null) out.add(new MinigameScore(rsn, score));
-            }
-            catch (Exception ignored) { /* skip malformed entry */ }
-        }
-        return out;
-    }
-
-    /** Parses a TRUE_OR_FALSE_ROUND_ENDED payload's "results" list. {@code answer} is nullable
-     * (missing/null JSON means the player never answered that round at all, not that they
-     * answered false). */
-    public static List<TrueOrFalseResult> safeTrueOrFalseResults(JsonObject o)
-    {
-        if (o == null || !o.has("results") || o.get("results").isJsonNull() || !o.get("results").isJsonArray()) return Collections.emptyList();
-        JsonArray arr = o.get("results").getAsJsonArray();
-        List<TrueOrFalseResult> out = new ArrayList<>(arr.size());
-        for (int i = 0; i < arr.size(); i++)
-        {
-            try
-            {
-                JsonObject entry = arr.get(i).getAsJsonObject();
-                String rsn = safeStr(entry, "player");
-                if (rsn == null) continue;
-                JsonElement answerEl = entry.get("answer");
-                Boolean answer = answerEl != null && !answerEl.isJsonNull() ? answerEl.getAsBoolean() : null;
-                JsonElement correctEl = entry.get("correct");
-                boolean correct = correctEl != null && !correctEl.isJsonNull() && correctEl.getAsBoolean();
-                out.add(new TrueOrFalseResult(rsn, answer, correct));
             }
             catch (Exception ignored) { /* skip malformed entry */ }
         }

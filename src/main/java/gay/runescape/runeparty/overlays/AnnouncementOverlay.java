@@ -6,7 +6,6 @@ import gay.runescape.runeparty.net.MinigameScore;
 import gay.runescape.runeparty.RosterReducer;
 import gay.runescape.runeparty.RunePartyColor;
 import gay.runescape.runeparty.RunePartyPlugin;
-import gay.runescape.runeparty.TrueOrFalseResult;
 import gay.runescape.runeparty.WheelEntry;
 import gay.runescape.runeparty.overlays.layout.Box;
 import gay.runescape.runeparty.overlays.layout.Layout;
@@ -149,19 +148,12 @@ public class AnnouncementOverlay extends Overlay
     private static final Color MINIGAME_REWARDS_COLOR = new Color(80, 220, 120);
     private static final Color MINIGAME_REWARDS_NONE_COLOR = Color.GRAY;
 
-    private static final float TRUE_OR_FALSE_ROUND_LABEL_SIZE = 22f; // "Round 2/5"
-    private static final float TRUE_OR_FALSE_QUESTION_SIZE = 26f;
-    private static final int TRUE_OR_FALSE_QUESTION_LINE_HEIGHT = 32;
-    private static final int TRUE_OR_FALSE_QUESTION_MAX_WIDTH = 620;
-    private static final float TRUE_OR_FALSE_COUNTDOWN_SIZE = 34f;
-    private static final Color TRUE_OR_FALSE_COUNTDOWN_COLOR = RAINBOW_YELLOW;
-
-    private static final long TRUE_OR_FALSE_REVEAL_FADE_MS = 400;
-    private static final float TRUE_OR_FALSE_REVEAL_TITLE_SIZE = 30f;
-    private static final float TRUE_OR_FALSE_REVEAL_LINE_SIZE = 18f;
-    private static final int TRUE_OR_FALSE_REVEAL_LINE_HEIGHT = 24;
-    private static final Color TRUE_OR_FALSE_TRUE_COLOR = new Color(80, 220, 80);
-    private static final Color TRUE_OR_FALSE_FALSE_COLOR = new Color(220, 70, 70);
+    // Originally True or False's own countdown styling -- that mini-game's since been removed, but
+    // Crab Rave's and Brutus Attack's own big centered round countdowns (renderCrabRaveCountdown/
+    // renderBrutusAttackDashCountdown) still reuse this exact size/color, so the constant stays,
+    // just renamed to not reference a mini-game that no longer exists.
+    private static final float ROUND_COUNTDOWN_SIZE = 34f;
+    private static final Color ROUND_COUNTDOWN_COLOR = RAINBOW_YELLOW;
 
     // End-game awards ceremony: "GAME OVER!" -> intro -> one place reveal per eliminated player ->
     // suspense -> winner. Each phase gets its own fade/size below, in the order it plays.
@@ -343,8 +335,6 @@ public class AnnouncementOverlay extends Overlay
         }
         renderRainbowRushTrafficLight(g);
         renderArrivalRoundBeginBanner(g);
-        renderTrueOrFalseReveal(g);
-        renderTrueOrFalseQuestion(g);
         renderCrabRaveCountdown(g);
         renderBrutusAttackDashCountdown(g);
         renderBrutusAttackDashResult(g);
@@ -1615,83 +1605,8 @@ public class AnnouncementOverlay extends Overlay
         Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
     }
 
-    /** Draws the current True or False round's question, a live countdown to its answer deadline,
-     * and a "who's answered" tally. The countdown number stays hidden ("Get ready...") for a brief
-     * reading period before the real answer clock starts. */
-    private void renderTrueOrFalseQuestion(Graphics2D g)
-    {
-        if (!plugin.isMinigamePlayable()) return;
-        if (System.currentTimeMillis() < plugin.getTrueOrFalseRevealUntil()) return;
-        String question = plugin.getTrueOrFalseQuestion();
-        if (question == null) return;
-
-        int centerX = drawableWidth() / 2;
-        int y = drawableHeight() / 3 - 20;
-        int maxWidth = safeTextWidth();
-
-        Node roundLabel = Text.of("Round " + plugin.getTrueOrFalseRoundNumber() + "/5")
-            .font(FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_ROUND_LABEL_SIZE)).color(Color.WHITE);
-        Layout.renderCentered(g, roundLabel, centerX, y, maxWidth, 1f);
-
-        Text questionText = Text.of(question)
-            .font(FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_QUESTION_SIZE))
-            .color(Color.WHITE)
-            .wrap(Math.min(TRUE_OR_FALSE_QUESTION_MAX_WIDTH, maxWidth))
-            .lineHeight(TRUE_OR_FALSE_QUESTION_LINE_HEIGHT);
-        Dimension questionSize = Layout.renderCentered(g, questionText, centerX, y + 34, maxWidth, 1f);
-        int afterQuestionY = y + 34 + questionSize.height;
-
-        long now = System.currentTimeMillis();
-        if (now < plugin.getTrueOrFalseAnswerWindowStartsAt())
-        {
-            Node getReady = Text.of("Get ready...").font(FontManager.getRunescapeSmallFont()).color(Color.LIGHT_GRAY);
-            Layout.renderCentered(g, getReady, centerX, afterQuestionY + 34, maxWidth, 1f);
-        }
-        else
-        {
-            long remainingMs = plugin.getTrueOrFalseRoundEndsAt() - now;
-            int secondsLeft = (int) Math.max(0, Math.ceil(remainingMs / 1000.0));
-            Node countdown = Text.of(String.valueOf(secondsLeft)).font(MARIO_PARTY_FONT.deriveFont(TRUE_OR_FALSE_COUNTDOWN_SIZE)).color(TRUE_OR_FALSE_COUNTDOWN_COLOR);
-            Layout.renderCentered(g, countdown, centerX, afterQuestionY + 40, maxWidth, 1f);
-        }
-
-        Font emoteFont = FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
-        Font emoteWordFont = MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_EMOTE_SIZE);
-        int emoteY = afterQuestionY + 72;
-        Node yesLine = Line.of(
-            Segment.plain("'", emoteFont, Color.LIGHT_GRAY),
-            Segment.rainbow("YES", emoteWordFont, RAINBOW_LETTER_COLORS),
-            Segment.plain("' = True", emoteFont, Color.LIGHT_GRAY));
-        Layout.renderCentered(g, yesLine, centerX - 100, emoteY, maxWidth, 1f);
-        Node noLine = Line.of(
-            Segment.plain("'", emoteFont, Color.LIGHT_GRAY),
-            Segment.rainbow("NO", emoteWordFont, RAINBOW_LETTER_COLORS),
-            Segment.plain("' = False", emoteFont, Color.LIGHT_GRAY));
-        Layout.renderCentered(g, noLine, centerX + 100, emoteY, maxWidth, 1f);
-
-        Set<String> answered = plugin.getTrueOrFalseAnsweredRsns();
-        List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
-        players.sort(Comparator.comparing((RosterReducer.RosterEntry e) -> e.number));
-
-        Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
-        Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(ROUND_COMPLETE_LINE_SIZE);
-        Table table = Table.rows().rowHeight(ROUND_COMPLETE_LINE_HEIGHT);
-        for (RosterReducer.RosterEntry entry : players)
-        {
-            boolean isAnswered = answered.contains(entry.rsn.toLowerCase());
-            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
-            Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
-            table.addRow(
-                Segment.plain("", nameFont, Color.LIGHT_GRAY),
-                Segment.plain(entry.rsn, nameFont, nameColor),
-                Segment.plain(isAnswered ? "   Answered!" : "   Waiting...", statsFont,
-                    isAnswered ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR));
-        }
-        Layout.renderCentered(g, table, centerX, emoteY + 36, maxWidth, 1f);
-    }
-
     /** Crab Rave's own big centered countdown, ticking down from getCrabRaveEndsAt() -- same
-     * secondsLeft math renderTrueOrFalseQuestion's own countdown number already uses. No
+     * secondsLeft math renderBrutusAttackDashCountdown's own countdown number already uses. No
      * instructional subtitle here -- the mini-game's own instructions banner (shown once, at
      * MINIGAME_STARTED) already told players to dance, so a second persistent reminder for the
      * whole round would just be clutter (see CrabRaveHudOverlay for the local dance counter that
@@ -1712,7 +1627,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 3;
 
         int secondsLeft = (int) Math.max(0, Math.ceil((endsAt - now) / 1000.0));
-        Node message = Text.of(String.valueOf(secondsLeft)).font(MARIO_PARTY_FONT.deriveFont(TRUE_OR_FALSE_COUNTDOWN_SIZE)).color(TRUE_OR_FALSE_COUNTDOWN_COLOR);
+        Node message = Text.of(String.valueOf(secondsLeft)).font(MARIO_PARTY_FONT.deriveFont(ROUND_COUNTDOWN_SIZE)).color(ROUND_COUNTDOWN_COLOR);
         Layout.renderCentered(g, message, centerX, y, safeTextWidth(), 1f);
     }
 
@@ -1772,7 +1687,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 3;
 
         int secondsLeft = (int) Math.max(0, Math.ceil((endsAt - now) / 1000.0));
-        Node message = Text.of(String.valueOf(secondsLeft)).font(MARIO_PARTY_FONT.deriveFont(TRUE_OR_FALSE_COUNTDOWN_SIZE)).color(TRUE_OR_FALSE_COUNTDOWN_COLOR);
+        Node message = Text.of(String.valueOf(secondsLeft)).font(MARIO_PARTY_FONT.deriveFont(ROUND_COUNTDOWN_SIZE)).color(ROUND_COUNTDOWN_COLOR);
         Layout.renderCentered(g, message, centerX, y, safeTextWidth(), 1f);
     }
 
@@ -1854,42 +1769,6 @@ public class AnnouncementOverlay extends Overlay
             Node message = Text.of(othersRsn + " was eliminated!").font(font).color(DICE_ROLL_BONUS_NEGATIVE_COLOR);
             Layout.renderCentered(g, message, centerX, othersY, safeTextWidth(), othersAlpha);
         }
-    }
-
-    /** Draws the previous True or False round's reveal -- the correct answer, plus every player's
-     * own answer and whether it was correct. Fixed-duration, since the answer doesn't change once
-     * revealed. */
-    private void renderTrueOrFalseReveal(Graphics2D g)
-    {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getTrueOrFalseRevealUntil(), TRUE_OR_FALSE_REVEAL_FADE_MS);
-        if (alpha == null) return;
-        Boolean correctAnswer = plugin.getTrueOrFalseLastCorrectAnswer();
-        if (correctAnswer == null) return;
-
-        int centerX = drawableWidth() / 2;
-        int y = drawableHeight() / 3;
-        int maxWidth = safeTextWidth();
-
-        String title = "The answer was " + (correctAnswer ? "TRUE" : "FALSE") + "!";
-        Color titleColor = correctAnswer ? TRUE_OR_FALSE_TRUE_COLOR : TRUE_OR_FALSE_FALSE_COLOR;
-        Node titleNode = Text.of(title).font(FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_REVEAL_TITLE_SIZE)).color(titleColor);
-        Layout.renderCentered(g, titleNode, centerX, y, maxWidth, alpha);
-
-        Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(TRUE_OR_FALSE_REVEAL_LINE_SIZE);
-        Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(TRUE_OR_FALSE_REVEAL_LINE_SIZE);
-
-        List<TrueOrFalseResult> results = plugin.getTrueOrFalseLastResults();
-        Table table = Table.rows().rowHeight(TRUE_OR_FALSE_REVEAL_LINE_HEIGHT);
-        for (TrueOrFalseResult result : results)
-        {
-            String answerText = result.answer == null ? "no answer" : (result.answer ? "True" : "False");
-            String status = "   " + answerText + (result.correct ? " -- correct!" : " -- wrong");
-            Color statusColor = result.correct ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR;
-            table.addRow(
-                Segment.plain(result.rsn, nameFont, Color.LIGHT_GRAY),
-                Segment.plain(status, statsFont, statusColor));
-        }
-        Layout.renderCentered(g, table, centerX, y + 36, maxWidth, alpha);
     }
 
     /** Draws the mini-game final-score recap -- "FINAL SCORE", then every seated player with the

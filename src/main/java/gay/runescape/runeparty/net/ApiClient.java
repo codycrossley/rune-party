@@ -666,22 +666,6 @@ public class ApiClient
         postPlayerAction("/v1/games/" + gameId + "/confirm-sandwich-rush-arrival", playerRsn, playerToken, "Confirm Sandwich Rush arrival");
     }
 
-    /** Reports the local player's YES ("True")/NO ("False") emote answering the current True or
-     * False round. 409s a second attempt for the same round, or if no question is open. Never
-     * echoes back correctness -- that's only revealed once the round ends. */
-    public void answerTrueOrFalse(String gameId, String playerRsn, String playerToken, boolean answer) throws IOException
-    {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-        body.addProperty("answer", answer);
-
-        try (Response resp = post("/v1/games/" + gameId + "/true-or-false-answer", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Answer True or False failed (" + resp.code() + "): " + raw);
-        }
-    }
-
     /** Passes the Hot Potato -- only succeeds if the caller is the current holder. */
     public void passHotPotato(String gameId, String playerRsn, String playerToken) throws IOException
     {

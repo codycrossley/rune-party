@@ -21,9 +21,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * the exact same shared set every seated client sees. Unlike rounds 2/3 (applied the instant that
  * event lands), a LIVE client's own round 1 is deliberately buffered until onRoundBegin() actually
  * fires -- see pendingFirstRoundNumber's own doc for why. roundStartAt anchors this class's own
- * local peek/challenge clock, the same "stamp off my own round-scoped event, not the generic
- * MINIGAME_ROUND_BEGIN" shape TrueOrFalsePresentation's own roundStartedAt uses (that one's safe
- * to apply immediately since True or False isn't arrival-gated -- see getEndsAt).
+ * local peek/challenge clock, stamping off this mini-game's own round-scoped event rather than the
+ * generic MINIGAME_ROUND_BEGIN (see getEndsAt).
  * attemptedIndices is purely local judging: EVERY cell the local player has stood on and SPUN
  * since this round began (see onSpinFinished), correct or not -- deliberately not filtered down to
  * just the correct ones, since TileOverlay#renderRepeatAfterMeTile needs the full picked set both

@@ -3,11 +3,8 @@ package gay.runescape.runeparty.overlays;
 import gay.runescape.runeparty.RunePartyColor;
 import gay.runescape.runeparty.RunePartyPlugin;
 
-import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
-import java.awt.Font;
-import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import net.runelite.client.ui.FontManager;
@@ -67,46 +64,12 @@ public class ClickClickClickOverlay extends Overlay
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
-        Font labelFont = FontManager.getRunescapeSmallFont().deriveFont(LABEL_SIZE);
-        Font numberFont = RunePartyFonts.MARIO_PARTY.deriveFont(NUMBER_SIZE);
         String numberText = String.valueOf(plugin.getClickClickClickUniqueTileCount());
-
         RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(plugin.getLocalRsn()));
         Color numberColor = seatColor != null ? seatColor.awt : NUMBER_COLOR_FALLBACK;
 
-        g.setFont(labelFont);
-        FontMetrics labelFm = g.getFontMetrics();
-        int labelWidth = labelFm.stringWidth(LABEL);
-
-        g.setFont(numberFont);
-        FontMetrics numberFm = g.getFontMetrics();
-        int numberWidth = numberFm.stringWidth(numberText);
-
-        int width = PADDING_X * 2 + Math.max(labelWidth, numberWidth);
-        int height = PADDING_Y * 2 + labelFm.getHeight() + LABEL_GAP + numberFm.getHeight();
-
-        g.setColor(BACKGROUND);
-        g.fillRoundRect(0, 0, width, height, CORNER_RADIUS, CORNER_RADIUS);
-        g.setStroke(new BasicStroke(2f));
-        g.setColor(BORDER);
-        g.drawRoundRect(1, 1, width - 2, height - 2, CORNER_RADIUS, CORNER_RADIUS);
-
-        g.setFont(labelFont);
-        int labelY = PADDING_Y + labelFm.getAscent();
-        drawShadowedText(g, LABEL, (width - labelWidth) / 2, labelY, LABEL_COLOR);
-
-        g.setFont(numberFont);
-        int numberY = labelY + labelFm.getDescent() + LABEL_GAP + numberFm.getAscent();
-        drawShadowedText(g, numberText, (width - numberWidth) / 2, numberY, numberColor);
-
-        return new Dimension(width, height);
-    }
-
-    private static void drawShadowedText(Graphics2D g, String text, int x, int y, Color color)
-    {
-        g.setColor(Color.BLACK);
-        g.drawString(text, x + 2, y + 2);
-        g.setColor(color);
-        g.drawString(text, x, y);
+        return RunePartyRender.drawTitledStatPanel(g, PADDING_X, PADDING_Y, LABEL_GAP, CORNER_RADIUS,
+            BACKGROUND, BORDER, FontManager.getRunescapeSmallFont().deriveFont(LABEL_SIZE), LABEL, LABEL_COLOR,
+            RunePartyFonts.MARIO_PARTY.deriveFont(NUMBER_SIZE), numberText, numberColor);
     }
 }

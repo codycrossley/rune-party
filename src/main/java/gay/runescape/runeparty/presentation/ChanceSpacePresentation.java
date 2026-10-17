@@ -210,8 +210,7 @@ public final class ChanceSpacePresentation
         return lander + " landed on a Chance Tile, but neither " + participantA + " nor " + participantB + " had a Golden Gnome to give!";
     }
 
-    // Boolean field with no plain accessor on Json -- same inline null-safe read Json's own
-    // safeTrueOrFalseResults uses for TRUE_OR_FALSE_ROUND_ENDED's "answer" field.
+    // Boolean field with no plain accessor on Json -- a plain inline null-safe read.
     private static Boolean safeBool(com.google.gson.JsonObject o, String key)
     {
         com.google.gson.JsonElement el = o != null ? o.get(key) : null;

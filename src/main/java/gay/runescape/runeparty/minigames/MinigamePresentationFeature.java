@@ -28,8 +28,8 @@ public interface MinigamePresentationFeature
 
     /** Stamps this minigame's own round-start wall-clock timestamp -- called once, right as
      * MINIGAME_ROUND_BEGIN takes effect, for whichever minigame is currently active. Default
-     * no-op, for a minigame that anchors its own timing off a different event instead (True or
-     * False anchors off its own TRUE_OR_FALSE_ROUND_STARTED). {@code catchingUp} is here (unlike
+     * no-op, for a minigame that anchors its own timing off a different event instead (see
+     * RepeatAfterMePresentation's own doc for one such example). {@code catchingUp} is here (unlike
      * onStarted's own identically-shaped parameter, this isn't just mirroring it for consistency)
      * for a real reason: a reconnecting client replaying this same event mid-round should never
      * repeat a one-shot cosmetic side effect the round's own real start should only ever trigger

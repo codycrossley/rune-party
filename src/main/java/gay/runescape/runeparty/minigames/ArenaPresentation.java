@@ -41,8 +41,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * only ever originates that event's confirming request, never reacts to it. */
 public final class ArenaPresentation implements MinigamePresentationFeature
 {
-    // Same duration MageArenaPresentation's own eliminationBannerUntil uses for its "<rsn> was
-    // eliminated!" flash -- see armEliminationBanner's own doc.
+    // Same duration MageArenaPresentation's own banner uses -- see EliminationBanner's own doc.
     private static final long ELIMINATION_BANNER_DURATION_MS = 1800;
 
     private final RunePartyPlugin plugin;
@@ -52,23 +51,21 @@ public final class ArenaPresentation implements MinigamePresentationFeature
     private volatile boolean eliminationReported = false;
 
     // Persistent for the rest of the round (never cleared until onStarted/reset), unlike the
-    // transient banners below -- read by PlayerOverlay's own skull icon, same "Hot Potato" treatment
+    // transient banner below -- read by PlayerOverlay's own skull icon, same "Hot Potato" treatment
     // HotPotatoPresentation's own eliminatedRsns already established. Lowercase rsn.
     private final Set<String> eliminatedRsns = ConcurrentHashMap.newKeySet();
 
     // Armed from RunePartyPlugin's own ARENA_PLAYER_ELIMINATED handling (not folded here via
     // apply() -- see this class' own doc on why that event is still handled directly in the
-    // plugin's switch). Split into two independent slots -- see armEliminationBanner's own doc on
-    // why -- rather than one shared pair the way an earlier version of this had it.
-    private volatile long localEliminationBannerUntil = 0;
-    private volatile long othersEliminationBannerUntil = 0;
-    private volatile String othersEliminationBannerRsn = null;
+    // plugin's switch). See EliminationBanner's own doc for the local/others split.
+    private final EliminationBanner eliminationBanner;
 
     public ArenaPresentation(RunePartyPlugin plugin)
     {
         this.plugin = plugin;
         this.arrivalGate = new ArrivalGate(plugin, "Arena", "the flame field",
             (self, gid, token) -> plugin.apiClient.confirmArenaArrival(gid, self, token));
+        this.eliminationBanner = new EliminationBanner(plugin, ELIMINATION_BANNER_DURATION_MS);
     }
 
     /** Called once per real game tick from RunePartyPlugin#onGameTick while Arena is active. Fires
@@ -121,9 +118,7 @@ public final class ArenaPresentation implements MinigamePresentationFeature
         arrivalGate.reset();
         eliminationReported = false;
         eliminatedRsns.clear();
-        localEliminationBannerUntil = 0;
-        othersEliminationBannerUntil = 0;
-        othersEliminationBannerRsn = null;
+        eliminationBanner.reset();
     }
 
     @Override
@@ -132,9 +127,7 @@ public final class ArenaPresentation implements MinigamePresentationFeature
         arrivalGate.reset();
         eliminationReported = false;
         eliminatedRsns.clear();
-        localEliminationBannerUntil = 0;
-        othersEliminationBannerUntil = 0;
-        othersEliminationBannerRsn = null;
+        eliminationBanner.reset();
     }
 
     /** Lowercase rsns eliminated so far this round -- see PlayerOverlay's own persistent skull icon,
@@ -147,51 +140,16 @@ public final class ArenaPresentation implements MinigamePresentationFeature
     /** Arms Flame Field's own "&lt;rsn&gt; was eliminated!"/"You were eliminated!" flash -- called
      * from RunePartyPlugin's own ARENA_PLAYER_ELIMINATED handling (not folded here via apply(), see
      * this class' own doc), right alongside the existing spotanim/chat message and the persistent
-     * skull icon above, since the chat line alone was easy to miss mid-round.
-     * <p>
-     * Deliberately routed into one of two completely independent slots depending on whether {@code
-     * rsn} is the local viewer, rather than one shared pair: an earlier version of this used a single
-     * slot for every elimination, which meant two eliminations landing within the same ~1.8s window
-     * -- plausible now that Mage Arena's own cast can catch several dodgers in one "X" blast, and
-     * always possible here if Flame Field's heat gradient kills more than one player on the same
-     * tick -- would silently stomp each other, with no guarantee the locally-eliminated player's own
-     * "You were eliminated!" ever actually stayed on screen long enough to be read. Splitting the
-     * local slot out means a bystander's own elimination flash can never steal the one message that
-     * matters most to the player it's actually about -- only two LOCAL eliminations in the same
-     * window could still collide, which structurally can't happen (a player can only be eliminated
-     * once per round). The "others" slot can still be stomped by a second bystander's elimination
-     * arriving within the window, same as before, but that's a much lower-stakes case now that the
-     * persistent skull icon (see getEliminatedRsns above) means a missed flash is never the only way
-     * to learn someone's out. */
+     * skull icon above, since the chat line alone was easy to miss mid-round. See EliminationBanner
+     * for the local/others split's own reasoning. */
     public void armEliminationBanner(String rsn)
     {
         if (rsn == null) return;
         eliminatedRsns.add(rsn.toLowerCase(Locale.ROOT));
-
-        String local = plugin.getLocalRsn();
-        long until = System.currentTimeMillis() + ELIMINATION_BANNER_DURATION_MS;
-        if (local != null && local.equalsIgnoreCase(rsn))
-        {
-            localEliminationBannerUntil = until;
-        }
-        else
-        {
-            othersEliminationBannerRsn = rsn;
-            othersEliminationBannerUntil = until;
-        }
+        eliminationBanner.arm(rsn);
     }
 
-    /** When the local viewer's own "You were eliminated!" flash should disappear -- 0 if none is
-     * armed. Always about the local viewer by construction, so there's no accompanying rsn getter
-     * the way {@link #getOthersEliminationBannerRsn()} needs one. */
-    public long getLocalEliminationBannerUntil() { return localEliminationBannerUntil; }
-
-    /** Same idea, for the "&lt;rsn&gt; was eliminated!" flash shown for everyone ELSE'S eliminations
-     * -- independent of {@link #getLocalEliminationBannerUntil()} so the two can never stomp each
-     * other (see armEliminationBanner's own doc). */
-    public long getOthersEliminationBannerUntil() { return othersEliminationBannerUntil; }
-
-    /** Only meaningful while a caller has already confirmed via
-     * {@link #getOthersEliminationBannerUntil()} that the banner's own fade hasn't passed yet. */
-    public String getOthersEliminationBannerRsn() { return othersEliminationBannerRsn; }
+    public long getLocalEliminationBannerUntil() { return eliminationBanner.getLocalUntil(); }
+    public long getOthersEliminationBannerUntil() { return eliminationBanner.getOthersUntil(); }
+    public String getOthersEliminationBannerRsn() { return eliminationBanner.getOthersRsn(); }
 }

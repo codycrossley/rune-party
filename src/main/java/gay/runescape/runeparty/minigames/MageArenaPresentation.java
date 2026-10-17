@@ -54,8 +54,7 @@ public final class MageArenaPresentation implements MinigamePresentationFeature
     private static final long CAST_WARNING_MS = 600;
     private static final long CAST_DANGER_MS = 600;
 
-    // How long the "<rsn> was eliminated!" flash stays up -- see
-    // AnnouncementOverlay#renderMageArenaElimination, the only reader.
+    // How long the "<rsn> was eliminated!" flash stays up -- see EliminationBanner's own doc.
     private static final long ELIMINATION_BANNER_DURATION_MS = 1800;
 
     private final RunePartyPlugin plugin;
@@ -64,10 +63,11 @@ public final class MageArenaPresentation implements MinigamePresentationFeature
     private volatile long roundStartAt = 0;
     private final Set<String> eliminatedRsns = ConcurrentHashMap.newKeySet(); // lowercase rsn
 
-    // One-shot guard for onTick's own arrival report -- fires exactly once per player per mini-game
-    // instance (there's only ever one round, no re-gathering the way Brutus's own 3 rounds need),
-    // for every seated player including the eventual Mage -- see this class's own doc.
-    private volatile boolean confirmedArrivalThisRound = false;
+    // One-shot arrival report -- fires exactly once per player per mini-game instance (there's only
+    // ever one round, no re-gathering the way Brutus's own 3 rounds need), for every seated player
+    // including the eventual Mage, hence no role-branching needed -- see this class's own doc and
+    // ArrivalGate's own doc for why that makes this a plain fit for it (unlike Brutus/Jaddy).
+    private final ArrivalGate arrivalGate;
 
     // The most recently broadcast cast's own target tile and this client's own locally-computed
     // warning/detonate/resolved timestamps -- see this class's own doc. activeCastPoint is null
@@ -80,17 +80,15 @@ public final class MageArenaPresentation implements MinigamePresentationFeature
     // reset the instant a new cast lands, not once per round (see this class's own doc).
     private volatile boolean castProcessedForElimination = false;
 
-    // Split into two independent slots so a second dodger's own elimination (now plausible within
-    // the same window, given a single cast's own "X" blast can catch several at once) can never
-    // stomp the local player's own "You were eliminated!" flash -- see armEliminationBanner's own
-    // doc, same reasoning ArenaPresentation's identical pair now uses.
-    private volatile long localEliminationBannerUntil = 0;
-    private volatile long othersEliminationBannerUntil = 0;
-    private volatile String othersEliminationBannerRsn = null;
+    // See EliminationBanner's own doc for the local/others split's own reasoning.
+    private final EliminationBanner eliminationBanner;
 
     public MageArenaPresentation(RunePartyPlugin plugin)
     {
         this.plugin = plugin;
+        this.arrivalGate = new ArrivalGate(plugin, "Mage Arena", "the arena",
+            (self, gid, token) -> plugin.apiClient.confirmMageArenaArrival(gid, self, token));
+        this.eliminationBanner = new EliminationBanner(plugin, ELIMINATION_BANNER_DURATION_MS);
     }
 
     @Override
@@ -181,11 +179,7 @@ public final class MageArenaPresentation implements MinigamePresentationFeature
         String self = plugin.getLocalRsn();
         if (self == null) return;
 
-        if (!confirmedArrivalThisRound && plugin.findMageArenaTiles().contains(pos))
-        {
-            confirmedArrivalThisRound = true;
-            confirmArrival(self);
-        }
+        arrivalGate.confirmIfMatched(plugin.findMageArenaTiles().contains(pos));
 
         if (mageRsn == null || self.equalsIgnoreCase(mageRsn)) return; // nothing further for the Mage, or before one's assigned
         if (activeCastPoint == null || castProcessedForElimination) return;
@@ -200,17 +194,6 @@ public final class MageArenaPresentation implements MinigamePresentationFeature
 
         castProcessedForElimination = true;
         confirmElimination(self);
-    }
-
-    private void confirmArrival(String self)
-    {
-        final String gid = plugin.gameId;
-        final String token = plugin.playerToken;
-        if (gid == null || token == null) return;
-
-        plugin.submitAction("Confirm Mage Arena arrival",
-            () -> plugin.apiClient.confirmMageArenaArrival(gid, self, token),
-            e -> plugin.addChatMessage("Failed to confirm your Mage Arena arrival: " + e.getMessage()));
     }
 
     /** Fires the local player's own cast -- called directly from a menu-click action (see
@@ -262,15 +245,13 @@ public final class MageArenaPresentation implements MinigamePresentationFeature
         mageRsn = null;
         roundStartAt = 0;
         eliminatedRsns.clear();
-        confirmedArrivalThisRound = false;
+        arrivalGate.reset();
         activeCastPoint = null;
         activeCastWarningAt = 0;
         activeCastDetonateAt = 0;
         activeCastResolvedAt = 0;
         castProcessedForElimination = false;
-        localEliminationBannerUntil = 0;
-        othersEliminationBannerUntil = 0;
-        othersEliminationBannerRsn = null;
+        eliminationBanner.reset();
     }
 
     /** The rsn currently assigned as the Mage -- null before MAGE_ARENA_ROUND_STARTED lands. */
@@ -295,37 +276,16 @@ public final class MageArenaPresentation implements MinigamePresentationFeature
      * again until the next cast. */
     public long getActiveCastResolvedAt() { return activeCastResolvedAt; }
 
-    /** Routes a fresh elimination into one of two completely independent banner slots depending on
-     * whether {@code rsn} is the local viewer -- see ArenaPresentation#armEliminationBanner's own
-     * doc for the full reasoning (identical here): a bystander's own elimination can never stomp the
-     * one message that matters most to the player it's actually about, since the two slots share
-     * nothing. Only the caller (this class' own apply(), the MAGE_ARENA_PLAYER_ELIMINATED case)
-     * decides whether to call this at all -- gated there on !catchingUp, same as every other
-     * one-shot cosmetic reveal in this codebase. */
+    /** Only the caller (this class' own apply(), the MAGE_ARENA_PLAYER_ELIMINATED case) decides
+     * whether to call this at all -- gated there on !catchingUp, same as every other one-shot
+     * cosmetic reveal in this codebase. See EliminationBanner for the local/others split's own
+     * reasoning. */
     private void armEliminationBanner(String rsn)
     {
-        String local = plugin.getLocalRsn();
-        long until = System.currentTimeMillis() + ELIMINATION_BANNER_DURATION_MS;
-        if (local != null && local.equalsIgnoreCase(rsn))
-        {
-            localEliminationBannerUntil = until;
-        }
-        else
-        {
-            othersEliminationBannerRsn = rsn;
-            othersEliminationBannerUntil = until;
-        }
+        eliminationBanner.arm(rsn);
     }
 
-    /** When the local viewer's own "You were eliminated!" flash should disappear -- 0 if none is
-     * armed. Always about the local viewer by construction, so there's no accompanying rsn getter
-     * the way {@link #getOthersEliminationBannerRsn()} needs one. */
-    public long getLocalEliminationBannerUntil() { return localEliminationBannerUntil; }
-    /** Same idea, for the "&lt;rsn&gt; was eliminated!" flash shown for everyone ELSE'S
-     * eliminations -- independent of {@link #getLocalEliminationBannerUntil()} so the two can never
-     * stomp each other (see armEliminationBanner's own doc). */
-    public long getOthersEliminationBannerUntil() { return othersEliminationBannerUntil; }
-    /** Only meaningful while a caller has already confirmed via
-     * {@link #getOthersEliminationBannerUntil()} that the banner's own fade hasn't passed yet. */
-    public String getOthersEliminationBannerRsn() { return othersEliminationBannerRsn; }
+    public long getLocalEliminationBannerUntil() { return eliminationBanner.getLocalUntil(); }
+    public long getOthersEliminationBannerUntil() { return eliminationBanner.getOthersUntil(); }
+    public String getOthersEliminationBannerRsn() { return eliminationBanner.getOthersRsn(); }
 }

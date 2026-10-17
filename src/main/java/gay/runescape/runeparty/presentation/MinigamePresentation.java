@@ -25,7 +25,6 @@ import gay.runescape.runeparty.minigames.RepeatAfterMePresentation;
 import gay.runescape.runeparty.minigames.RuneMatchPresentation;
 import gay.runescape.runeparty.minigames.BalloonPopPresentation;
 import gay.runescape.runeparty.minigames.SandwichRushPresentation;
-import gay.runescape.runeparty.minigames.TrueOrFalsePresentation;
 import gay.runescape.runeparty.minigames.TurfWarsPresentation;
 import gay.runescape.runeparty.minigames.WhosYourJaddyPresentation;
 
@@ -98,8 +97,8 @@ public final class MinigamePresentation
     private volatile boolean minigameRoundBegun = false;
     // Same idea as JadPresentation's own awaitingBowFinish, one per response to a pending
     // mini-game ready-check -- see RunePartyPlugin#onAnimationChanged, which consults this via the
-    // arm/isAwaiting/clear methods below. True-or-False's/Hot Potato's own equivalents live on
-    // their own feature classes now.
+    // arm/isAwaiting/clear methods below. Hot Potato's own equivalent lives on its own feature
+    // class now.
     private volatile boolean awaitingMinigameReadyFinish = false;
     // ---- minigame banner (server-driven, everyone sees it -- see MINIGAME_STARTED handling) ----
     private final TimedBanner<Void> minigameBanner = new TimedBanner<>();
@@ -133,7 +132,6 @@ public final class MinigamePresentation
     private final ClickClickClickPresentation clickClickClick;
     private final TurfWarsPresentation turfWars;
     private final WhosYourJaddyPresentation jaddy;
-    private final TrueOrFalsePresentation trueOrFalse;
     private final HotPotatoPresentation hotPotato;
     private final DanceDanceRuneScapePresentation danceDanceRuneScape;
     private final RainbowRushPresentation rainbowRush;
@@ -157,7 +155,6 @@ public final class MinigamePresentation
         this.clickClickClick = new ClickClickClickPresentation();
         this.turfWars = new TurfWarsPresentation(plugin);
         this.jaddy = new WhosYourJaddyPresentation(plugin);
-        this.trueOrFalse = new TrueOrFalsePresentation(plugin);
         this.hotPotato = new HotPotatoPresentation(plugin);
         this.danceDanceRuneScape = new DanceDanceRuneScapePresentation(plugin);
         this.rainbowRush = new RainbowRushPresentation(plugin);
@@ -175,7 +172,6 @@ public final class MinigamePresentation
         features.put(RunePartyPlugin.CLICK_CLICK_CLICK_KEY, clickClickClick);
         features.put(RunePartyPlugin.TURF_WARS_KEY, turfWars);
         features.put(RunePartyPlugin.JADDY_KEY, jaddy);
-        features.put(RunePartyPlugin.TRUE_OR_FALSE_KEY, trueOrFalse);
         features.put(RunePartyPlugin.HOT_POTATO_KEY, hotPotato);
         features.put(RunePartyPlugin.DANCE_DANCE_RUNESCAPE_KEY, danceDanceRuneScape);
         features.put(RunePartyPlugin.RAINBOW_RUSH_KEY, rainbowRush);
@@ -508,8 +504,8 @@ public final class MinigamePresentation
     }
 
     // ---- awaiting-emote flag, consulted by RunePartyPlugin#onAnimationChanged as part of its
-    // single priority-ordered "which gesture am I waiting for" chain. True-or-False's/Hot Potato's
-    // own equivalents now live on trueOrFalse()/hotPotato() directly. ----
+    // single priority-ordered "which gesture am I waiting for" chain. Hot Potato's own equivalent
+    // now lives on hotPotato() directly. ----
     public void armAwaitingMinigameReadyFinish() { awaitingMinigameReadyFinish = true; }
     public boolean isAwaitingMinigameReadyFinish() { return awaitingMinigameReadyFinish; }
     public void clearAwaitingMinigameReadyFinish() { awaitingMinigameReadyFinish = false; }
@@ -548,7 +544,6 @@ public final class MinigamePresentation
     public ClickClickClickPresentation clickClickClick() { return clickClickClick; }
     public TurfWarsPresentation turfWars() { return turfWars; }
     public WhosYourJaddyPresentation jaddy() { return jaddy; }
-    public TrueOrFalsePresentation trueOrFalse() { return trueOrFalse; }
     public HotPotatoPresentation hotPotato() { return hotPotato; }
     public DanceDanceRuneScapePresentation danceDanceRuneScape() { return danceDanceRuneScape; }
     public RainbowRushPresentation rainbowRush() { return rainbowRush; }
