@@ -50,6 +50,7 @@ import gay.runescape.runeparty.overlays.JadEncounter;
 import gay.runescape.runeparty.overlays.JaddyDuelModel;
 import gay.runescape.runeparty.overlays.PlayerOverlay;
 import gay.runescape.runeparty.overlays.PlayerTransformOverlay;
+import gay.runescape.runeparty.overlays.RunePartyFonts;
 import gay.runescape.runeparty.overlays.RunePartyMapOverlay;
 import gay.runescape.runeparty.overlays.SandwichRushHudOverlay;
 import gay.runescape.runeparty.overlays.StatsOverlay;
@@ -1135,6 +1136,13 @@ public class RunePartyPlugin extends Plugin
     @Inject private TooltipManager tooltipManager;
     @Inject private OkHttpClient okHttpClient;
     @Inject private Gson gson;
+    /** The client's own injected Gson -- RuneLite's Plugin Hub packager rejects any plugin that
+     * ever constructs its own `new Gson()`/`new GsonBuilder()` rather than reusing (and, if needed,
+     * `.newBuilder()`-customizing) this one. CourseBuilder's own local-file save/load is the one
+     * other place in this plugin that needs a Gson (see its own FILE_GSON doc); RunePartyFonts'
+     * own dialogue-font.json parsing is instead handed this plugin's gson field directly via
+     * RunePartyFonts#init, called from startUp(). */
+    public Gson getGson() { return gson; }
 
     private TileReducer tileReducer;
     private TileOverlay tileOverlay;
@@ -1526,6 +1534,10 @@ public class RunePartyPlugin extends Plugin
     protected void startUp()
     {
         log.debug("Rune Party starting up");
+
+        // Must happen before anything that might render a dialogue box -- see
+        // RunePartyFonts#init's own doc for why this can't just be an eager static initializer.
+        RunePartyFonts.init(gson);
 
         apiClient = new ApiClient(okHttpClient, gson);
         loadTileTypeCatalog();

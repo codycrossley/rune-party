@@ -7,7 +7,6 @@ import gay.runescape.runeparty.minigames.Minigames;
 import gay.runescape.runeparty.net.ApiClient;
 
 import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParseException;
 import lombok.extern.slf4j.Slf4j;
 
@@ -51,11 +50,18 @@ import java.util.Set;
 @Slf4j
 public final class CourseBuilder
 {
-    // Pretty-printed on purpose -- a saved course file is meant to be human-readable/diffable
-    // (e.g. to hand-port into a new HardcodedCourse entry later), unlike the plugin's own injected
-    // Gson, which is tuned for compact wire payloads. A dedicated instance keeps that choice local
-    // to the one class that owns the file format.
-    private static final Gson FILE_GSON = new GsonBuilder().setPrettyPrinting().create();
+    // Derived from the plugin's own injected Gson via newBuilder() -- RuneLite's Plugin Hub
+    // packager rejects a plugin that ever constructs its own `new Gson()`/`new GsonBuilder()`
+    // outright, so this can't just be a `new GsonBuilder()...create()` static constant the way an
+    // earlier version of this had it. Pretty-printed on purpose -- a saved course file is meant to
+    // be human-readable/diffable (e.g. to hand-port into a new HardcodedCourse entry later), unlike
+    // the plugin's own base instance, which is tuned for compact wire payloads -- newBuilder()
+    // copies that instance's own configuration first, then layers this file format's own
+    // pretty-printing on top, rather than starting from a bare, unconfigured GsonBuilder. Built
+    // once in the constructor (plugin.getGson() is only valid once dependency injection has
+    // actually populated it, which it has by the time RunePartyPlugin#startUp() constructs this
+    // class -- see that method's own construction order).
+    private final Gson fileGson;
 
     private final RunePartyPlugin plugin;
 
@@ -91,6 +97,7 @@ public final class CourseBuilder
     public CourseBuilder(RunePartyPlugin plugin)
     {
         this.plugin = plugin;
+        this.fileGson = plugin.getGson().newBuilder().setPrettyPrinting().create();
         reloadLocalPresets();
     }
 
@@ -602,7 +609,7 @@ public final class CourseBuilder
             {
                 try (var reader = Files.newBufferedReader(f.toPath(), StandardCharsets.UTF_8))
                 {
-                    SavedCourseFile dto = FILE_GSON.fromJson(reader, SavedCourseFile.class);
+                    SavedCourseFile dto = fileGson.fromJson(reader, SavedCourseFile.class);
                     if (dto != null) loaded.add(dto.toCoursePreset());
                 }
                 catch (IOException | JsonParseException e)
@@ -638,7 +645,7 @@ public final class CourseBuilder
 
         try (var writer = Files.newBufferedWriter(file.toPath(), StandardCharsets.UTF_8))
         {
-            FILE_GSON.toJson(SavedCourseFile.from(preset), writer);
+            fileGson.toJson(SavedCourseFile.from(preset), writer);
         }
         catch (IOException e)
         {

@@ -19,7 +19,7 @@ import net.runelite.client.ui.FontManager;
  * HotPotatoOverlay, ...), and the two dialogue-box fonts ChatboxDialogueOverlay tries in order for
  * its own NPC conversation boxes (see DIALOGUE_BITMAP/DIALOGUE_PLAIN's own docs). */
 @Slf4j
-final class RunePartyFonts
+public final class RunePartyFonts
 {
     // Loaded once at class-init; falls back to the client's own bold font if the resource is
     // missing, so a packaging mistake degrades gracefully instead of crashing.
@@ -41,7 +41,25 @@ final class RunePartyFonts
     // font id 497 (this project draws no overhead chat text, the only consumer of its other
     // bundled font, 496/b12_full). GameFont is a trimmed, verbatim port of that plugin's own class
     // of the same name.
-    static final GameFont DIALOGUE_BITMAP = loadDialogueBitmap();
+    //
+    // Unlike MARIO_PARTY/DIALOGUE_PLAIN above, this can't be a plain eager static initializer --
+    // parsing it needs a Gson, and RuneLite's Plugin Hub packager rejects a plugin that ever
+    // constructs its own `new Gson()`/`new GsonBuilder()` rather than using the client's own
+    // injected instance (customized via `.newBuilder()` if needed) -- see init's own doc. Starts
+    // null (same as a failed load -- every caller already null-checks and falls back to
+    // DIALOGUE_PLAIN for exactly that case) until init() populates it.
+    static volatile GameFont DIALOGUE_BITMAP = null;
+
+    /** Finishes loading DIALOGUE_BITMAP using the client's own injected Gson -- called once from
+     * RunePartyPlugin#startUp(), the only place in this plugin with access to that injected
+     * instance this early. Safe to call more than once (idempotent -- re-parses the same bundled
+     * resource); not safe to call before dependency injection has actually populated the caller's
+     * own Gson field. MARIO_PARTY/DIALOGUE_PLAIN need no such call -- Font.createFont has nothing
+     * to do with Gson at all. */
+    public static void init(Gson gson)
+    {
+        DIALOGUE_BITMAP = loadDialogueBitmap(gson);
+    }
 
     // RuneStar's pixel-perfect recreation of the game's own "Plain 12" font (a DIFFERENT font from
     // DIALOGUE_BITMAP's own "Quill 8" -- Plain 12 is the general interface typeface, Quill 8 is
@@ -113,12 +131,12 @@ final class RunePartyFonts
         List<FontEntry> fonts;
     }
 
-    private static GameFont loadDialogueBitmap()
+    private static GameFont loadDialogueBitmap(Gson gson)
     {
         try (InputStream is = RunePartyFonts.class.getResourceAsStream("dialogue-font.json"))
         {
             if (is == null) throw new IOException("dialogue-font.json resource not found");
-            Dump dump = new Gson().fromJson(new InputStreamReader(is, StandardCharsets.UTF_8), Dump.class);
+            Dump dump = gson.fromJson(new InputStreamReader(is, StandardCharsets.UTF_8), Dump.class);
             if (dump == null || dump.fonts == null || dump.fonts.isEmpty())
             {
                 throw new IOException("dialogue-font.json has no fonts");
