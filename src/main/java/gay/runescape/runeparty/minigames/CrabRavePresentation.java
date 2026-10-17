@@ -48,17 +48,6 @@ public final class CrabRavePresentation implements MinigamePresentationFeature
         if (!catchingUp) plugin.playCrabRaveMusic();
     }
 
-    /** Stops Crab Rave's own music for good the instant its round ends -- see
-     * RunePartyPlugin#stopCrabRaveMusic's own doc for why this matters beyond just tidiness: without
-     * it, a clip merely paused mid-round via toggleCrabRaveMusicMuted (deliberately left open, not
-     * closed, so unmuting resumes rather than restarts it) would still be fully resumable even after
-     * the round itself is long over, playing stale music on top of whatever comes next. */
-    @Override
-    public void onEnded()
-    {
-        plugin.stopCrabRaveMusic();
-    }
-
     @Override
     public void reset()
     {

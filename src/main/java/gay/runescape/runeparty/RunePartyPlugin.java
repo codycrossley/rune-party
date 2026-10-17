@@ -61,9 +61,7 @@ import gay.runescape.runeparty.overlays.GnomeNpcOverlay;
 import gay.runescape.runeparty.overlays.WiseOldManNpcOverlay;
 import java.awt.Color;
 import java.awt.event.KeyEvent;
-import java.io.BufferedInputStream;
 import java.io.File;
-import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
@@ -89,10 +87,6 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.function.ToIntFunction;
 import javax.inject.Inject;
-import javax.sound.sampled.AudioSystem;
-import javax.sound.sampled.Clip;
-import javax.sound.sampled.FloatControl;
-import javax.sound.sampled.LineEvent;
 import javax.swing.SwingUtilities;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
@@ -112,6 +106,7 @@ import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.MenuOpened;
 import net.runelite.api.gameval.AnimationID;
 import net.runelite.api.gameval.SpotanimID;
+import net.runelite.client.audio.AudioPlayer;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -1135,6 +1130,7 @@ public class RunePartyPlugin extends Plugin
     @Inject private ModelOutlineRenderer modelOutlineRenderer;
     @Inject private TooltipManager tooltipManager;
     @Inject private OkHttpClient okHttpClient;
+    @Inject private AudioPlayer audioPlayer;
     @Inject private Gson gson;
     /** The client's own injected Gson -- RuneLite's Plugin Hub packager rejects any plugin that
      * ever constructs its own `new Gson()`/`new GsonBuilder()` rather than reusing (and, if needed,
@@ -1581,9 +1577,8 @@ public class RunePartyPlugin extends Plugin
         crabRaveNpcOverlay = new CrabRaveNpcOverlay(client, this);
         overlayManager.add(crabRaveNpcOverlay);
 
-        crabRaveHudOverlay = new CrabRaveHudOverlay(this, mouseManager);
+        crabRaveHudOverlay = new CrabRaveHudOverlay(this);
         overlayManager.add(crabRaveHudOverlay);
-        crabRaveHudOverlay.register();
 
         wiseOldManNpcOverlay = new WiseOldManNpcOverlay(client, this);
         overlayManager.add(wiseOldManNpcOverlay);
@@ -1698,10 +1693,7 @@ public class RunePartyPlugin extends Plugin
         if (wiseOldManDialogueOverlay != null) { wiseOldManDialogueOverlay.unregister(); overlayManager.remove(wiseOldManDialogueOverlay); }
         if (itemShopNpcOverlay != null) { itemShopNpcOverlay.clear(); overlayManager.remove(itemShopNpcOverlay); }
         if (itemShopDialogueOverlay != null) { itemShopDialogueOverlay.unregister(); overlayManager.remove(itemShopDialogueOverlay); }
-        if (crabRaveHudOverlay != null) { crabRaveHudOverlay.unregister(); overlayManager.remove(crabRaveHudOverlay); }
-        // Closes a still-open audio line rather than leaving it dangling if the plugin's disabled
-        // mid-song -- see stopCrabRaveMusic's own doc.
-        stopCrabRaveMusic();
+        if (crabRaveHudOverlay != null) overlayManager.remove(crabRaveHudOverlay);
         if (playerTransformOverlay != null) { playerTransformOverlay.clear(); overlayManager.remove(playerTransformOverlay); }
         if (fishingCatchOverlay != null) overlayManager.remove(fishingCatchOverlay);
         if (runeMatchOverlay != null) overlayManager.remove(runeMatchOverlay);
@@ -4741,109 +4733,31 @@ public class RunePartyPlugin extends Plugin
         triggerSpotAnimOnPlayer(spotAnimId, rsn, heightFn, 0);
     }
 
-    // The currently-playing Crab Rave music clip, or null -- retained (unlike the old
-    // AudioPlayer#play-based approach, which returns nothing to hold onto at all) specifically so
-    // toggleCrabRaveMusicMuted can actually stop/resume it, not just gate a future play attempt.
-    // Touched from both the client thread (playCrabRaveMusic/toggleCrabRaveMusicMuted) and the
-    // clip's own line-event thread (the addLineListener callback in playCrabRaveMusic) -- volatile
-    // rather than synchronized, same "a stale read just means acting a moment late, never a torn
-    // one" reasoning every other cross-thread field in this class already uses.
-    private volatile Clip crabRaveMusicClip = null;
-    // Session-only mute flag -- see toggleCrabRaveMusicMuted's own doc for why this is deliberately
-    // separate from config.playMinigameMusic() (the persistent "never play this at all" setting).
-    private volatile boolean crabRaveMusicMuted = false;
-
     /** Starts Crab Rave's own CRAB_RAVE_MUSIC_RESOURCE_PATH clip playing, once, the instant its
      * round genuinely begins -- see presentation/MinigamePresentation's own MINIGAME_ROUND_BEGIN
      * case, the only caller (deliberately not folded into CrabRavePresentation#onRoundBegin itself,
      * which has no catchingUp of its own to gate on -- see that interface method's own doc). Silent
-     * no-op if config.playMinigameMusic() is off, crabRaveMusicMuted is on (see
-     * toggleCrabRaveMusicMuted), or the clip can't be loaded/played for any reason (missing
-     * resource, unsupported format, no audio line available) -- purely cosmetic, never worth
-     * interrupting a round over.
-     * <p>
-     * Hand-rolled via javax.sound.sampled directly rather than RuneLite's own AudioPlayer#play
-     * (every other audio-less-trivial need in this class still would, if there were one) -- that
-     * utility is fire-and-forget, returning nothing to hold onto, so there'd be no way for
-     * toggleCrabRaveMusicMuted to ever stop a clip already playing. The addLineListener callback
-     * closes the clip once it plays out to its own natural end (frame position reaching frame
-     * length) -- but NOT when toggleCrabRaveMusicMuted stops it early, since that same STOP event
-     * fires either way; leaving it open (not closed) in that case is what lets unmuting resume
-     * playback from the same position instead of restarting the song. */
+     * no-op if config.playMinigameMusic() is off, or the clip can't be loaded/played for any reason
+     * (missing resource, unsupported format, no audio line available) -- purely cosmetic, never
+     * worth interrupting a round over. Fire-and-forget via RuneLite's own AudioPlayer#play -- the
+     * Plugin Hub packager rejects any plugin that touches javax.sound.sampled directly, which rules
+     * out ever retaining a stoppable/resumable handle on an already-playing clip (an earlier version
+     * of this hand-rolled one via javax.sound specifically for a mute button that could pause and
+     * resume mid-song; that's simply not achievable through the sanctioned API, which returns
+     * nothing to hold onto at all -- see config.playMinigameMusic() for the only on/off control this
+     * now has, a persistent setting checked before a round starts, not mid-song). */
     public void playCrabRaveMusic()
     {
-        if (!config.playMinigameMusic() || crabRaveMusicMuted) return;
-        try (InputStream raw = RunePartyPlugin.class.getResourceAsStream(CRAB_RAVE_MUSIC_RESOURCE_PATH))
+        if (!config.playMinigameMusic()) return;
+        try
         {
-            if (raw == null) return;
-            Clip clip = AudioSystem.getClip();
-            clip.open(AudioSystem.getAudioInputStream(new BufferedInputStream(raw)));
-            if (clip.isControlSupported(FloatControl.Type.MASTER_GAIN))
-            {
-                ((FloatControl) clip.getControl(FloatControl.Type.MASTER_GAIN)).setValue(CRAB_RAVE_MUSIC_GAIN_DB);
-            }
-            clip.addLineListener(event ->
-            {
-                if (event.getType() == LineEvent.Type.STOP && clip.getFramePosition() >= clip.getFrameLength())
-                {
-                    clip.close();
-                    if (crabRaveMusicClip == clip) crabRaveMusicClip = null;
-                }
-            });
-            crabRaveMusicClip = clip;
-            clip.start();
+            audioPlayer.play(RunePartyPlugin.class, CRAB_RAVE_MUSIC_RESOURCE_PATH, CRAB_RAVE_MUSIC_GAIN_DB);
         }
         catch (Exception e)
         {
             log.warn("Failed to play the Crab Rave music clip", e);
         }
     }
-
-    /** Toggles Crab Rave's own music on/off for the rest of this client session -- see
-     * CrabRaveHudOverlay's own mute icon, the only caller. Deliberately session-only, separate from
-     * config.playMinigameMusic() (the persistent "never play this at all" setting, changed only via
-     * the plugin's own settings panel): a quick "not right now" switch that resets the next time the
-     * client restarts, rather than silently rewriting a saved setting from a casual in-game click.
-     * Stops (never closes) a currently-playing clip so unmuting resumes it from the same position
-     * instead of restarting the song -- see playCrabRaveMusic's own doc for why the clip is left
-     * open in that case. A no-op past the flag flip itself if nothing's currently playing (e.g.
-     * toggled between rounds, or config.playMinigameMusic() was already off). */
-    public void toggleCrabRaveMusicMuted()
-    {
-        crabRaveMusicMuted = !crabRaveMusicMuted;
-        Clip clip = crabRaveMusicClip;
-        if (clip == null) return;
-        if (crabRaveMusicMuted)
-        {
-            if (clip.isRunning()) clip.stop();
-        }
-        else
-        {
-            if (!clip.isRunning() && clip.isOpen()) clip.start();
-        }
-    }
-
-    /** Stops and fully closes Crab Rave's own music clip for good -- called the instant its round
-     * ends (see CrabRavePresentation#onEnded, the only caller), regardless of whether the clip was
-     * actually playing or merely paused via toggleCrabRaveMusicMuted. Without this, a mute mid-round
-     * just pauses the clip in place (see that method's own doc for why, on purpose, so unmuting
-     * resumes rather than restarts) -- left alone, that same paused-but-still-open clip would still
-     * be sitting there, fully resumable, the instant the player happened to unmute sometime AFTER
-     * the round itself had already ended, playing stale music on top of whatever comes next (the
-     * recap, the next turn, an entirely different mini-game). A no-op if nothing's currently
-     * loaded. */
-    public void stopCrabRaveMusic()
-    {
-        Clip clip = crabRaveMusicClip;
-        crabRaveMusicClip = null;
-        if (clip == null) return;
-        if (clip.isRunning()) clip.stop();
-        clip.close();
-    }
-
-    /** Whether Crab Rave's own music is currently muted for this session -- see
-     * toggleCrabRaveMusicMuted's own doc. Drives CrabRaveHudOverlay's own mute-icon state. */
-    public boolean isCrabRaveMusicMuted() { return crabRaveMusicMuted; }
 
     /** Plays the Hot Potato explosion effect (see models/HotPotatoExplosionModel) at {@code rsn}'s
      * current location -- a snapshot at the moment it fires, not an actor-attached effect that
