@@ -438,11 +438,9 @@ public class RunePartyPlugin extends Plugin
     // No gain adjustment by default -- let the clip's own mastered volume speak for itself rather
     // than guessing an offset with no clip to test it against. Tweak here if it turns out too
     // loud/quiet once a real file's in place.
-    // -10dB per user feedback ("lower the volume") -- a standard javax.sound.sampled
-    // FloatControl.Type.MASTER_GAIN value (logarithmic dB, 0 = unity/unchanged, see
-    // playCrabRaveMusic's own use of it), and -10dB is the usual rule-of-thumb reduction for "about
-    // half as loud" to a listener, not a linear amplitude halving (which would be closer to -6dB).
-    public static final float CRAB_RAVE_MUSIC_GAIN_DB = -10f;
+    //
+    // Adjustment after player feedback
+    public static final float CRAB_RAVE_MUSIC_GAIN_DB = -13.2f;
 
     // Model 56446 (see the client's own CrabRaveNpcOverlay) -- NPC composition, not a raw model
     // id, so it's spawned via RunePartyRender.loadNpcModel(client, GEMSTONE_CRAB_NPC_ID), same
