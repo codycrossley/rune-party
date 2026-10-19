@@ -667,18 +667,8 @@ public class RunePartyMapOverlay extends Overlay
         return t != null && t.displayName != null ? t.displayName : fallback;
     }
 
-    /** Same served catalog TileOverlay#defaultColorFor reads, rather than its own hardcoded table
-     * -- falls back to plain yellow for a type the catalog doesn't have. */
     private Color tileColor(String tileType, String hex)
     {
-        if (hex != null && !hex.isBlank())
-        {
-            try { return Color.decode(hex); }
-            catch (NumberFormatException ignored) { /* fall through to the type default below */ }
-        }
-        ApiClient.TileTypeOut t = plugin.getTileTypeCatalog().get(tileType);
-        if (t == null || t.colorHex == null) return new Color(255, 255, 0);
-        try { return Color.decode(t.colorHex); }
-        catch (NumberFormatException e) { return new Color(255, 255, 0); }
+        return RunePartyRender.resolveTileColor(plugin, hex, tileType);
     }
 }

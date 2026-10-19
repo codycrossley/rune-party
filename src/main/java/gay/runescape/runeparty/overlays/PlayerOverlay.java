@@ -165,7 +165,7 @@ public class PlayerOverlay extends Overlay
                 // isBrutusAttackTarget's own doc gives: isBrutusAttackActive() alone would recolor
                 // every outline the instant MINIGAME_STARTED lands, before the wheel's even
                 // revealed which mini-game was picked.
-                c = rsn.equalsIgnoreCase(plugin.getBrutusAttackBrutusRsn()) ? RunePartyPlugin.TEAM_A_COLOR : RunePartyPlugin.TEAM_B_COLOR;
+                c = oneVsAllColor(rsn, plugin.getBrutusAttackBrutusRsn());
             }
             else if (plugin.isMageArenaActive() && plugin.isMinigamePlayable())
             {
@@ -176,7 +176,7 @@ public class PlayerOverlay extends Overlay
                 // etc.) yet -- just the team-color outline/token for now, see MAGE_ARENA_KEY's own
                 // doc for that follow-up. Also requires isMinigamePlayable(), same "don't spoil the
                 // wheel's own reveal" reasoning the Brutus Attack branch's own doc gives.
-                c = rsn.equalsIgnoreCase(plugin.getMageArenaMageRsn()) ? RunePartyPlugin.TEAM_A_COLOR : RunePartyPlugin.TEAM_B_COLOR;
+                c = oneVsAllColor(rsn, plugin.getMageArenaMageRsn());
             }
             modelOutlineRenderer.drawOutline(p, OUTLINE_WIDTH,
                 new Color(c.getRed(), c.getGreen(), c.getBlue(), OUTLINE_ALPHA), OUTLINE_FEATHER);
@@ -250,6 +250,15 @@ public class PlayerOverlay extends Overlay
         }
 
         return null;
+    }
+
+    /** The shared fixed TEAM_A_COLOR/TEAM_B_COLOR split every 1-vs-everyone mini-game (Brutus
+     * Attack, Mage Arena) uses: {@code specialRsn} (Brutus/the Mage) gets TEAM_A_COLOR, every
+     * other seated player gets TEAM_B_COLOR -- a future 1-vs-everyone mini-game can reuse this
+     * directly instead of adding its own copy of the same ternary. */
+    private static Color oneVsAllColor(String rsn, String specialRsn)
+    {
+        return rsn.equalsIgnoreCase(specialRsn) ? RunePartyPlugin.TEAM_A_COLOR : RunePartyPlugin.TEAM_B_COLOR;
     }
 
     /** holdingHotPotato overrides the token's own fill color and radius while true: a fast pulse
