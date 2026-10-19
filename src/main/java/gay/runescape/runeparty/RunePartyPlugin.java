@@ -61,7 +61,6 @@ import gay.runescape.runeparty.overlays.GnomeNpcOverlay;
 import gay.runescape.runeparty.overlays.WiseOldManNpcOverlay;
 import java.awt.Color;
 import java.awt.event.KeyEvent;
-import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
@@ -110,7 +109,6 @@ import net.runelite.client.audio.AudioPlayer;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
-import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.game.SpriteManager;
 import net.runelite.client.input.MouseManager;
 import net.runelite.client.plugins.Plugin;
@@ -623,23 +621,6 @@ public class RunePartyPlugin extends Plugin
         keys.add(RAINBOW_RUSH_KEY);
         GATHER_MESSAGE_KEYS = Collections.unmodifiableSet(keys);
     }
-
-    /** Every mini-game that actually board-swaps in a dedicated arena (see each one's own
-     * prepare()/app.py's MinigameContext.arena_center) -- the only ones a host-placed spawn point
-     * (see CourseBuilder#enterMinigameSpawnPlacementMode) means anything for. Coin Rush, True or
-     * False, Click Click Click, and Rainbow Rush are deliberately excluded: none of them swap the
-     * board at all (Rainbow Rush repaints the existing course instead), so placing a spawn point
-     * for one would be dead configuration with nothing to ever read it. */
-    public static final Set<String> BOARD_SWAPPING_MINIGAME_KEYS = Set.of(
-        ARENA_KEY, TURF_WARS_KEY, SANDWICH_RUSH_KEY, JADDY_KEY, HOT_POTATO_KEY, DANCE_DANCE_RUNESCAPE_KEY,
-        REPEAT_AFTER_ME_KEY, CRAB_RAVE_KEY, BRUTUS_ATTACK_KEY, FISHING_CONTEST_KEY, RUNE_MATCH_KEY, MAGE_ARENA_KEY);
-
-    /** Matches the server's own ceremony.py CEREMONY_KEY exactly -- used only for the
-     * minigameSpawnPoints/arena_offset override lookups the Golden Gnome Awards ceremony shares
-     * with every real board-swapping mini-game above (see RunePartyPanel's own CEREMONY_ENTRY).
-     * Not a real mini-game key: there's no ceremony entry in Minigames, and it's deliberately kept
-     * out of BOARD_SWAPPING_MINIGAME_KEYS too, since that set means "the wheel can pick this." */
-    public static final String CEREMONY_KEY = "ceremony";
 
     /** How long AnnouncementOverlay's mini-game final-score recap ("how did everyone do") stays up
      * -- triggered on MINIGAME_ENDED (see triggerMinigameScoreBanner), shown *after* the "MINIGAME
@@ -1360,14 +1341,6 @@ public class RunePartyPlugin extends Plugin
     // renderReturnToPositionArrow, which is what actually uses this to gate re-rolling.
     private final Map<String, Integer> playerPositions = new ConcurrentHashMap<>();
 
-    // Host-placed arena spawn point per mini-game key (see CourseBuilder's own placement-mode
-    // fields), mirroring the server's own state["minigameSpawnPoints"] -- real, durable state
-    // (folded unconditionally, catch-up or not), persists for the whole game the same way the real
-    // course tiles do. A key with no entry here just uses the default bounding-box-center
-    // placement -- see TileOverlay#renderMinigameSpawnPlacementPreview, the only reader that cares
-    // whether a given key already has one set, and RunePartyPanel's own minigame-placement section.
-    private final Map<String, WorldPoint> minigameSpawnPoints = new ConcurrentHashMap<>();
-
     // ---- pre-game gathering (GAME_STARTED fired, but currentTurnRsn still null -- see confirmStart) ----
     private volatile boolean startConfirmSubmitted = false; // guards confirm-start firing every tick while the echo is in flight
 
@@ -1613,27 +1586,6 @@ public class RunePartyPlugin extends Plugin
             @Override public void onError(Exception e) { log.debug("EventSocket error", e); }
             @Override public void onCaughtUp() { sessionManager.syncRosterSnapshot(true); refreshPanel(); }
         });
-    }
-
-    /** Dev Mode gates panel VISIBILITY (see isDevModeEnabled's own doc), which -- unlike every
-     * other config boolean here, each read live by some overlay's own render() every frame -- is
-     * only ever recomputed inside RunePartyPanel#refresh(). Without this, flipping Dev Mode in
-     * RuneLite's own config panel mid-session would only take visible effect whenever some
-     * unrelated event happened to trigger the next refresh(), not immediately. Also cancels
-     * "Build Custom Course"/"Place Minigame" mode the instant Dev Mode turns off, so a host can't
-     * get stuck mid-placement with no panel button left to cancel from -- doesn't touch
-     * coursePlacementMode, since placing an already-finished course stays available regardless of
-     * Dev Mode. */
-    @Subscribe
-    public void onConfigChanged(ConfigChanged event)
-    {
-        if (!"runeparty".equals(event.getGroup())) return;
-        if (!isDevModeEnabled())
-        {
-            courseBuilder.exitCustomCourseBuildMode();
-            courseBuilder.cancelMinigameSpawnPlacementMode();
-        }
-        refreshPanel();
     }
 
     @Override
@@ -2155,28 +2107,9 @@ public class RunePartyPlugin extends Plugin
     public void enterCoursePlacementMode() { courseBuilder.enterCoursePlacementMode(); }
     /** Unmarks every currently-committed course tile -- the host's "start over" button. */
     public void clearCourse() { courseBuilder.clearCourse(); }
-    public boolean isCustomCourseBuildMode() { return courseBuilder.isCustomCourseBuildMode(); }
-    public void enterCustomCourseBuildMode() { courseBuilder.enterCustomCourseBuildMode(); }
-    public void exitCustomCourseBuildMode() { courseBuilder.exitCustomCourseBuildMode(); }
-    /** Built-in presets plus every locally-saved course -- see CourseBuilder#getAvailablePresets,
-     * the only reader besides RunePartyPanel's own presetDropdown. */
+    /** Built-in presets -- see CourseBuilder#getAvailablePresets, the only reader besides
+     * RunePartyPanel's own presetDropdown. */
     public List<CoursePreset> getAvailablePresets() { return courseBuilder.getAvailablePresets(); }
-    /** "Save Current Course" button's action -- see CourseBuilder#saveCurrentCourseAs's own doc. */
-    public File saveCurrentCourse(String name) { return courseBuilder.saveCurrentCourseAs(name); }
-    /** The world point of the tile currently armed via "Connect From" -- see
-     * TileOverlay#renderConnectFromIndicator, the only reader. */
-    public WorldPoint getCourseConnectFromPoint() { return courseBuilder.getCourseConnectFromPoint(); }
-
-    // ---- Mini-game spawn placement (host, LOBBY only) -- same delegating-facade shape as course
-    // building above, see CourseBuilder's own doc for why this lives there rather than a new class. ----
-    public boolean isMinigameSpawnPlacementMode() { return courseBuilder.isMinigameSpawnPlacementMode(); }
-    public String getMinigameSpawnPlacementKey() { return courseBuilder.getMinigameSpawnPlacementKey(); }
-    public void enterMinigameSpawnPlacementMode(String minigameKey) { courseBuilder.enterMinigameSpawnPlacementMode(minigameKey); }
-    public void cancelMinigameSpawnPlacementMode() { courseBuilder.cancelMinigameSpawnPlacementMode(); }
-    public void clearMinigameSpawnPoint(String minigameKey) { courseBuilder.clearMinigameSpawnPoint(minigameKey); }
-    /** This mini-game's own host-placed arena spawn point, or null if it's still using the default
-     * bounding-box-center placement -- see minigameSpawnPoints' own doc. */
-    public WorldPoint getMinigameSpawnPoint(String minigameKey) { return minigameSpawnPoints.get(minigameKey); }
 
     // -------------------------------------------------------------------------
     // Board interaction helpers -- Golden Gnome purchase, Click Click Click tile clicks, Fishing
@@ -3141,16 +3074,6 @@ public class RunePartyPlugin extends Plugin
             courseBuilder.addPresetMenuEntries();
             return;
         }
-        if (phase == GamePhase.LOBBY && isHost() && courseBuilder.isCustomCourseBuildMode())
-        {
-            courseBuilder.addCustomCourseBuildMenuEntries();
-            return;
-        }
-        if (phase == GamePhase.LOBBY && isHost() && courseBuilder.isMinigameSpawnPlacementMode())
-        {
-            courseBuilder.addMinigameSpawnMenuEntries();
-            return;
-        }
         if (phase == GamePhase.ACTIVE && itemPlacementKey != null)
         {
             addItemPlacementMenuEntries();
@@ -4046,27 +3969,6 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
-            case Events.MINIGAME_SPAWN_POINT_SET:
-            {
-                // Real state, applied catch-up or not -- see minigameSpawnPoints' own doc.
-                String spawnKey = Json.requiredStr(e.payload, type, "minigameKey");
-                Integer spawnX = Json.requiredInt(e.payload, type, "x");
-                Integer spawnY = Json.requiredInt(e.payload, type, "y");
-                Integer spawnPlane = Json.requiredInt(e.payload, type, "plane");
-                if (spawnKey != null && spawnX != null && spawnY != null && spawnPlane != null)
-                {
-                    minigameSpawnPoints.put(spawnKey, new WorldPoint(spawnX, spawnY, spawnPlane));
-                }
-                break;
-            }
-
-            case Events.MINIGAME_SPAWN_POINT_CLEARED:
-            {
-                String spawnKey = Json.requiredStr(e.payload, type, "minigameKey");
-                if (spawnKey != null) minigameSpawnPoints.remove(spawnKey);
-                break;
-            }
-
             case Events.GOLDEN_GNOME_PURCHASED:
             {
                 goldenGnomePresentation.apply(e, catchingUp);
@@ -4739,7 +4641,6 @@ public class RunePartyPlugin extends Plugin
         minigamePresentation.reset();
         maxRounds = 0; completedRounds = 0;
         playerPositions.clear();
-        minigameSpawnPoints.clear();
         startConfirmSubmitted = false;
         gameStartBanner.reset();
         ceremonyPresentation.reset();
@@ -4766,11 +4667,6 @@ public class RunePartyPlugin extends Plugin
     public String getJoinCode() { return sessionManager.getJoinCode(); }
     public String getHostRsn() { return sessionManager.getHostRsn(); }
     public boolean isHost() { return writeKey != null; }
-    /** Gates the "Build Custom Course"/"Save Current Course" authoring tools in Host Controls --
-     * see CourseBuilder's own class doc. Does NOT gate the preset dropdown/"Place"/"Clear Course",
-     * which stay available to every host regardless (picking and placing an already-finished
-     * course is an everyday action, not a dev-only one). */
-    public boolean isDevModeEnabled() { return config.devMode(); }
     /** True once this game has been permanently locked to a Standard Course -- see
      * standardCourseKey's own field doc. Course-building tools (RunePartyPanel's own
      * courseToolsPanel) stay hidden for the rest of this game's life once this flips true. */

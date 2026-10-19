@@ -28,15 +28,4 @@ public interface RunePartyConfig extends Config
     {
         return true;
     }
-
-    @ConfigItem(
-        keyName = "devMode",
-        name = "Dev Mode",
-        description = "Enable local, server-free course-authoring tools in Host Controls",
-        position = 2
-    )
-    default boolean devMode()
-    {
-        return false;
-    }
 }

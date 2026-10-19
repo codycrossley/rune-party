@@ -804,38 +804,6 @@ public class ApiClient
         }
     }
 
-    /** Pins {@code minigameKey}'s own board-swapped arena to an exact world point for the rest of
-     * this game -- see app.py's set_minigame_spawn_point's own doc for why this is allowed
-     * regardless of whether the course is a locked Standard Course. */
-    public void setMinigameSpawnPoint(String gameId, String writeKey, String minigameKey, int x, int y, int plane) throws IOException
-    {
-        JsonObject body = new JsonObject();
-        body.addProperty("minigameKey", minigameKey);
-        body.addProperty("x", x);
-        body.addProperty("y", y);
-        body.addProperty("plane", plane);
-
-        try (Response resp = post("/v1/games/" + gameId + "/set-minigame-spawn-point", body, writeKey))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Set mini-game spawn point failed (" + resp.code() + "): " + raw);
-        }
-    }
-
-    /** Resets {@code minigameKey} back to the default bounding-box-center placement -- see
-     * setMinigameSpawnPoint's own doc. */
-    public void clearMinigameSpawnPoint(String gameId, String writeKey, String minigameKey) throws IOException
-    {
-        JsonObject body = new JsonObject();
-        body.addProperty("minigameKey", minigameKey);
-
-        try (Response resp = post("/v1/games/" + gameId + "/clear-minigame-spawn-point", body, writeKey))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Clear mini-game spawn point failed (" + resp.code() + "): " + raw);
-        }
-    }
-
     // -------------------------------------------------------------------------
     // Event polling / roster
     // -------------------------------------------------------------------------
