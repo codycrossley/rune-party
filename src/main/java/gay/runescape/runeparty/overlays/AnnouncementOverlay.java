@@ -75,7 +75,7 @@ public class AnnouncementOverlay extends Overlay
     private static final float SHOWDOWN_SIZE = 32f; // "SHOWDOWN"
 
     // Mario-Party-style rainbow-letter treatment shared by "RUNE PARTY", "MINIGAME!", "HERE WE GO!":
-    // one color per non-space character, cycling through this sequence (see drawCenteredRainbowText).
+    // one color per non-space character, cycling through this sequence (see layout/Text#rainbow).
     private static final Color RAINBOW_RED = new Color(230, 45, 45);
     private static final Color RAINBOW_GREEN = new Color(60, 190, 80);
     private static final Color RAINBOW_YELLOW = new Color(250, 210, 40);
@@ -235,25 +235,24 @@ public class AnnouncementOverlay extends Overlay
     private static final float JAD_COUNTDOWN_SIZE = 40f;
 
     // Screen-fit safety net -- every one of this overlay's single-phrase/rainbow text draws funnels
-    // through drawCenteredText/drawCenteredRainbowText below, which auto-shrink (see fitFont) rather
-    // than let a title, name, or line run past the viewer's own CURRENT drawable edges -- computed
-    // fresh from drawableWidth() (see its own doc) each call, not the game window's normal/design
-    // size, so a resized/small client is covered, AND so is Fixed mode, where the actual 3D viewport
-    // is smaller than the full canvas and the rest is native OSRS widgets (inventory, chat, minimap)
-    // that would otherwise sit on top of anything centered on the raw canvas instead. Every
-    // centerX/y position formula in this file (not just the wrap/shrink width) is anchored to
-    // drawableWidth()/drawableHeight() for the same reason -- see their own doc. A composite line
-    // built from several independently pre-measured segments (renderSpinHintSelf/Waiting,
-    // an emote instruction, a Table's own rank/name/stats columns) can't shrink itself that way --
-    // see the layout package's own Line/Table, which jointly measure every segment/row up front and
-    // apply the same shared scale to all of them before painting anything, exactly like fitScale's
-    // own doc describes for a single line. Genuine multi-sentence content (mini-game instructions,
-    // True or False questions) still wraps onto multiple lines instead of shrinking -- see Text#wrap
-    // -- since a whole paragraph squeezed onto one line would turn unreadable long before it ran out
-    // of room that way.
+    // through a layout/Text node handed to Layout.renderCentered with this as its maxWidth, which
+    // auto-shrinks (see Text#fitToWidth) rather than let a title, name, or line run past the
+    // viewer's own CURRENT drawable edges -- computed fresh from drawableWidth() (see its own doc)
+    // each call, not the game window's normal/design size, so a resized/small client is covered,
+    // AND so is Fixed mode, where the actual 3D viewport is smaller than the full canvas and the
+    // rest is native OSRS widgets (inventory, chat, minimap) that would otherwise sit on top of
+    // anything centered on the raw canvas instead. Every centerX/y position formula in this file
+    // (not just the wrap/shrink width) is anchored to drawableWidth()/drawableHeight() for the same
+    // reason -- see their own doc. A composite line built from several independently pre-measured
+    // segments (renderSpinHintSelf/Waiting, an emote instruction, a Table's own rank/name/stats
+    // columns) can't shrink itself that way -- see the layout package's own Line/Table, which
+    // jointly measure every segment/row up front and apply the same shared scale to all of them
+    // before painting anything, exactly like Text#fitToWidth does for a single line. Genuine
+    // multi-sentence content (mini-game instructions) still wraps onto multiple lines instead of
+    // shrinking -- see Text#wrap -- since a whole paragraph squeezed onto one line would turn
+    // unreadable long before it ran out of room that way.
     private static final int SCREEN_SAFE_MARGIN_PX = 24; // kept clear on both sides of the canvas edge
     private static final int MIN_SAFE_TEXT_WIDTH_PX = 240; // floor so a tiny/resized window can't force degenerate wrapping/shrinking
-    private static final float MIN_FIT_SCALE = 0.5f; // never shrink a line past half its designed size
 
     private static final Font MARIO_PARTY_FONT = RunePartyFonts.MARIO_PARTY;
 
@@ -518,11 +517,11 @@ public class AnnouncementOverlay extends Overlay
         boolean isLocal = isLocal(encounterRsn);
 
         String title = isLocal ? "You have awakened Jad!" : encounterRsn + " has awakened Jad!";
-        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_TITLE_SIZE));
-        drawCenteredText(g, title, centerX, y, Color.WHITE, alpha);
+        Layout.renderCentered(g, Text.of(title).font(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_TITLE_SIZE)).color(Color.WHITE),
+            centerX, y, safeTextWidth(), alpha);
 
-        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(JAD_TAUNT_SIZE));
-        drawCenteredText(g, "Bow down to me!! Or else!!", centerX, y + 32, new Color(214, 9, 65), alpha);
+        Layout.renderCentered(g, Text.of("Bow down to me!! Or else!!").font(FontManager.getRunescapeBoldFont().deriveFont(JAD_TAUNT_SIZE)).color(new Color(214, 9, 65)),
+            centerX, y + 32, safeTextWidth(), alpha);
 
         // Skipped (shows nothing) for a client that only caught up on an already-open encounter.
         long awakenedAt = plugin.getJadAwakenedAt();
@@ -530,8 +529,8 @@ public class AnnouncementOverlay extends Overlay
         {
             long remainingMs = RunePartyPlugin.JAD_BOW_WINDOW_MS - (System.currentTimeMillis() - awakenedAt);
             int secondsLeft = (int) Math.max(0, Math.ceil(remainingMs / 1000.0));
-            g.setFont(MARIO_PARTY_FONT.deriveFont(JAD_COUNTDOWN_SIZE));
-            drawCenteredText(g, String.valueOf(secondsLeft), centerX, y + 68, Color.WHITE, alpha);
+            Layout.renderCentered(g, Text.of(String.valueOf(secondsLeft)).font(MARIO_PARTY_FONT.deriveFont(JAD_COUNTDOWN_SIZE)).color(Color.WHITE),
+                centerX, y + 68, safeTextWidth(), alpha);
         }
 
         if (isLocal)
@@ -546,8 +545,8 @@ public class AnnouncementOverlay extends Overlay
         }
         else
         {
-            g.setFont(FontManager.getRunescapeSmallFont());
-            drawCenteredText(g, "Waiting for " + encounterRsn + " to bow...", centerX, y + 96, Color.LIGHT_GRAY, alpha);
+            Layout.renderCentered(g, Text.of("Waiting for " + encounterRsn + " to bow...").font(FontManager.getRunescapeSmallFont()).color(Color.LIGHT_GRAY),
+                centerX, y + 96, safeTextWidth(), alpha);
         }
     }
 
@@ -569,8 +568,8 @@ public class AnnouncementOverlay extends Overlay
         boolean isLocal = isLocal(offerRsn);
 
         String title = isLocal ? "Would you like to buy a Golden Gnome?" : offerRsn + " found a Golden Gnome!";
-        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_TITLE_SIZE));
-        drawCenteredText(g, title, centerX, y, Color.WHITE, alpha);
+        Layout.renderCentered(g, Text.of(title).font(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_TITLE_SIZE)).color(Color.WHITE),
+            centerX, y, safeTextWidth(), alpha);
 
         if (isLocal)
         {
@@ -589,8 +588,8 @@ public class AnnouncementOverlay extends Overlay
         }
         else
         {
-            g.setFont(FontManager.getRunescapeSmallFont());
-            drawCenteredText(g, "Waiting for " + offerRsn + " to purchase a Golden Gnome...", centerX, y + 32, Color.LIGHT_GRAY, alpha);
+            Layout.renderCentered(g, Text.of("Waiting for " + offerRsn + " to purchase a Golden Gnome...").font(FontManager.getRunescapeSmallFont()).color(Color.LIGHT_GRAY),
+                centerX, y + 32, safeTextWidth(), alpha);
         }
     }
 
@@ -724,14 +723,14 @@ public class AnnouncementOverlay extends Overlay
         float textAlpha = stageAlpha * Math.min(1f, local / (float) RunePartyPlugin.CHANCE_SPACE_TEXT_FADE_MS);
 
         int y = iconY + CHANCE_SPACE_TOKEN_RADIUS + CHANCE_SPACE_TOKEN_NAME_GAP + CHANCE_SPACE_ANNOUNCEMENT_TOP_GAP;
-        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(CHANCE_SPACE_ANNOUNCEMENT_HEADER_SIZE));
-        drawCenteredText(g, lines[0], centerX, y, WELCOME_TITLE_COLOR, textAlpha);
+        Font headerFont = FontManager.getRunescapeBoldFont().deriveFont(CHANCE_SPACE_ANNOUNCEMENT_HEADER_SIZE);
+        Layout.renderCentered(g, Text.of(lines[0]).font(headerFont).color(WELCOME_TITLE_COLOR), centerX, y, safeTextWidth(), textAlpha);
 
-        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(CHANCE_SPACE_ANNOUNCEMENT_LINE_SIZE));
+        Font lineFont = FontManager.getRunescapeBoldFont().deriveFont(CHANCE_SPACE_ANNOUNCEMENT_LINE_SIZE);
         for (int i = 1; i < lines.length; i++)
         {
             y += CHANCE_SPACE_ANNOUNCEMENT_LINE_HEIGHT;
-            drawCenteredText(g, lines[i], centerX, y, Color.WHITE, textAlpha);
+            Layout.renderCentered(g, Text.of(lines[i]).font(lineFont).color(Color.WHITE), centerX, y, safeTextWidth(), textAlpha);
         }
     }
 
@@ -762,8 +761,8 @@ public class AnnouncementOverlay extends Overlay
         g.setColor(RunePartyRender.withAlpha(Color.BLACK, alpha));
         g.drawOval(cx - radius, cy - radius, radius * 2, radius * 2);
 
-        g.setFont(FontManager.getRunescapeBoldFont().deriveFont(CHANCE_SPACE_TOKEN_NAME_SIZE));
-        drawCenteredText(g, rsn, cx, cy + radius + CHANCE_SPACE_TOKEN_NAME_GAP, color, alpha);
+        Layout.renderCentered(g, Text.of(rsn).font(FontManager.getRunescapeBoldFont().deriveFont(CHANCE_SPACE_TOKEN_NAME_SIZE)).color(color),
+            cx, cy + radius + CHANCE_SPACE_TOKEN_NAME_GAP, safeTextWidth(), alpha);
     }
 
     /** The arrow between the two tokens, always pointing one way -- toward whichever side actually
@@ -1297,8 +1296,8 @@ public class AnnouncementOverlay extends Overlay
 
         if (!spinning && revealText != null)
         {
-            g.setFont(MARIO_PARTY_FONT.deriveFont(WHEEL_NAME_SIZE));
-            drawCenteredText(g, revealText, cx, Math.round(cy + WHEEL_RADIUS + 50), RAINBOW_YELLOW, alpha);
+            Layout.renderCentered(g, Text.of(revealText).font(MARIO_PARTY_FONT.deriveFont(WHEEL_NAME_SIZE)).color(RAINBOW_YELLOW),
+                cx, Math.round(cy + WHEEL_RADIUS + 50), safeTextWidth(), alpha);
         }
     }
 
@@ -1533,8 +1532,8 @@ public class AnnouncementOverlay extends Overlay
             float scale = withinPhase < MINIGAME_COUNTDOWN_POP_MS
                 ? 1.4f - 0.4f * (withinPhase / (float) MINIGAME_COUNTDOWN_POP_MS)
                 : 1f;
-            g.setFont(MARIO_PARTY_FONT.deriveFont(MINIGAME_COUNTDOWN_SIZE * 0.55f * scale));
-            drawCenteredRainbowText(g, "Begin!", RAINBOW_LETTER_COLORS, centerX, boxTop + boxHeight + 50, 1f);
+            Layout.renderCentered(g, Text.rainbow("Begin!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(MINIGAME_COUNTDOWN_SIZE * 0.55f * scale)),
+                centerX, boxTop + boxHeight + 50, safeTextWidth(), 1f);
         }
     }
 
@@ -2239,110 +2238,6 @@ public class AnnouncementOverlay extends Overlay
         return Math.max(MIN_SAFE_TEXT_WIDTH_PX, drawableWidth() - 2 * SCREEN_SAFE_MARGIN_PX);
     }
 
-    /** Scale factor to shrink a composite line/row's own already-measured "design" width by so it
-     * fits within safeTextWidth() -- 1f (unchanged) if it already fits. A composite line built from
-     * several separately-measured segments can't shrink itself the way a single drawCenteredText
-     * call can: by the time any one segment is actually drawn, its caller has already measured every
-     * segment at the font size it intends to use and laid out x offsets from that. So those callers
-     * measure the WHOLE line/row at its normal design size first, get this shared scale, then
-     * re-derive every segment's font by the same factor before laying anything out for real --
-     * keeping proportions between segments consistent instead of each drifting independently. */
-    private float fitScale(int designWidth)
-    {
-        int maxWidth = safeTextWidth();
-        if (designWidth <= maxWidth) return 1f;
-        return Math.max(MIN_FIT_SCALE, maxWidth / (float) designWidth);
-    }
-
-    /** Shared centered/shadowed string draw -- caller sets the font first. Auto-shrinks (see
-     * fitScale) rather than let {@code text} run past the viewer's own current screen edges, then
-     * restores the caller's original font before returning so anything drawn right after (e.g. a
-     * backdrop sized off that same font's metrics) is unaffected.
-     * <p>
-     * Measures {@code text} exactly once for the common case (no shrink needed) -- the same
-     * measurement this method always had to do for centering doubles as the fit check, rather than
-     * a separate pass measuring the same string twice every frame. A second measurement only happens
-     * on the rare frame where a shrink actually applies, since {@code fitScale}'s ratio is a linear
-     * approximation of the smaller font's real width. */
-    private void drawCenteredText(Graphics2D g, String text, int centerX, int y, Color color, float alpha)
-    {
-        Font original = g.getFont();
-        int width = g.getFontMetrics(original).stringWidth(text);
-        float scale = fitScale(width);
-
-        Font font = original;
-        if (scale < 1f)
-        {
-            font = original.deriveFont(original.getSize2D() * scale);
-            g.setFont(font);
-            width = g.getFontMetrics().stringWidth(text);
-        }
-
-        drawLeftAlignedText(g, text, centerX - width / 2, y, color, alpha);
-        if (font != original) g.setFont(original);
-    }
-
-    /** Same as drawCenteredText, but colors each non-space character from {@code letterColors} in
-     * order instead of one solid color. Same auto-shrink/restore treatment, and same
-     * measure-once-in-the-common-case reasoning -- the per-character width loop below is already
-     * required (rainbow text needs per-character positions regardless of fit), so it doubles as the
-     * fit check instead of adding a separate measurement pass. */
-    private void drawCenteredRainbowText(Graphics2D g, String text, Color[] letterColors, int centerX, int y, float alpha)
-    {
-        Font original = g.getFont();
-        FontMetrics fm = g.getFontMetrics(original);
-        int totalWidth = 0;
-        for (int i = 0; i < text.length(); i++) totalWidth += fm.charWidth(text.charAt(i));
-        float scale = fitScale(totalWidth);
-
-        Font font = original;
-        if (scale < 1f)
-        {
-            font = original.deriveFont(original.getSize2D() * scale);
-            g.setFont(font);
-            fm = g.getFontMetrics();
-            totalWidth = 0;
-            for (int i = 0; i < text.length(); i++) totalWidth += fm.charWidth(text.charAt(i));
-        }
-
-        drawLeftAlignedRainbowText(g, text, letterColors, centerX - totalWidth / 2, y, alpha);
-        if (font != original) g.setFont(original);
-    }
-
-    /** Draws {@code text} left-aligned from canvas x {@code x}, and returns the x just past what it
-     * drew, so a composite line built from multiple styled segments can keep chaining. */
-    private int drawLeftAlignedText(Graphics2D g, String text, int x, int y, Color color, float alpha)
-    {
-        g.setColor(RunePartyRender.withAlpha(Color.BLACK, alpha * 0.7f));
-        g.drawString(text, x + 2, y + 2);
-        g.setColor(RunePartyRender.withAlpha(color, alpha));
-        g.drawString(text, x, y);
-        return x + g.getFontMetrics().stringWidth(text);
-    }
-
-    /** Left-aligned counterpart to drawCenteredRainbowText. */
-    private int drawLeftAlignedRainbowText(Graphics2D g, String text, Color[] letterColors, int x, int y, float alpha)
-    {
-        FontMetrics fm = g.getFontMetrics();
-        int colorIndex = 0;
-        for (int i = 0; i < text.length(); i++)
-        {
-            char ch = text.charAt(i);
-            int charWidth = fm.charWidth(ch);
-            if (!Character.isWhitespace(ch))
-            {
-                String s = String.valueOf(ch);
-                Color color = letterColors[colorIndex % letterColors.length];
-                g.setColor(RunePartyRender.withAlpha(Color.BLACK, alpha * 0.7f));
-                g.drawString(s, x + 2, y + 2);
-                g.setColor(RunePartyRender.withAlpha(color, alpha));
-                g.drawString(s, x, y);
-                colorIndex++;
-            }
-            x += charWidth;
-        }
-        return x;
-    }
 
     /** Draws a big, toy-like die dead center of the screen after a dice roll, filled in the
      * roller's own seat color, faces 1-10. Cycles random faces while "spinning", then snaps to the
@@ -2453,8 +2348,8 @@ public class AnnouncementOverlay extends Overlay
             String signedBonus = (bonus > 0 ? "+" : "") + bonus;
             String label = sinceSpinEnd < flipStart ? signedBonus : (signedBonus + " = " + total);
             Color labelColor = bonus > 0 ? DICE_ROLL_BONUS_POSITIVE_COLOR : DICE_ROLL_BONUS_NEGATIVE_COLOR;
-            g.setFont(FontManager.getRunescapeBoldFont().deriveFont(DICE_ROLL_BONUS_LABEL_SIZE));
-            drawCenteredText(g, label, cx, cy + half + 30, labelColor, alpha);
+            Layout.renderCentered(g, Text.of(label).font(FontManager.getRunescapeBoldFont().deriveFont(DICE_ROLL_BONUS_LABEL_SIZE)).color(labelColor),
+                cx, cy + half + 30, safeTextWidth(), alpha);
         }
     }
 

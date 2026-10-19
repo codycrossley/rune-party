@@ -13,13 +13,13 @@ import java.util.List;
 import java.util.Objects;
 
 /** A single styled line (or, with {@link #wrap}, a word-wrapped paragraph) of text -- the leaf
- * node every migrated AnnouncementOverlay banner is ultimately built from. Replicates that file's
- * own {@code drawCenteredText}/{@code drawCenteredRainbowText}/{@code drawWrappedCenteredText}
- * behavior (shadow offset, auto-shrink-to-fit, rainbow per-letter cycling) as one reusable node
+ * node every AnnouncementOverlay banner is ultimately built from. Replaced that file's own former
+ * {@code drawCenteredText}/{@code drawCenteredRainbowText}/{@code drawWrappedCenteredText}
+ * behavior (shadow offset, auto-shrink-to-fit, rainbow per-letter cycling) with one reusable node
  * instead of four private methods plus their own {@code fitScale}/{@code wrapCenteredLines}
- * helpers -- see this package's own doc on why the algorithm is replicated here rather than
- * shared by reference (the viewport-reading half of the original stays in AnnouncementOverlay,
- * which has the RuneLite {@code Client} this package deliberately doesn't depend on).
+ * helpers -- see this package's own doc on why the algorithm lives here rather than being shared
+ * by reference (the viewport-reading half of the original stays in AnnouncementOverlay, which has
+ * the RuneLite {@code Client} this package deliberately doesn't depend on).
  * <p>
  * {@code y} in {@link #paint} is this node's own text <b>baseline</b>, not its top edge -- the
  * one deliberate exception {@link Node#paint}'s own doc calls out. Every existing
@@ -53,8 +53,8 @@ public final class Text extends Node
         return new Text(text, null);
     }
 
-    /** Colors each non-space character from {@code palette} in order, cycling -- replicates
-     * drawCenteredRainbowText/drawLeftAlignedRainbowText. */
+    /** Colors each non-space character from {@code palette} in order, cycling -- replaced the
+     * former drawCenteredRainbowText/drawLeftAlignedRainbowText. */
     public static Text rainbow(String text, Color[] palette)
     {
         return new Text(text, Objects.requireNonNull(palette, "palette"));
@@ -87,8 +87,9 @@ public final class Text extends Node
     }
 
     /** Default true -- shrinks toward {@link #minFitScale} rather than overflow the room a parent
-     * hands this node, replicating {@code fitScale}/{@code MIN_FIT_SCALE}. Ignored once {@link
-     * #wrap} is set (wrapping into multiple lines takes priority over shrinking a single line). */
+     * hands this node, replacing the former {@code fitScale}/{@code MIN_FIT_SCALE}. Ignored once
+     * {@link #wrap} is set (wrapping into multiple lines takes priority over shrinking a single
+     * line). */
     public Text fitToWidth(boolean on)
     {
         this.fitToWidth = on;
