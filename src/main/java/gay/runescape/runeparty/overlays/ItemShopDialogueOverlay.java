@@ -91,16 +91,17 @@ public final class ItemShopDialogueOverlay extends ChatboxDialogueOverlay
     @Override
     protected String getSpeakerName() { return "Item Clerk"; }
 
-    /** The Item Clerk's own in-world model is recolored by hand (see ItemShopNpcOverlay's own
-     * RECOLOR_FIND/RECOLOR_REPLACE doc) -- his chathead portrait needs the exact same recolor
-     * applied via that class's shared applyRecolor helper, or the dialogue box would show him in
-     * his stock colors while the model standing on the tile shows the recolored ones. */
+    /** The Item Clerk's own in-world model is recolored by hand (see RunePartyPlugin's own
+     * ITEM_SHOP_RECOLOR_FIND/RECOLOR_REPLACE doc) -- his chathead portrait needs the exact same
+     * recolor applied via InteriorNpcOverlay's shared applyRecolor helper, or the dialogue box
+     * would show him in his stock colors while the model standing on the tile shows the recolored
+     * ones. */
     @Override
     protected Model loadChatheadModel()
     {
         ModelData raw = RunePartyRender.loadNpcChatheadModelData(client, getNpcId());
         if (raw == null) return null;
-        return ItemShopNpcOverlay.applyRecolor(raw).light();
+        return InteriorNpcOverlay.applyRecolor(raw, RunePartyPlugin.ITEM_SHOP_RECOLOR_FIND, RunePartyPlugin.ITEM_SHOP_RECOLOR_REPLACE).light();
     }
 
     @Override

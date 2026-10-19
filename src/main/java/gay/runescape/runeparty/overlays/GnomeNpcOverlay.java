@@ -22,12 +22,12 @@ import java.util.Set;
 /** Spawns the purely-decorative Gnome NPC (RunePartyPlugin#GNOME_NPC_ID) at the exact center of
  * the Golden Gnome Awards ceremony's own 5x5 CEREMONY_TILE arena, idling on GNOME_IDLE_ANIMATION_ID
  * the whole time -- same "no server-driven spawn event, every client derives an identical spot
- * from tiles it already has" reasoning WiseOldManNpcOverlay's own doc gives, just centered on the
+ * from tiles it already has" reasoning InteriorNpcOverlay's own doc gives, just centered on the
  * arena's own middle tile instead of offset from a single host-placed one (5 being odd, the 5x5
  * block's own bounding-box center is always itself one of the 25 real tiles, never a gap between
  * four of them). Left in the NPC's own natural, declared appearance (see
  * RunePartyRender#loadNpcModel, which already applies an NPC's own composition/recolors
- * automatically) rather than a custom override the way WiseOldManNpcOverlay's own doc explains
+ * automatically) rather than a custom override the way InteriorNpcOverlay's own doc explains
  * that class needed for its own thematic reasons -- this Gnome's default look is exactly what the
  * ceremony wants.
  * <p>

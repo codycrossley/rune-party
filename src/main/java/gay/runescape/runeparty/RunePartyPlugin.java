@@ -44,8 +44,8 @@ import gay.runescape.runeparty.overlays.FishingCatchOverlay;
 import gay.runescape.runeparty.overlays.RuneMatchOverlay;
 import gay.runescape.runeparty.overlays.HardcodedCourseLauncherOverlay;
 import gay.runescape.runeparty.overlays.HotPotatoOverlay;
+import gay.runescape.runeparty.overlays.InteriorNpcOverlay;
 import gay.runescape.runeparty.overlays.ItemShopDialogueOverlay;
-import gay.runescape.runeparty.overlays.ItemShopNpcOverlay;
 import gay.runescape.runeparty.overlays.JadEncounter;
 import gay.runescape.runeparty.overlays.JaddyDuelModel;
 import gay.runescape.runeparty.overlays.PlayerOverlay;
@@ -58,7 +58,6 @@ import gay.runescape.runeparty.overlays.TileOverlay;
 import gay.runescape.runeparty.overlays.TurfWarsScoreOverlay;
 import gay.runescape.runeparty.overlays.WiseOldManDialogueOverlay;
 import gay.runescape.runeparty.overlays.GnomeNpcOverlay;
-import gay.runescape.runeparty.overlays.WiseOldManNpcOverlay;
 import java.awt.Color;
 import java.awt.event.KeyEvent;
 import java.util.ArrayList;
@@ -700,9 +699,23 @@ public class RunePartyPlugin extends Plugin
     public static final long JAD_OUTCOME_BANNER_DURATION_MS = GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
 
     // The Wise Old Man himself (RuneMonk npc id 2108), and the animation he idles on while
-    // standing beside his own tile (WiseOldManNpcOverlay, the only reader of either).
+    // standing beside his own tile (InteriorNpcOverlay, the only reader of either).
     public static final int WISE_OLD_MAN_NPC_ID = 2108;
     public static final int WISE_OLD_MAN_IDLE_ANIMATION_ID = 813;
+    // This NPC's own custom recolor find/replace pairs (packed-HSL swap slots), paired by index --
+    // values above Short.MAX_VALUE are genuine packed-HSL bit patterns, not out of range; Java just
+    // has no unsigned short literal, so they need an explicit narrowing cast the same way any color
+    // above 0x7FFF always would. Read by both InteriorNpcOverlay (the in-world model) and
+    // WiseOldManDialogueOverlay (the chathead portrait) so neither drifts from the other -- see
+    // InteriorNpcOverlay#applyRecolor's own doc.
+    public static final short[] WISE_OLD_MAN_RECOLOR_FIND =
+    {
+        (short) 8741, (short) 7700, (short) 926, (short) 11200, (short) 25238,
+    };
+    public static final short[] WISE_OLD_MAN_RECOLOR_REPLACE =
+    {
+        (short) 8856, (short) 42787, (short) 43963, (short) 8617, (short) 8856,
+    };
 
     // The Golden Gnome Awards' own Gnome (RuneMonk npc id 4233), and the animation he idles on at
     // the ceremony arena's own center (GnomeNpcOverlay, the only reader of either).
@@ -721,11 +734,23 @@ public class RunePartyPlugin extends Plugin
     public static final long WISE_OLD_MAN_OUTCOME_BANNER_DURATION_MS = GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
 
     // The Item Shop's own shopkeeper (RuneMonk npc id 2151), and the animation he idles on while
-    // standing beside his own tile (ItemShopNpcOverlay, the only reader of either). 808 (a generic
+    // standing beside his own tile (InteriorNpcOverlay, the only reader of either). 808 (a generic
     // stand-idle) is a placeholder, same "will adjust later" status the prices below carry -- swap
     // it for whatever this NPC's real idle animation turns out to be.
     public static final int ITEM_SHOP_NPC_ID = 2151;
     public static final int ITEM_SHOP_NPC_IDLE_ANIMATION_ID = 808;
+    // This NPC's own custom recolor find/replace pairs -- see WISE_OLD_MAN_RECOLOR_FIND's own doc
+    // just above for why these are packed-HSL shorts, and InteriorNpcOverlay#applyRecolor's own doc
+    // for why both the in-world model and ItemShopDialogueOverlay's own chathead read these same
+    // two arrays.
+    public static final short[] ITEM_SHOP_RECOLOR_FIND =
+    {
+        (short) 8741, (short) 25238, (short) 8078, (short) 908, (short) 4626, (short) 6798,
+    };
+    public static final short[] ITEM_SHOP_RECOLOR_REPLACE =
+    {
+        (short) 47502, (short) 47502, (short) 47382, (short) 47382, (short) 12, (short) 6057,
+    };
 
     /** One item this Item Shop sells -- itemKey matches the server's own items/__init__.py
      * REGISTRY (see Items.java, the client-side twin) so the dialogue can pull each item's real
@@ -1100,10 +1125,10 @@ public class RunePartyPlugin extends Plugin
     private JaddyDuelModel jaddyDuelModel;
     private CrabRaveNpcOverlay crabRaveNpcOverlay;
     private CrabRaveHudOverlay crabRaveHudOverlay;
-    private WiseOldManNpcOverlay wiseOldManNpcOverlay;
+    private InteriorNpcOverlay wiseOldManNpcOverlay;
     private GnomeNpcOverlay gnomeNpcOverlay;
     private WiseOldManDialogueOverlay wiseOldManDialogueOverlay;
-    private ItemShopNpcOverlay itemShopNpcOverlay;
+    private InteriorNpcOverlay itemShopNpcOverlay;
     private ItemShopDialogueOverlay itemShopDialogueOverlay;
     private PlayerTransformOverlay playerTransformOverlay;
     private FishingCatchOverlay fishingCatchOverlay;
@@ -1517,7 +1542,8 @@ public class RunePartyPlugin extends Plugin
         crabRaveHudOverlay = new CrabRaveHudOverlay(this);
         overlayManager.add(crabRaveHudOverlay);
 
-        wiseOldManNpcOverlay = new WiseOldManNpcOverlay(client, this);
+        wiseOldManNpcOverlay = new InteriorNpcOverlay(client, this, this::findWiseOldManTilePoints,
+            WISE_OLD_MAN_NPC_ID, WISE_OLD_MAN_IDLE_ANIMATION_ID, WISE_OLD_MAN_RECOLOR_FIND, WISE_OLD_MAN_RECOLOR_REPLACE);
         overlayManager.add(wiseOldManNpcOverlay);
 
         gnomeNpcOverlay = new GnomeNpcOverlay(client, this);
@@ -1527,7 +1553,8 @@ public class RunePartyPlugin extends Plugin
         overlayManager.add(wiseOldManDialogueOverlay);
         wiseOldManDialogueOverlay.register();
 
-        itemShopNpcOverlay = new ItemShopNpcOverlay(client, this);
+        itemShopNpcOverlay = new InteriorNpcOverlay(client, this, this::findItemShopTilePoints,
+            ITEM_SHOP_NPC_ID, ITEM_SHOP_NPC_IDLE_ANIMATION_ID, ITEM_SHOP_RECOLOR_FIND, ITEM_SHOP_RECOLOR_REPLACE);
         overlayManager.add(itemShopNpcOverlay);
 
         itemShopDialogueOverlay = new ItemShopDialogueOverlay(client, this, mouseManager, spriteManager, rosterReducer);
@@ -2489,7 +2516,7 @@ public class RunePartyPlugin extends Plugin
         return findTilesByType("REPEAT_AFTER_ME_TILE");
     }
 
-    /** Every currently-marked Wise Old Man tile -- see WiseOldManNpcOverlay, the only reader: a
+    /** Every currently-marked Wise Old Man tile -- see InteriorNpcOverlay, the only reader: a
      * real, host-placed course stop (unlike GoldenGnomeTile/CoinTrapTile), so unlike those two
      * there could be more than one on the same board. */
     public List<WorldPoint> findWiseOldManTilePoints()
@@ -2497,7 +2524,7 @@ public class RunePartyPlugin extends Plugin
         return findTilesByType("WISE_OLD_MAN_TILE");
     }
 
-    /** Every currently-marked Item Shop tile -- see ItemShopNpcOverlay, the only caller. */
+    /** Every currently-marked Item Shop tile -- see InteriorNpcOverlay, the only caller. */
     public List<WorldPoint> findItemShopTilePoints()
     {
         return findTilesByType("ITEM_SHOP_TILE");
@@ -2513,7 +2540,7 @@ public class RunePartyPlugin extends Plugin
     private long interiorNpcSpawnPointCacheRevision = -1;
 
     /** Where a purely-decorative NPC that "stands beside" a real course tile (Wise Old Man, the
-     * Item Shop keeper -- see WiseOldManNpcOverlay/ItemShopNpcOverlay, the only callers) should
+     * Item Shop keeper -- see InteriorNpcOverlay, the only caller) should
      * spawn -- one tile off to whichever side of the tile's own direction of travel sits closer to
      * the whole course's own rough center, so the NPC reads as standing inside the loop looking out
      * at a player walking past, regardless of which edge of the loop (or which winding direction)

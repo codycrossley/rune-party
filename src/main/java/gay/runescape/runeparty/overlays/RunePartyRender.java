@@ -66,7 +66,7 @@ public final class RunePartyRender
 
     /** Same merge as {@link #loadNpcChatheadModel}, but returns the raw, pre-lit {@link ModelData}
      * instead of a finished {@link Model} -- for a caller whose in-world model is recolored by
-     * hand (see ItemShopNpcOverlay's own RECOLOR_FIND/RECOLOR_REPLACE doc) and needs its chathead
+     * hand (see InteriorNpcOverlay's own applyRecolor doc) and needs its chathead
      * portrait recolored to match before calling {@code ModelData#light()} itself -- otherwise the
      * dialogue box's portrait shows the NPC's stock colors while the model standing on the tile
      * shows the recolored ones. Same "null while not cached yet, keep calling every frame"
