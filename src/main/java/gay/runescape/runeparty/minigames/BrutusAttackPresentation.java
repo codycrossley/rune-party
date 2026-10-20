@@ -403,24 +403,8 @@ public final class BrutusAttackPresentation implements MinigamePresentationFeatu
     @Override
     public void onStarted(boolean catchingUp)
     {
-        brutusRsn = null;
-        npcId = -1;
-        idleAnimationId = -1;
-        walkAnimationId = -1;
-        roundNumber = 0;
-        roundStartAt = 0;
-        eliminatedRsns.clear();
-        confirmedArrivalThisRound = false;
-        dashReportedThisRound = false;
-        targetConfirmedArrivalThisRound = false;
-        targetLeftZoneReportedThisRound = false;
-        brutusOutOfBoundsReportedThisRound = false;
-        dashWindowOpenThisRound = false;
-        dashResolvedThisRound = false;
-        dashLandedThisRound = false;
-        dashLandedPosition = null;
-        dashResultBannerUntil = 0;
-        dashResultWasHit = false;
+        // Identical to reset()'s own body, so just delegates.
+        reset();
     }
 
     @Override

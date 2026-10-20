@@ -95,11 +95,8 @@ public final class CoinRushPresentation implements MinigamePresentationFeature
         // and no tally. roundStartAt deliberately isn't set here -- MINIGAME_STARTED lands before
         // the round is actually playable (the ready-check still has to run first), so stamping
         // "now" at this point would undercount the round's remaining time; see onRoundBegin, the
-        // only writer.
-        spawns.clear();
-        scores.clear();
-        collectSubmitted.clear();
-        roundStartAt = 0;
+        // only writer. Same end state as reset(), so just delegates.
+        reset();
     }
 
     @Override
