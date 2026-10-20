@@ -4496,19 +4496,7 @@ public class RunePartyPlugin extends Plugin
      * Always hops onto the client thread, so any caller off it can call this directly. */
     public void triggerSpotAnimOnPlayer(int spotAnimId, String rsn, int height, int delayTicks)
     {
-        if (rsn == null) return;
-        clientThread.invoke(() ->
-        {
-            for (Player p : client.getPlayers())
-            {
-                if (p == null || p.getName() == null) continue;
-                if (rsn.equalsIgnoreCase(Text.toJagexName(p.getName())))
-                {
-                    p.createSpotAnim(spotAnimId, spotAnimId, height, delayTicks);
-                    return;
-                }
-            }
-        });
+        withPlayerByRsn(rsn, p -> p.createSpotAnim(spotAnimId, spotAnimId, height, delayTicks));
     }
 
     public void triggerSpotAnimOnPlayer(int spotAnimId, String rsn, int height)
@@ -4523,19 +4511,7 @@ public class RunePartyPlugin extends Plugin
      * shared by every player regardless of their own build. */
     public void triggerSpotAnimOnPlayer(int spotAnimId, String rsn, ToIntFunction<Player> heightFn, int delayTicks)
     {
-        if (rsn == null) return;
-        clientThread.invoke(() ->
-        {
-            for (Player p : client.getPlayers())
-            {
-                if (p == null || p.getName() == null) continue;
-                if (rsn.equalsIgnoreCase(Text.toJagexName(p.getName())))
-                {
-                    p.createSpotAnim(spotAnimId, spotAnimId, heightFn.applyAsInt(p), delayTicks);
-                    return;
-                }
-            }
-        });
+        withPlayerByRsn(rsn, p -> p.createSpotAnim(spotAnimId, spotAnimId, heightFn.applyAsInt(p), delayTicks));
     }
 
     public void triggerSpotAnimOnPlayer(int spotAnimId, String rsn, ToIntFunction<Player> heightFn)
@@ -4577,6 +4553,15 @@ public class RunePartyPlugin extends Plugin
      * hops onto the client thread, so any caller off it can call this directly. */
     public void triggerHotPotatoExplosion(String rsn)
     {
+        withPlayerByRsn(rsn, p -> hotPotatoExplosionModel.spawn(p.getWorldLocation()));
+    }
+
+    /** Finds {@code rsn}'s own live, loaded Player on the client thread and runs {@code action} on
+     * it -- shared by triggerSpotAnimOnPlayer/triggerHotPotatoExplosion, which only differ in what
+     * they do once they've found it. A no-op if {@code rsn} isn't currently a loaded/visible nearby
+     * actor. Always hops onto the client thread, so any caller off it can call this directly. */
+    private void withPlayerByRsn(String rsn, Consumer<Player> action)
+    {
         if (rsn == null) return;
         clientThread.invoke(() ->
         {
@@ -4585,7 +4570,7 @@ public class RunePartyPlugin extends Plugin
                 if (p == null || p.getName() == null) continue;
                 if (rsn.equalsIgnoreCase(Text.toJagexName(p.getName())))
                 {
-                    hotPotatoExplosionModel.spawn(p.getWorldLocation());
+                    action.accept(p);
                     return;
                 }
             }
