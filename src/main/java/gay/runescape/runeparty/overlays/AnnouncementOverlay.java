@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.function.BiFunction;
 import gay.runescape.runeparty.items.Item;
 import gay.runescape.runeparty.items.Items;
 import gay.runescape.runeparty.minigames.Minigame;
@@ -1796,25 +1797,11 @@ public class AnnouncementOverlay extends Overlay
             scoreByRsn.put(score.rsn.toLowerCase(), score.score);
         }
 
-        List<RosterReducer.RosterEntry> players = plugin.rosterReducer.seatedPlayers();
-        players.sort(Comparator
-            .comparingInt((RosterReducer.RosterEntry e) -> scoreByRsn.getOrDefault(e.rsn.toLowerCase(), 0))
-            .reversed()
-            .thenComparing(e -> e.number));
-
-        Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(MINIGAME_REWARDS_LINE_SIZE);
-        Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(MINIGAME_REWARDS_LINE_SIZE);
-        Table table = Table.rows().rowHeight(MINIGAME_REWARDS_LINE_HEIGHT);
-        for (RosterReducer.RosterEntry entry : players)
-        {
-            RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
-            Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
-            table.addRow(
-                Segment.plain("", nameFont, Color.LIGHT_GRAY),
-                Segment.plain(entry.rsn, nameFont, nameColor),
+        renderRankedPlayerTable(g, centerX, y, maxWidth, alpha,
+            FontManager.getRunescapeBoldFont().deriveFont(MINIGAME_REWARDS_LINE_SIZE),
+            FontManager.getRunescapeSmallFont().deriveFont(MINIGAME_REWARDS_LINE_SIZE),
+            MINIGAME_REWARDS_LINE_HEIGHT, scoreByRsn, (entry, statsFont) ->
                 Segment.plain("   " + scoreByRsn.getOrDefault(entry.rsn.toLowerCase(), 0) + " pts", statsFont, Color.LIGHT_GRAY));
-        }
-        Layout.renderCentered(g, table, centerX, y + 40, maxWidth, alpha);
     }
 
     /** Draws the mini-game rewards recap -- "REWARDS", then every seated player with the coins they
@@ -1838,25 +1825,37 @@ public class AnnouncementOverlay extends Overlay
             rewardByRsn.put(reward.rsn.toLowerCase(), reward.coins);
         }
 
+        renderRankedPlayerTable(g, centerX, y, maxWidth, alpha,
+            FontManager.getRunescapeBoldFont().deriveFont(MINIGAME_REWARDS_LINE_SIZE),
+            FontManager.getRunescapeSmallFont().deriveFont(MINIGAME_REWARDS_LINE_SIZE),
+            MINIGAME_REWARDS_LINE_HEIGHT, rewardByRsn, (entry, statsFont) ->
+            {
+                Integer reward = rewardByRsn.get(entry.rsn.toLowerCase());
+                return Segment.plain(reward != null ? "   +" + reward + " coins" : "   no reward", statsFont,
+                    reward != null ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR);
+            });
+    }
+
+    /** Shared shape behind renderMinigameScoreBanner/renderMinigameRewardsBanner: seated players
+     * ranked by an int-valued per-rsn lookup (ties broken by seat number), each row showing the
+     * name in its own seat color plus a caller-supplied stat column. */
+    private void renderRankedPlayerTable(Graphics2D g, int centerX, int y, int maxWidth, float alpha,
+        Font nameFont, Font statsFont, int rowHeight, Map<String, Integer> valueByRsn,
+        BiFunction<RosterReducer.RosterEntry, Font, Segment> statSegment)
+    {
         List<RosterReducer.RosterEntry> players = plugin.rosterReducer.seatedPlayers();
         players.sort(Comparator
-            .comparingInt((RosterReducer.RosterEntry e) -> rewardByRsn.getOrDefault(e.rsn.toLowerCase(), 0))
+            .comparingInt((RosterReducer.RosterEntry e) -> valueByRsn.getOrDefault(e.rsn.toLowerCase(), 0))
             .reversed()
             .thenComparing(e -> e.number));
 
-        Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(MINIGAME_REWARDS_LINE_SIZE);
-        Font statsFont = FontManager.getRunescapeSmallFont().deriveFont(MINIGAME_REWARDS_LINE_SIZE);
-        Table table = Table.rows().rowHeight(MINIGAME_REWARDS_LINE_HEIGHT);
+        Table table = Table.rows().rowHeight(rowHeight);
         for (RosterReducer.RosterEntry entry : players)
         {
-            Integer reward = rewardByRsn.get(entry.rsn.toLowerCase());
             RunePartyColor seatColor = RunePartyColor.forNumber(entry.colorNumber);
             Color nameColor = seatColor != null ? seatColor.awt : Color.LIGHT_GRAY;
-            table.addRow(
-                Segment.plain("", nameFont, Color.LIGHT_GRAY),
-                Segment.plain(entry.rsn, nameFont, nameColor),
-                Segment.plain(reward != null ? "   +" + reward + " coins" : "   no reward", statsFont,
-                    reward != null ? MINIGAME_REWARDS_COLOR : MINIGAME_REWARDS_NONE_COLOR));
+            table.addRow(Segment.plain("", nameFont, Color.LIGHT_GRAY), Segment.plain(entry.rsn, nameFont, nameColor),
+                statSegment.apply(entry, statsFont));
         }
         Layout.renderCentered(g, table, centerX, y + 40, maxWidth, alpha);
     }
