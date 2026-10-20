@@ -62,7 +62,7 @@ public final class WiseOldManPresentation
                     // alongside the local turnEffectGateUntil, same JAD_AWAKENED shape.
                     Integer settleMs = Json.safeInt(e.payload, "settleMs");
                     long serverIntendedStart = now + (settleMs != null ? settleMs : 0);
-                    revealAt = Math.max(serverIntendedStart, plugin.getTurnEffectGateUntil());
+                    revealAt = Math.max(serverIntendedStart, plugin.turnEffectGateUntil);
                     awakenedAt = revealAt;
                 }
                 break;

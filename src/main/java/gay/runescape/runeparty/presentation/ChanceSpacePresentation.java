@@ -127,14 +127,14 @@ public final class ChanceSpacePresentation
             int coins = amount != null ? amount : 0;
             if (coins > 0)
             {
-                plugin.enqueueCoinPopup(receiver, coins, plugin.getRosterReducer().getCoins(receiver), RunePartyPlugin.COIN_POPUP_DURATION_MS, false);
-                plugin.enqueueCoinPopup(giver, -coins, plugin.getRosterReducer().getCoins(giver), RunePartyPlugin.COIN_POPUP_DURATION_MS, false);
+                plugin.enqueueCoinPopup(receiver, coins, plugin.rosterReducer.getCoins(receiver), RunePartyPlugin.COIN_POPUP_DURATION_MS, false);
+                plugin.enqueueCoinPopup(giver, -coins, plugin.rosterReducer.getCoins(giver), RunePartyPlugin.COIN_POPUP_DURATION_MS, false);
             }
         }
         else if (Boolean.TRUE.equals(gnomeTransferred))
         {
-            plugin.goldenGnomePresentation.showCountPopup(giver, plugin.getRosterReducer().getGoldenGnomeCount(giver), -1);
-            plugin.goldenGnomePresentation.showCountPopup(receiver, plugin.getRosterReducer().getGoldenGnomeCount(receiver), 1);
+            plugin.goldenGnomePresentation.showCountPopup(giver, plugin.rosterReducer.getGoldenGnomeCount(giver), -1);
+            plugin.goldenGnomePresentation.showCountPopup(receiver, plugin.rosterReducer.getGoldenGnomeCount(receiver), 1);
         }
     }
 

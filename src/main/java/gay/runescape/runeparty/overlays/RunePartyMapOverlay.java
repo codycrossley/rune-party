@@ -112,7 +112,7 @@ public class RunePartyMapOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (!plugin.isMapShowing())
+        if (!plugin.mapShowing)
         {
             boundsKnown = false;
             return null;
@@ -130,7 +130,7 @@ public class RunePartyMapOverlay extends Overlay
         g.setColor(BACKDROP);
         g.fillRect(0, 0, canvasWidth, canvasHeight);
 
-        List<TileReducer.TileEntry> tiles = plugin.getTileReducer().snapshot();
+        List<TileReducer.TileEntry> tiles = plugin.tileReducer.snapshot();
         if (tiles.isEmpty())
         {
             boundsKnown = false;
@@ -225,9 +225,9 @@ public class RunePartyMapOverlay extends Overlay
         {
             if (from.point.getPlane() != plane || from.pathIndex == null) continue;
             Point fromCenter = cellCenter(from.point, minX, maxY, gridOriginX, gridOriginY);
-            for (int nextIndex : plugin.getTileReducer().resolveNextIndices(from))
+            for (int nextIndex : plugin.tileReducer.resolveNextIndices(from))
             {
-                TileReducer.TileEntry to = plugin.getTileReducer().tileAtIndex(nextIndex);
+                TileReducer.TileEntry to = plugin.tileReducer.tileAtIndex(nextIndex);
                 if (to == null || to.point.getPlane() != plane) continue;
                 Point toCenter = cellCenter(to.point, minX, maxY, gridOriginX, gridOriginY);
                 g.drawLine(fromCenter.getX(), fromCenter.getY(), toCenter.getX(), toCenter.getY());
@@ -318,15 +318,15 @@ public class RunePartyMapOverlay extends Overlay
         if (wp == null) return;
 
         List<TileReducer.TileEntry> here = new ArrayList<>();
-        for (TileReducer.TileEntry t : plugin.getTileReducer().snapshot())
+        for (TileReducer.TileEntry t : plugin.tileReducer.snapshot())
         {
             if (t.point.equals(wp)) here.add(t);
         }
 
         List<String> standing = new ArrayList<>();
-        for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().seatedPlayers())
+        for (RosterReducer.RosterEntry entry : plugin.rosterReducer.seatedPlayers())
         {
-            TileReducer.TileEntry playerTile = plugin.getTileReducer().tileAtIndex(plugin.getPlayerPosition(entry.rsn));
+            TileReducer.TileEntry playerTile = plugin.tileReducer.tileAtIndex(plugin.getPlayerPosition(entry.rsn));
             if (playerTile != null && playerTile.point.equals(wp)) standing.add(entry.rsn);
         }
 
@@ -355,7 +355,7 @@ public class RunePartyMapOverlay extends Overlay
      * local viewer's own current position where that's meaningful (see stepsAwaySuffix). */
     private String tileDescription(TileReducer.TileEntry t)
     {
-        ApiClient.TileTypeOut type = plugin.getTileTypeCatalog().get(t.tileType);
+        ApiClient.TileTypeOut type = plugin.tileTypeCatalog.get(t.tileType);
         String base = type != null ? type.description : t.tileType;
         if (t.pathIndex == null) return base;
 
@@ -373,13 +373,13 @@ public class RunePartyMapOverlay extends Overlay
         if (localRsn == null) return null;
 
         RosterReducer.RosterEntry self = null;
-        for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().seatedPlayers())
+        for (RosterReducer.RosterEntry entry : plugin.rosterReducer.seatedPlayers())
         {
             if (entry.rsn.equalsIgnoreCase(localRsn)) { self = entry; break; }
         }
         if (self == null) return null;
 
-        Integer steps = plugin.getTileReducer().stepsBetween(plugin.getPlayerPosition(self.rsn), targetPathIndex);
+        Integer steps = plugin.tileReducer.stepsBetween(plugin.getPlayerPosition(self.rsn), targetPathIndex);
         if (steps == null) return null;
         return " -- " + steps + (steps == 1 ? " tile away" : " tiles away");
     }
@@ -394,9 +394,9 @@ public class RunePartyMapOverlay extends Overlay
         String localRsn = plugin.getLocalRsn();
 
         Map<Point, List<RosterReducer.RosterEntry>> byCell = new HashMap<>();
-        for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().seatedPlayers())
+        for (RosterReducer.RosterEntry entry : plugin.rosterReducer.seatedPlayers())
         {
-            TileReducer.TileEntry tile = plugin.getTileReducer().tileAtIndex(plugin.getPlayerPosition(entry.rsn));
+            TileReducer.TileEntry tile = plugin.tileReducer.tileAtIndex(plugin.getPlayerPosition(entry.rsn));
             if (tile == null || tile.point.getPlane() != plane) continue;
             byCell.computeIfAbsent(cellCenter(tile.point, minX, maxY, originX, originY), c -> new ArrayList<>()).add(entry);
         }
@@ -549,7 +549,7 @@ public class RunePartyMapOverlay extends Overlay
      * Crab Rave, Brutus Attack, Repeat After Me) -- this map is a schematic of the standard course,
      * not whatever arena happens to be swapped in for the mini-game currently playing. Same flag
      * (and reasoning) CourseBuilder's own "Set Tile" submenu already filters on. */
-    // Memoizes buildLegendRows() below, keyed on plugin.getTileTypeCatalog()'s own object identity
+    // Memoizes buildLegendRows() below, keyed on plugin.tileTypeCatalog's own object identity
     // -- that field is fetched once at startup and only ever reassigned to a genuinely new Map
     // reference the one time the real catalog actually lands (see RunePartyPlugin#tileTypeCatalog's
     // own doc), never mutated in place, so an identity check is exactly the right invalidation
@@ -561,7 +561,7 @@ public class RunePartyMapOverlay extends Overlay
 
     private List<LegendRow> buildLegendRows()
     {
-        Map<String, ApiClient.TileTypeOut> catalog = plugin.getTileTypeCatalog();
+        Map<String, ApiClient.TileTypeOut> catalog = plugin.tileTypeCatalog;
         if (catalog == lastLegendCatalog) return lastLegendRows;
 
         List<LegendRow> rows = new ArrayList<>();
@@ -663,7 +663,7 @@ public class RunePartyMapOverlay extends Overlay
      * for a missing catalog entry. */
     private String modifierName(String tileType, String fallback)
     {
-        ApiClient.TileTypeOut t = plugin.getTileTypeCatalog().get(tileType);
+        ApiClient.TileTypeOut t = plugin.tileTypeCatalog.get(tileType);
         return t != null && t.displayName != null ? t.displayName : fallback;
     }
 

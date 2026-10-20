@@ -252,7 +252,7 @@ public class TileOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        GamePhase phase = plugin.getPhase();
+        GamePhase phase = plugin.phase;
         if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE)
         {
             clearGoldenGnomeModels();
@@ -447,7 +447,7 @@ public class TileOverlay extends Overlay
         renderRouteLines(g, entries);
     }
 
-    /** Drops every entry whose own served tile-type catalog entry (plugin.getTileTypeCatalog(),
+    /** Drops every entry whose own served tile-type catalog entry (plugin.tileTypeCatalog,
      * the exact same isMinigameTile flag RunePartyMapOverlay#buildLegendRows/CourseBuilder already
      * use for their own "exclude every mini-game-only type" filtering) says is mini-game-only --
      * see renderCommittedCourse's own call site doc for why. An unrecognized tileType (there
@@ -456,7 +456,7 @@ public class TileOverlay extends Overlay
      * instead of silently hiding real course tiles. */
     private List<TileReducer.TileEntry> filterOutMinigameOnlyTiles(List<TileReducer.TileEntry> entries)
     {
-        Map<String, ApiClient.TileTypeOut> catalog = plugin.getTileTypeCatalog();
+        Map<String, ApiClient.TileTypeOut> catalog = plugin.tileTypeCatalog;
         List<TileReducer.TileEntry> filtered = new ArrayList<>(entries.size());
         for (TileReducer.TileEntry entry : entries)
         {
@@ -749,13 +749,13 @@ public class TileOverlay extends Overlay
      * during the mini-game would make this arrow reappear telling them to go back. */
     private void renderTargetArrow(Graphics2D g)
     {
-        if (!plugin.isPendingRoll() || plugin.minigamePresentation.isActive()) return;
+        if (!plugin.pendingRoll || plugin.minigamePresentation.isActive()) return;
         long revealDelay = RunePartyPlugin.DICE_ROLL_SPIN_PHASE_MS
-            + (plugin.getDiceRollBonus() != 0 ? RunePartyPlugin.DICE_ROLL_BONUS_REVEAL_MS : 0);
-        if (System.currentTimeMillis() - plugin.getDiceRollStart() < revealDelay) return;
-        List<Integer> targetIndices = plugin.getPendingTargetIndices();
+            + (plugin.diceRollBonus != 0 ? RunePartyPlugin.DICE_ROLL_BONUS_REVEAL_MS : 0);
+        if (System.currentTimeMillis() - plugin.diceRollStart < revealDelay) return;
+        List<Integer> targetIndices = plugin.pendingTargetIndices;
         if (targetIndices.isEmpty()) return;
-        String moverRsn = plugin.getCurrentTurnRsn();
+        String moverRsn = plugin.currentTurnRsn;
         if (moverRsn == null) return;
 
         Player mover = findPlayerByRsn(moverRsn);
@@ -770,7 +770,7 @@ public class TileOverlay extends Overlay
             }
         }
 
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(moverRsn));
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.rosterReducer.getColorNumber(moverRsn));
         Color arrowColor = seatColor != null ? seatColor.awt : COLOR_TARGET_ARROW;
 
         for (int targetIndex : targetIndices)
@@ -794,8 +794,8 @@ public class TileOverlay extends Overlay
      * see. */
     private void renderReturnToPositionArrow(Graphics2D g)
     {
-        if (plugin.isPendingRoll() || plugin.minigamePresentation.isActive()) return;
-        String moverRsn = plugin.getCurrentTurnRsn();
+        if (plugin.pendingRoll || plugin.minigamePresentation.isActive()) return;
+        String moverRsn = plugin.currentTurnRsn;
         if (moverRsn == null || !isLocalPlayer(moverRsn)) return;
 
         TileReducer.TileEntry tile = tileReducer.tileAtIndex(plugin.getPlayerPosition(moverRsn));
@@ -804,7 +804,7 @@ public class TileOverlay extends Overlay
         WorldPoint localPos = client.getLocalPlayer() != null ? client.getLocalPlayer().getWorldLocation() : null;
         if (localPos != null && localPos.equals(tile.point)) return; // already back -- nothing to show
 
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(moverRsn));
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.rosterReducer.getColorNumber(moverRsn));
         Color arrowColor = seatColor != null ? seatColor.awt : COLOR_TARGET_ARROW;
         drawBouncingArrowWithLabel(g, tile.point, "Return Here!", arrowColor);
     }
@@ -850,8 +850,8 @@ public class TileOverlay extends Overlay
      * arrow visually ties back to the tile it's pointing at. */
     private void renderStartArrow(Graphics2D g)
     {
-        if (plugin.getPhase() != GamePhase.ACTIVE) return;
-        if (plugin.getCurrentTurnRsn() != null) return; // turn order has begun -- gathering is over
+        if (plugin.phase != GamePhase.ACTIVE) return;
+        if (plugin.currentTurnRsn != null) return; // turn order has begun -- gathering is over
 
         TileReducer.TileEntry start = tileReducer.tileAtIndex(0);
         if (start == null) return;
@@ -888,7 +888,7 @@ public class TileOverlay extends Overlay
      * &lt;item&gt;" entry these tiles carry (see RunePartyPlugin#onMenuEntryAdded). */
     private void renderItemPlacementArrows(Graphics2D g)
     {
-        if (plugin.getItemPlacementKey() == null) return;
+        if (plugin.itemPlacementKey == null) return;
         for (WorldPoint point : plugin.getItemPlacementCandidates())
         {
             drawBouncingArrowWithLabel(g, point, "Place", COLOR_PLACEMENT_ARROW);
@@ -907,16 +907,16 @@ public class TileOverlay extends Overlay
      * reasoning renderStartArrow ties its own arrow back to START's own green. */
     private void renderGoldenGnomePurchaseArrow(Graphics2D g)
     {
-        if (!plugin.isPendingRoll()) return;
+        if (!plugin.pendingRoll) return;
         if (plugin.goldenGnomePresentation.getOfferRsn() != null) return;
-        String moverRsn = plugin.getCurrentTurnRsn();
+        String moverRsn = plugin.currentTurnRsn;
         if (moverRsn == null || !isLocalPlayer(moverRsn)) return;
 
         WorldPoint goldenGnomePoint = plugin.findFirstTileByType("GOLDEN_GNOME_TILE");
         if (goldenGnomePoint == null) return;
 
         Integer goldenGnomePathIndex = tileReducer.pathIndexAt(goldenGnomePoint);
-        if (goldenGnomePathIndex == null || !plugin.getPendingReachableIndices().contains(goldenGnomePathIndex)) return;
+        if (goldenGnomePathIndex == null || !plugin.pendingReachableIndices.contains(goldenGnomePathIndex)) return;
 
         drawBouncingArrowWithLabel(g, goldenGnomePoint, "Purchase!", defaultColorFor("GOLDEN_GNOME_TILE"));
     }

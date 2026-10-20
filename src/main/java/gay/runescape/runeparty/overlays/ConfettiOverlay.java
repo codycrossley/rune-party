@@ -122,7 +122,7 @@ public class ConfettiOverlay extends Overlay
     private Color[] resolvePalette()
     {
         String winnerRsn = plugin.ceremonyPresentation.getWinnerRsn();
-        String number = winnerRsn != null ? plugin.getRosterReducer().getColorNumber(winnerRsn) : null;
+        String number = winnerRsn != null ? plugin.rosterReducer.getColorNumber(winnerRsn) : null;
         RunePartyColor seatColor = RunePartyColor.forNumber(number);
         return seatColor == null ? FALLBACK_PALETTE : paletteFor(seatColor.awt);
     }

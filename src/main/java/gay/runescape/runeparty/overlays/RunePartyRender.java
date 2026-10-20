@@ -261,7 +261,7 @@ public final class RunePartyRender
      * color a tile type is. */
     static Color defaultTileColor(RunePartyPlugin plugin, String tileType)
     {
-        ApiClient.TileTypeOut t = plugin.getTileTypeCatalog().get(tileType);
+        ApiClient.TileTypeOut t = plugin.tileTypeCatalog.get(tileType);
         if (t == null || t.colorHex == null) return UNKNOWN_TILE_COLOR;
         try { return decodeColor(t.colorHex); }
         catch (NumberFormatException e) { return UNKNOWN_TILE_COLOR; }

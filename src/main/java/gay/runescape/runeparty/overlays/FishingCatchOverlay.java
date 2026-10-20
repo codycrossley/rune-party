@@ -76,8 +76,8 @@ public class FishingCatchOverlay extends Overlay
         Font titleFont = FontManager.getRunescapeSmallFont().deriveFont(TITLE_SIZE);
         Font countFont = FontManager.getRunescapeBoldFont().deriveFont(COUNT_SIZE);
 
-        String shrimpText = String.valueOf(plugin.getShrimpCount());
-        String anchovyText = String.valueOf(plugin.getAnchovyCount());
+        String shrimpText = String.valueOf(plugin.shrimpCount);
+        String anchovyText = String.valueOf(plugin.anchovyCount);
 
         g.setFont(countFont);
         FontMetrics countFm = g.getFontMetrics();

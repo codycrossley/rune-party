@@ -167,7 +167,7 @@ public final class CeremonyPresentation
     {
         int generation = ceremonyGeneration;
         long now = System.currentTimeMillis();
-        long gateUntil = plugin.getTurnEffectGateUntil();
+        long gateUntil = plugin.turnEffectGateUntil;
         long earliestFromSharedGate = gateUntil > now ? gateUntil + RunePartyPlugin.POST_TURN_EFFECT_GRACE_MS : now;
         long revealAt = Math.max(earliestFromSharedGate, nextBeatAt);
         nextBeatAt = revealAt + durationMs;
@@ -196,7 +196,7 @@ public final class CeremonyPresentation
      * grant has already landed, so they count). Spectators and never-joined seats are excluded. */
     private List<RosterReducer.RosterEntry> computeFinalStandings()
     {
-        List<RosterReducer.RosterEntry> standings = plugin.getRosterReducer().seatedPlayers();
+        List<RosterReducer.RosterEntry> standings = plugin.rosterReducer.seatedPlayers();
         standings.sort(Comparator
             .comparingInt((RosterReducer.RosterEntry e) -> e.goldenGnomeCount).reversed()
             .thenComparing(Comparator.comparingInt((RosterReducer.RosterEntry e) -> e.coins).reversed()));
@@ -323,7 +323,7 @@ public final class CeremonyPresentation
             if (generation != ceremonyGeneration) return;
             for (String rsn : winners)
             {
-                plugin.goldenGnomePresentation.showCountPopup(rsn, plugin.getRosterReducer().getGoldenGnomeCount(rsn), 1);
+                plugin.goldenGnomePresentation.showCountPopup(rsn, plugin.rosterReducer.getGoldenGnomeCount(rsn), 1);
             }
         }, RunePartyPlugin.GOLDEN_GNOME_MOVE_VANISH_DELAY_MS, TimeUnit.MILLISECONDS);
     }

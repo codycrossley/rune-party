@@ -69,7 +69,7 @@ public final class GnomeNpcOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (plugin.getPhase() != GamePhase.ACTIVE || !plugin.ceremonyPresentation.isCeremonyIntroRevealed())
+        if (plugin.phase != GamePhase.ACTIVE || !plugin.ceremonyPresentation.isCeremonyIntroRevealed())
         {
             clear();
             return null;

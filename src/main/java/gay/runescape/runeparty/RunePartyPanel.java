@@ -41,11 +41,11 @@ public class RunePartyPanel extends PluginPanel
     private final JLabel joinCodeValueLabel = new JLabel("—");
     private final JButton copyJoinCodeBtn = new JButton("Copy");
     private final JLabel statusLabel = new JLabel(" ");
-    // Label toggles between "Show Map"/"Hide Map" based on plugin.isMapShowing() -- see refresh(),
+    // Label toggles between "Show Map"/"Hide Map" based on plugin.mapShowing -- see refresh(),
     // the only place that flips it.
     private final JButton showMapBtn = new JButton("Show Map");
     // Label toggles between "View Board"/"Return to Normal View" based on
-    // plugin.isBoardViewActive() -- see refresh(), the only place that flips it.
+    // plugin.boardViewActive -- see refresh(), the only place that flips it.
     private final JButton viewBoardBtn = new JButton("View Board");
 
     // Item use -- one button per distinct held item, visible only on the local player's own turn
@@ -355,7 +355,7 @@ public class RunePartyPanel extends PluginPanel
      * lands (it never changes shape again after that). */
     private void refreshLegend()
     {
-        Map<String, ApiClient.TileTypeOut> catalog = plugin.getTileTypeCatalog();
+        Map<String, ApiClient.TileTypeOut> catalog = plugin.tileTypeCatalog;
         if (catalog.isEmpty() || catalog.size() == legendBuiltForCatalogSize) return;
         legendBuiltForCatalogSize = catalog.size();
 
@@ -520,7 +520,7 @@ public class RunePartyPanel extends PluginPanel
 
     public void refresh()
     {
-        GamePhase phase = plugin.getPhase();
+        GamePhase phase = plugin.phase;
         boolean isHost = plugin.isHost();
 
         if (phase == GamePhase.DISCONNECTED)
@@ -537,14 +537,14 @@ public class RunePartyPanel extends PluginPanel
         statusLabel.setText(statusText(phase));
 
         showMapBtn.setVisible(phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE || phase == GamePhase.ENDED);
-        showMapBtn.setText(plugin.isMapShowing() ? "Hide Map" : "Show Map");
+        showMapBtn.setText(plugin.mapShowing ? "Hide Map" : "Show Map");
 
         // Only LOBBY/ACTIVE, matching toggleBoardView's own phase guard -- unlike showMapBtn,
         // not offered in ENDED (toggling would just no-op there). If board view somehow was still
         // active right as the game ended, RunePartyPlugin#resetState un-sticks it automatically
         // the moment the player actually leaves.
         viewBoardBtn.setVisible(phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE);
-        viewBoardBtn.setText(plugin.isBoardViewActive() ? "Return to Normal View" : "View Board");
+        viewBoardBtn.setText(plugin.boardViewActive ? "Return to Normal View" : "View Board");
 
         hostControlsCard.setVisible(isHost && (phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE));
         courseToolsPanel.setVisible(isHost && phase == GamePhase.LOBBY && !plugin.isStandardCourseLocked());
@@ -552,7 +552,7 @@ public class RunePartyPanel extends PluginPanel
         startGameBtn.setVisible(isHost && phase == GamePhase.LOBBY);
         endGameBtn.setVisible(isHost && phase == GamePhase.ACTIVE);
 
-        List<RosterReducer.RosterEntry> entries = plugin.getRosterReducer().snapshot();
+        List<RosterReducer.RosterEntry> entries = plugin.rosterReducer.snapshot();
         refreshItemUse(entries);
         refreshRoster(entries);
         refreshLegend();
@@ -572,7 +572,7 @@ public class RunePartyPanel extends PluginPanel
         // RunePartyPlugin#onMenuEntryAdded), this is just a status readout plus an escape hatch,
         // same as course placement mode has no panel presence beyond its own "Place"/dropdown
         // controls and relies on the in-world menu for the rest.
-        String placementKey = plugin.getItemPlacementKey();
+        String placementKey = plugin.itemPlacementKey;
         if (placementKey != null)
         {
             itemsCard.setVisible(true);
@@ -600,7 +600,7 @@ public class RunePartyPanel extends PluginPanel
         // the requires_placement card just above -- right-clicking the highlighted player's own
         // "Use <item>" entry (see RunePartyPlugin#onMenuEntryAdded) is the real confirm step, same
         // "status readout plus an escape hatch" restraint that card's own doc explains.
-        String targetKey = plugin.getItemTargetKey();
+        String targetKey = plugin.itemTargetKey;
         if (targetKey != null)
         {
             itemsCard.setVisible(true);
@@ -639,7 +639,7 @@ public class RunePartyPanel extends PluginPanel
         // gained/spent. A spectator, or anyone before the game's actually ACTIVE, has no items of
         // their own to ever show here.
         boolean isSeatedPlayer = localEntry != null && localEntry.role == RunePartyRole.PLAYER && localEntry.joined;
-        boolean showItemsCard = plugin.getPhase() == GamePhase.ACTIVE && isSeatedPlayer;
+        boolean showItemsCard = plugin.phase == GamePhase.ACTIVE && isSeatedPlayer;
         itemsCard.setVisible(showItemsCard);
         if (!showItemsCard)
         {
@@ -684,7 +684,7 @@ public class RunePartyPanel extends PluginPanel
         // still rebuilds the instant a reveal finishes even when that reveal happened to conceal a
         // held count down to the same buildItemsKey string it'll produce once revealed (impossible
         // today since concealment always changes the string, but cheap insurance either way).
-        boolean canUseNow = plugin.isLocalPlayerReadyToUseItem() && !plugin.isItemUsedThisTurn();
+        boolean canUseNow = plugin.isLocalPlayerReadyToUseItem() && !plugin.itemUsedThisTurn;
         String key = "items:" + canUseNow + ":" + plugin.isItemSelectionRevealed() + ":" + buildItemsKey(displayItems);
         if (key.equals(lastItemsKey)) return;
         lastItemsKey = key;
@@ -748,11 +748,11 @@ public class RunePartyPanel extends PluginPanel
             case LOBBY:
                 return "Waiting in lobby...";
             case ACTIVE:
-                String turn = plugin.getCurrentTurnRsn();
+                String turn = plugin.currentTurnRsn;
                 if (plugin.minigamePresentation.isActive()) return "Mini-game in progress!";
                 if (turn == null) return "Everyone gather at the start tile!";
-                Integer roll = plugin.getLastDiceRoll();
-                return turn + "'s turn" + (roll != null && plugin.isPendingRoll() ? " (rolled " + roll + ")" : "");
+                Integer roll = plugin.lastDiceRoll;
+                return turn + "'s turn" + (roll != null && plugin.pendingRoll ? " (rolled " + roll + ")" : "");
             case ENDED:
                 return "Game ended";
             default:
@@ -774,7 +774,7 @@ public class RunePartyPanel extends PluginPanel
      * belongs to which player. */
     private void refreshRoster(List<RosterReducer.RosterEntry> entries)
     {
-        String key = buildRosterKey(entries) + plugin.getPhase() + '|' + plugin.getCurrentTurnRsn();
+        String key = buildRosterKey(entries) + plugin.phase + '|' + plugin.currentTurnRsn;
         if (key.equals(lastRosterKey)) return;
         lastRosterKey = key;
 
@@ -790,7 +790,7 @@ public class RunePartyPanel extends PluginPanel
             row.setAlignmentX(LEFT_ALIGNMENT);
             row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
 
-            boolean onTurn = entry.rsn.equalsIgnoreCase(plugin.getCurrentTurnRsn());
+            boolean onTurn = entry.rsn.equalsIgnoreCase(plugin.currentTurnRsn);
             Color nameColor = entry.joined ? Color.WHITE : ColorScheme.MEDIUM_GRAY_COLOR;
             RunePartyColor seatColor = entry.role == RunePartyRole.PLAYER ? RunePartyColor.forNumber(entry.colorNumber) : null;
             Color numberColor = seatColor != null ? seatColor.awt : Color.WHITE;

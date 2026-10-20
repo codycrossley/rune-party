@@ -75,7 +75,7 @@ public class HotPotatoOverlay extends Overlay
     {
         if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.HOT_POTATO_KEY) || !plugin.isMinigamePlayable()) return null;
 
-        List<RosterReducer.RosterEntry> seated = plugin.getRosterReducer().seatedPlayers();
+        List<RosterReducer.RosterEntry> seated = plugin.rosterReducer.seatedPlayers();
         if (seated.isEmpty()) return null;
         seated.sort((a, b) ->
         {

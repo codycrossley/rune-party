@@ -91,7 +91,7 @@ public final class PlayerTransformOverlay extends Overlay
         // gives: isBrutusAttackActive() alone flips true the instant MINIGAME_STARTED lands, well
         // before the client's own selection wheel has actually spun to a stop, so Brutus's target
         // could otherwise transform into his giant model ahead of the "MINIGAME!" reveal.
-        if (plugin.getPhase() != GamePhase.ACTIVE || !plugin.minigamePresentation.isKeyActive(RunePartyPlugin.BRUTUS_ATTACK_KEY) || !plugin.isMinigameSelectionRevealed())
+        if (plugin.phase != GamePhase.ACTIVE || !plugin.minigamePresentation.isKeyActive(RunePartyPlugin.BRUTUS_ATTACK_KEY) || !plugin.isMinigameSelectionRevealed())
         {
             clear();
             return null;

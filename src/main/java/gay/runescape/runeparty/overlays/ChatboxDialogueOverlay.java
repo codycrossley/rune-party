@@ -275,7 +275,7 @@ public abstract class ChatboxDialogueOverlay extends Overlay
             resetForNextEncounter();
         }
 
-        boolean shouldBeOpen = plugin.getPhase() == GamePhase.ACTIVE
+        boolean shouldBeOpen = plugin.phase == GamePhase.ACTIVE
             && self != null && self.equalsIgnoreCase(encounterRsn)
             && !submitted
             && System.currentTimeMillis() >= getRevealAt();

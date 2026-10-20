@@ -138,7 +138,7 @@ public final class CrabRaveNpcOverlay extends Overlay
         // gives: isCrabRaveActive() alone flips true the instant MINIGAME_STARTED lands, well
         // before the client's own selection wheel has actually spun to a stop, so these NPCs could
         // otherwise spawn on the real board ahead of the "MINIGAME!" reveal.
-        if (plugin.getPhase() != GamePhase.ACTIVE || !plugin.minigamePresentation.isKeyActive(RunePartyPlugin.CRAB_RAVE_KEY) || !plugin.isMinigameSelectionRevealed())
+        if (plugin.phase != GamePhase.ACTIVE || !plugin.minigamePresentation.isKeyActive(RunePartyPlugin.CRAB_RAVE_KEY) || !plugin.isMinigameSelectionRevealed())
         {
             clear();
             return null;
