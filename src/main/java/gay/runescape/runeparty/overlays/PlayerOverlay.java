@@ -123,6 +123,7 @@ public class PlayerOverlay extends Overlay
             String rsn = Text.toJagexName(p.getName());
             if (rsn == null || rsn.isBlank()) continue;
             if (roster.getRole(rsn) != RunePartyRole.PLAYER) continue;
+            String lowerRsn = rsn.toLowerCase(Locale.ROOT);
 
             RunePartyColor seatColor = RunePartyColor.forNumber(roster.getColorNumber(rsn));
             if (seatColor == null) continue;
@@ -200,7 +201,7 @@ public class PlayerOverlay extends Overlay
             // target with a bullseye before anyone could see "Brutus Attack" was even chosen.
             boolean isBrutusAttackTarget = phase == GamePhase.ACTIVE && plugin.minigamePresentation.isKeyActive(RunePartyPlugin.BRUTUS_ATTACK_KEY) && plugin.isMinigamePlayable()
                 && !rsn.equalsIgnoreCase(plugin.minigamePresentation.brutusAttack().getBrutusRsn())
-                && !plugin.minigamePresentation.brutusAttack().getEliminatedRsns().contains(rsn.toLowerCase(Locale.ROOT));
+                && !plugin.minigamePresentation.brutusAttack().getEliminatedRsns().contains(lowerRsn);
             if (isBrutusAttackTarget)
             {
                 drawBrutusAttackTargetToken(g, p, c);
@@ -214,7 +215,7 @@ public class PlayerOverlay extends Overlay
             // player can never hold the potato again (see app.py's hot_potato_pass/hot_potato.py's
             // own random-explosion reassignment, both of which exclude the eliminated set).
             if (phase == GamePhase.ACTIVE && plugin.minigamePresentation.isKeyActive(RunePartyPlugin.HOT_POTATO_KEY)
-                && plugin.minigamePresentation.hotPotato().getEliminatedRsns().contains(rsn.toLowerCase(Locale.ROOT)))
+                && plugin.minigamePresentation.hotPotato().getEliminatedRsns().contains(lowerRsn))
             {
                 drawEliminatedSkullIcon(g, p);
             }
@@ -224,7 +225,7 @@ public class PlayerOverlay extends Overlay
             // that stays above an eliminated player's head for the rest of the round means missing
             // the flash's own short window is never the only way to notice someone's out.
             if (phase == GamePhase.ACTIVE && plugin.minigamePresentation.isKeyActive(RunePartyPlugin.ARENA_KEY)
-                && plugin.minigamePresentation.arena().getEliminatedRsns().contains(rsn.toLowerCase(Locale.ROOT)))
+                && plugin.minigamePresentation.arena().getEliminatedRsns().contains(lowerRsn))
             {
                 drawEliminatedSkullIcon(g, p);
             }
@@ -232,7 +233,7 @@ public class PlayerOverlay extends Overlay
             // Same again for Mage Arena -- a dodger caught in a cast's own "X" blast gets the same
             // durable marker, not just the transient flash.
             if (phase == GamePhase.ACTIVE && plugin.minigamePresentation.isKeyActive(RunePartyPlugin.MAGE_ARENA_KEY)
-                && plugin.minigamePresentation.mageArena().getEliminatedRsns().contains(rsn.toLowerCase(Locale.ROOT)))
+                && plugin.minigamePresentation.mageArena().getEliminatedRsns().contains(lowerRsn))
             {
                 drawEliminatedSkullIcon(g, p);
             }
