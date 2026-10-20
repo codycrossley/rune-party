@@ -114,6 +114,19 @@ public final class ItemShopPresentation
                 break;
             }
 
+            case Events.ITEM_SHOP_NO_ROOM:
+            {
+                // Fired instead of ITEM_SHOP_ENCOUNTER_OPENED -- the dialogue never opened at all
+                // for this landing, see events.item_shop_no_room's own doc (server) for why.
+                if (!catchingUp)
+                {
+                    String rsn = Json.requiredStr(e.payload, type, "player");
+                    plugin.armBanner(outcome, RunePartyPlugin.ITEM_SHOP_OUTCOME_BANNER_DURATION_MS,
+                        () -> new OutcomePayload("no_room_to_browse", rsn, null, null), true);
+                }
+                break;
+            }
+
             case Events.ITEM_SHOP_DISMISSED:
             {
                 encounterRsn = null; // always clear, catch-up or not -- real state
@@ -146,11 +159,14 @@ public final class ItemShopPresentation
     public long getOutcomeBannerUntil() { return outcome.until; }
 
     /** Payload for the "You/<rsn> purchased/can't afford/don't have room for <item>/can't afford
-     * any items!" outcome banner -- see the
-     * ITEM_SHOP_PURCHASED/ITEM_SHOP_PURCHASE_FAILED/ITEM_SHOP_NO_AFFORDABLE_ITEMS handlers above.
-     * outcome is "purchased", "failed" (not enough coins), "no_room" (already holding
-     * ItemTile.ITEM_CAP items), or "no_affordable_items"; price is only meaningful for "purchased";
-     * itemDisplayName is null for "no_affordable_items" (there's no single item to name). */
+     * any items/don't have room for another item!" outcome banner -- see the
+     * ITEM_SHOP_PURCHASED/ITEM_SHOP_PURCHASE_FAILED/ITEM_SHOP_NO_AFFORDABLE_ITEMS/ITEM_SHOP_NO_ROOM
+     * handlers above. outcome is "purchased", "failed" (not enough coins), "no_room" (tried to buy
+     * a specific item while already holding ItemTile.ITEM_CAP items), "no_affordable_items", or
+     * "no_room_to_browse" (landed already at the cap -- the dialogue never opened, see
+     * ITEM_SHOP_NO_ROOM's own case above); price is only meaningful for "purchased";
+     * itemDisplayName is null for every outcome except "no_room"/"purchased"/"failed" (there's no
+     * single item to name for the other two). */
     private static final class OutcomePayload
     {
         final String outcome;
