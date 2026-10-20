@@ -4055,6 +4055,7 @@ public class RunePartyPlugin extends Plugin
             case Events.ITEM_SHOP_PURCHASED:
             case Events.ITEM_SHOP_PURCHASE_FAILED:
             case Events.ITEM_SHOP_NO_AFFORDABLE_ITEMS:
+            case Events.ITEM_SHOP_NO_ROOM:
             case Events.ITEM_SHOP_DISMISSED:
             {
                 itemShopPresentation.apply(e, catchingUp);
