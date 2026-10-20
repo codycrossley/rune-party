@@ -125,11 +125,9 @@ public final class RainbowRushPresentation implements MinigamePresentationFeatur
     public void onStarted(boolean catchingUp)
     {
         // Same reasoning as every other client-local mini-game's own onStarted -- a fresh instance
-        // starts with no visited tiles and hasn't submitted yet, regardless of catch-up.
-        visitedPathIndices.clear();
-        roundStartAt = 0;
-        submitted = false;
-        arrivalGate.reset();
+        // starts with no visited tiles and hasn't submitted yet, regardless of catch-up. Identical
+        // to reset()'s own body, so just delegates.
+        reset();
     }
 
     @Override
