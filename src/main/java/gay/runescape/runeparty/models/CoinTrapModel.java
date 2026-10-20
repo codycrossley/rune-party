@@ -66,8 +66,8 @@ public final class CoinTrapModel
         }
 
         long now = System.currentTimeMillis();
-        WorldPoint triggerPoint = plugin.getCoinTrapTriggerPoint();
-        boolean triggerActive = triggerPoint != null && now < plugin.getCoinTrapTriggerUntil();
+        WorldPoint triggerPoint = plugin.itemPresentation.getCoinTrapTriggerPoint();
+        boolean triggerActive = triggerPoint != null && now < plugin.itemPresentation.getCoinTrapTriggerUntil();
         if (triggerActive)
         {
             current.add(triggerPoint);

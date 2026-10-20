@@ -957,7 +957,7 @@ public class AnnouncementOverlay extends Overlay
      * identical way "MINIGAME!" leads into renderMinigameSpinner. */
     private void renderItemBanner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getItemBannerUntil(), MINIGAME_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.itemPresentation.getItemBannerUntil(), MINIGAME_FADE_MS);
         if (alpha == null) return;
 
         int centerX = drawableWidth() / 2;
@@ -971,23 +971,23 @@ public class AnnouncementOverlay extends Overlay
      * segment per registered item. Reveals "You got &lt;item&gt;!" once settled. */
     private void renderItemSpinner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getItemSpinnerUntil(), WHEEL_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.itemPresentation.getItemSpinnerUntil(), WHEEL_FADE_MS);
         if (alpha == null) return;
         long now = System.currentTimeMillis();
 
         List<Item> all = Items.all();
         if (all.isEmpty()) return;
 
-        Item selected = Items.get(plugin.getItemGrantKey());
-        List<Item> wheelEntries = selectWheelEntries(all, selected, plugin.getItemSpinnerStart());
+        Item selected = Items.get(plugin.itemPresentation.getItemGrantKey());
+        List<Item> wheelEntries = selectWheelEntries(all, selected, plugin.itemPresentation.getItemSpinnerStart());
         int targetIndex = Math.max(0, wheelEntries.indexOf(selected));
 
-        long elapsed = now - plugin.getItemSpinnerStart();
+        long elapsed = now - plugin.itemPresentation.getItemSpinnerStart();
         boolean spinning = elapsed < RunePartyPlugin.ITEM_SPINNER_SPIN_PHASE_MS;
         float rotationDeg = wheelRotationDeg(wheelEntries.size(), targetIndex, elapsed, RunePartyPlugin.ITEM_SPINNER_SPIN_PHASE_MS, spinning);
         float scale = wheelSettleScale(elapsed, RunePartyPlugin.ITEM_SPINNER_SPIN_PHASE_MS, spinning);
 
-        String grantRsn = plugin.getItemGrantRsn();
+        String grantRsn = plugin.itemPresentation.getItemGrantRsn();
         boolean isLocal = isLocal(grantRsn);
         String revealText = grantRsn == null ? null
             : isLocal ? "You got " + selected.getDisplayName() + "!"
@@ -1002,10 +1002,10 @@ public class AnnouncementOverlay extends Overlay
      * "ready" step to wait on). Skips the subtitle entirely for an item with no description. */
     private void renderItemGrantDescription(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getItemGrantDescriptionUntil(), ITEM_USED_ANNOUNCE_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.itemPresentation.getItemGrantDescriptionUntil(), ITEM_USED_ANNOUNCE_FADE_MS);
         if (alpha == null) return;
-        String rsn = plugin.getItemGrantDescriptionRsn();
-        Item item = Items.get(plugin.getItemGrantDescriptionKey());
+        String rsn = plugin.itemPresentation.getItemGrantDescriptionRsn();
+        Item item = Items.get(plugin.itemPresentation.getItemGrantDescriptionKey());
         if (rsn == null || item == null) return;
 
         int centerX = drawableWidth() / 2;
@@ -1024,14 +1024,14 @@ public class AnnouncementOverlay extends Overlay
      * just a two-line explainer. */
     private void renderItemCapBlocked(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getItemCapBlockedUntil(), ITEM_CAP_BLOCKED_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.itemPresentation.getItemCapBlockedUntil(), ITEM_CAP_BLOCKED_FADE_MS);
         if (alpha == null) return;
-        String rsn = plugin.getItemCapBlockedRsn();
+        String rsn = plugin.itemPresentation.getItemCapBlockedRsn();
         if (rsn == null) return;
 
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 3;
-        int cap = plugin.getItemCapBlockedCap();
+        int cap = plugin.itemPresentation.getItemCapBlockedCap();
 
         boolean isLocal = isLocal(rsn);
 
@@ -1051,10 +1051,10 @@ public class AnnouncementOverlay extends Overlay
      * for items that opt into a use announcement. */
     private void renderItemUsedAnnouncement(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getItemUsedAnnounceUntil(), ITEM_USED_ANNOUNCE_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.itemPresentation.getItemUsedAnnounceUntil(), ITEM_USED_ANNOUNCE_FADE_MS);
         if (alpha == null) return;
-        String rsn = plugin.getItemUsedAnnounceRsn();
-        Item item = Items.get(plugin.getItemUsedAnnounceItemKey());
+        String rsn = plugin.itemPresentation.getItemUsedAnnounceRsn();
+        Item item = Items.get(plugin.itemPresentation.getItemUsedAnnounceItemKey());
         if (rsn == null || item == null) return;
 
         int centerX = drawableWidth() / 2;
@@ -1126,9 +1126,9 @@ public class AnnouncementOverlay extends Overlay
      * show up in each player's own coin popup instead. */
     private void renderCoinTrapAnnouncement(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getCoinTrapAnnounceUntil(), COIN_TRAP_ANNOUNCE_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.itemPresentation.getCoinTrapAnnounceUntil(), COIN_TRAP_ANNOUNCE_FADE_MS);
         if (alpha == null) return;
-        String rsn = plugin.getCoinTrapAnnounceRsn();
+        String rsn = plugin.itemPresentation.getCoinTrapAnnounceRsn();
         if (rsn == null) return;
 
         int centerX = drawableWidth() / 2;

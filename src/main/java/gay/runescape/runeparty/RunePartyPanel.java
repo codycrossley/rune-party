@@ -721,7 +721,7 @@ public class RunePartyPanel extends PluginPanel
     private Map<String, Integer> concealPendingItemGrant(Map<String, Integer> items)
     {
         if (plugin.isItemSelectionRevealed()) return items;
-        String pendingKey = plugin.getItemGrantKey();
+        String pendingKey = plugin.itemPresentation.getItemGrantKey();
         Integer count = pendingKey != null ? items.get(pendingKey) : null;
         if (count == null) return items;
 
