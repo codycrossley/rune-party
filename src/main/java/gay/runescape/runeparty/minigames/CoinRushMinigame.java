@@ -1,13 +1,9 @@
 package gay.runescape.runeparty.minigames;
 
-import java.awt.AlphaComposite;
-import java.awt.Composite;
+import gay.runescape.runeparty.WheelEntry;
+
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
-import java.io.IOException;
-import java.io.InputStream;
-import javax.imageio.ImageIO;
-import lombok.extern.slf4j.Slf4j;
 
 /** 2-4 coin spawns appear on random tiles over a 30-second round; whoever physically reaches a
  * spawn's tile first gets +2 coins and it disappears, then another can spawn elsewhere. There's
@@ -16,10 +12,9 @@ import lombok.extern.slf4j.Slf4j;
  * in StatsOverlay's scoreboard, and the "here's what to do" reminder is the MINIGAME_STARTED
  * instructions banner AnnouncementOverlay already shows (this used to also repeat as a side-panel
  * control-panel hint -- see docs/ARCHITECTURE_REVIEW.md's S7 for why that was removed). */
-@Slf4j
 public class CoinRushMinigame implements Minigame
 {
-    private static final BufferedImage ICON = loadIcon();
+    private static final BufferedImage ICON = WheelEntry.loadIcon(CoinRushMinigame.class, "/gay/runescape/runeparty/minigame_icons/coin-rush.png", "Coin Rush wheel icon");
 
     @Override
     public String getKey()
@@ -37,19 +32,5 @@ public class CoinRushMinigame implements Minigame
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
         drawIconImage(g, ICON, x, y, size, alpha);
-    }
-
-    private static BufferedImage loadIcon()
-    {
-        try (InputStream is = CoinRushMinigame.class.getResourceAsStream("/gay/runescape/runeparty/minigame_icons/coin-rush.png"))
-        {
-            if (is == null) throw new IOException("coin-rush.png resource not found");
-            return ImageIO.read(is);
-        }
-        catch (IOException e)
-        {
-            log.warn("Failed to load the Coin Rush wheel icon", e);
-            return null;
-        }
     }
 }
