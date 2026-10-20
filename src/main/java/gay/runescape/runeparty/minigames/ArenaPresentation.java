@@ -115,10 +115,8 @@ public final class ArenaPresentation implements MinigamePresentationFeature
     @Override
     public void onStarted(boolean catchingUp)
     {
-        arrivalGate.reset();
-        eliminationReported = false;
-        eliminatedRsns.clear();
-        eliminationBanner.reset();
+        // Identical to reset()'s own body, so just delegates.
+        reset();
     }
 
     @Override
