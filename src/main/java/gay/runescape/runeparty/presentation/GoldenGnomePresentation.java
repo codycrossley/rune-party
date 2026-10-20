@@ -79,10 +79,7 @@ public final class GoldenGnomePresentation
                 {
                     String rsn = Json.requiredStr(e.payload, type, "player");
                     Integer total = Json.requiredInt(e.payload, type, "goldenGnomeCount");
-                    popup.payload = new PopupPayload(rsn, total != null ? total : 0, 1);
-                    popup.start = System.currentTimeMillis();
-                    popup.until = popup.start + RunePartyPlugin.COIN_POPUP_DURATION_MS;
-                    plugin.extendTurnEffectGate(popup.until);
+                    showCountPopup(rsn, total != null ? total : 0, 1);
 
                     plugin.armBanner(outcome, RunePartyPlugin.GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS,
                         () -> new OutcomePayload("purchased", rsn), true); // same event, same player
@@ -155,10 +152,7 @@ public final class GoldenGnomePresentation
                 {
                     String rsn = Json.requiredStr(e.payload, type, "player");
                     Integer total = Json.requiredInt(e.payload, type, "goldenGnomeCount");
-                    popup.payload = new PopupPayload(rsn, total != null ? total : 0, -1);
-                    popup.start = System.currentTimeMillis();
-                    popup.until = popup.start + RunePartyPlugin.COIN_POPUP_DURATION_MS;
-                    plugin.extendTurnEffectGate(popup.until);
+                    showCountPopup(rsn, total != null ? total : 0, -1);
 
                     plugin.addChatMessage(rsn + " lost their Golden Gnome!");
                 }
@@ -180,10 +174,7 @@ public final class GoldenGnomePresentation
                 {
                     String rsn = Json.requiredStr(e.payload, type, "player");
                     Integer total = Json.requiredInt(e.payload, type, "goldenGnomeCount");
-                    popup.payload = new PopupPayload(rsn, total != null ? total : 0, 1);
-                    popup.start = System.currentTimeMillis();
-                    popup.until = popup.start + RunePartyPlugin.COIN_POPUP_DURATION_MS;
-                    plugin.extendTurnEffectGate(popup.until);
+                    showCountPopup(rsn, total != null ? total : 0, 1);
 
                     plugin.addChatMessage(rsn + " won a Golden Gnome!");
                 }
@@ -227,10 +218,10 @@ public final class GoldenGnomePresentation
         }
     }
 
-    /** Arms the count popup directly, bypassing apply()'s own event-driven timing -- for
-     * ChanceSpacePresentation's own deferred reveal (see GOLDEN_GNOME_LOST/WON's own doc above),
-     * which needs this exact "+1"/"-1" popup to land at its own reveal moment rather than the
-     * instant the underlying event actually arrived. */
+    /** Arms the count popup -- used directly by apply() above for its own immediate cases, and also
+     * callable standalone for ChanceSpacePresentation's own deferred reveal (see GOLDEN_GNOME_LOST/
+     * WON's own doc above), which needs this exact "+1"/"-1" popup to land at its own reveal moment
+     * rather than the instant the underlying event actually arrived. */
     public void showCountPopup(String rsn, int newTotal, int delta)
     {
         popup.payload = new PopupPayload(rsn, newTotal, delta);
