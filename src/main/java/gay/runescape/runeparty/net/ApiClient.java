@@ -577,34 +577,12 @@ public class ApiClient
      * where it actually placed the spawn. The payout is always server-decided. */
     public void collectCoinRushCoin(String gameId, String playerRsn, String playerToken, int spawnId, int x, int y, int plane) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-        body.addProperty("spawnId", spawnId);
-        body.addProperty("x", x);
-        body.addProperty("y", y);
-        body.addProperty("plane", plane);
-
-        try (Response resp = post("/v1/games/" + gameId + "/collect-coin-rush-coin", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Collect Coin Rush coin failed (" + resp.code() + "): " + raw);
-        }
+        postCollectSpawn("/v1/games/" + gameId + "/collect-coin-rush-coin", playerRsn, playerToken, spawnId, x, y, plane, "Collect Coin Rush coin");
     }
 
     public void collectSandwichItem(String gameId, String playerRsn, String playerToken, int spawnId, int x, int y, int plane) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-        body.addProperty("spawnId", spawnId);
-        body.addProperty("x", x);
-        body.addProperty("y", y);
-        body.addProperty("plane", plane);
-
-        try (Response resp = post("/v1/games/" + gameId + "/collect-sandwich-item", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Collect Sandwich Rush item failed (" + resp.code() + "): " + raw);
-        }
+        postCollectSpawn("/v1/games/" + gameId + "/collect-sandwich-item", playerRsn, playerToken, spawnId, x, y, plane, "Collect Sandwich Rush item");
     }
 
     /** A player's own one-shot self-report that it just reached the Sandwich Rush arena -- fired
@@ -874,6 +852,24 @@ public class ApiClient
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
+        body.addProperty("x", x);
+        body.addProperty("y", y);
+        body.addProperty("plane", plane);
+
+        try (Response resp = post(path, body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), errorLabel + " failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** Same shape as postPlayerPosition above, plus the spawnId both live-pickup collectors
+     * (Coin Rush/Sandwich Rush) also carry. */
+    private void postCollectSpawn(String path, String playerRsn, String playerToken, int spawnId, int x, int y, int plane, String errorLabel) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("spawnId", spawnId);
         body.addProperty("x", x);
         body.addProperty("y", y);
         body.addProperty("plane", plane);
