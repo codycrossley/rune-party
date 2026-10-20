@@ -162,17 +162,7 @@ public class ApiClient
      * advancing the turn -- the client only reports a position claim, the server decides. */
     public void confirmArrival(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-        body.addProperty("x", x);
-        body.addProperty("y", y);
-        body.addProperty("plane", plane);
-
-        try (Response resp = post("/v1/games/" + gameId + "/confirm-arrival", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm arrival failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerPosition("/v1/games/" + gameId + "/confirm-arrival", playerRsn, playerToken, x, y, plane, "Confirm arrival");
     }
 
     /** Reports that the local player has finished walking to the Start tile after using a Home
@@ -181,17 +171,7 @@ public class ApiClient
      * well after the item was used. */
     public void confirmHomeTeleportArrival(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-        body.addProperty("x", x);
-        body.addProperty("y", y);
-        body.addProperty("plane", plane);
-
-        try (Response resp = post("/v1/games/" + gameId + "/confirm-home-teleport-arrival", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Home Teleport arrival failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerPosition("/v1/games/" + gameId + "/confirm-home-teleport-arrival", playerRsn, playerToken, x, y, plane, "Confirm Home Teleport arrival");
     }
 
     /** One-shot, position-free "I'm on the grid" report for Arena -- fired once, the instant the
@@ -229,17 +209,7 @@ public class ApiClient
      * and confirmBrutusElimination below (what a hit actually reports). */
     public void confirmBrutusDash(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-        body.addProperty("x", x);
-        body.addProperty("y", y);
-        body.addProperty("plane", plane);
-
-        try (Response resp = post("/v1/games/" + gameId + "/confirm-brutus-dash", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Brutus dash failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerPosition("/v1/games/" + gameId + "/confirm-brutus-dash", playerRsn, playerToken, x, y, plane, "Confirm Brutus dash");
     }
 
     /** A target's own one-shot self-report that Brutus's dash just landed on it -- fired only when
@@ -290,17 +260,7 @@ public class ApiClient
      * below (what a hit actually reports). */
     public void confirmMageArenaCast(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-        body.addProperty("x", x);
-        body.addProperty("y", y);
-        body.addProperty("plane", plane);
-
-        try (Response resp = post("/v1/games/" + gameId + "/confirm-mage-arena-cast", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm Mage Arena cast failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerPosition("/v1/games/" + gameId + "/confirm-mage-arena-cast", playerRsn, playerToken, x, y, plane, "Confirm Mage Arena cast");
     }
 
     /** A dodger's own one-shot self-report that an active spell's danger window just caught it --
@@ -584,17 +544,7 @@ public class ApiClient
      * or if it isn't their turn to act. */
     public void placeCoinTrap(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-        body.addProperty("x", x);
-        body.addProperty("y", y);
-        body.addProperty("plane", plane);
-
-        try (Response resp = post("/v1/games/" + gameId + "/place-coin-trap", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Place Coin Trap failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerPosition("/v1/games/" + gameId + "/place-coin-trap", playerRsn, playerToken, x, y, plane, "Place Coin Trap");
     }
 
     /** Reports the local player's YES emote during the ready-check screen -- the server inserts
@@ -699,17 +649,7 @@ public class ApiClient
      * (x, y, plane) already has. */
     public void claimTurfWarsTile(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
     {
-        JsonObject body = new JsonObject();
-        body.addProperty("player", playerRsn);
-        body.addProperty("x", x);
-        body.addProperty("y", y);
-        body.addProperty("plane", plane);
-
-        try (Response resp = post("/v1/games/" + gameId + "/claim-turf-wars-tile", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Claim Turf Wars tile failed (" + resp.code() + "): " + raw);
-        }
+        postPlayerPosition("/v1/games/" + gameId + "/claim-turf-wars-tile", playerRsn, playerToken, x, y, plane, "Claim Turf Wars tile");
     }
 
     /** A player's own one-shot self-report that its live Who's Your Jaddy? zone membership just
@@ -919,6 +859,24 @@ public class ApiClient
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
+
+        try (Response resp = post(path, body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), errorLabel + " failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** Shared body for the 6 one-shot "here's who I am, and where" reports above (arrival/dash/cast
+     * confirmations, Coin Trap placement, Turf Wars tile claims) -- same {@code postPlayerAction}
+     * shape, just with the {@code {"x", "y", "plane"}} triple every one of them also carries. */
+    private void postPlayerPosition(String path, String playerRsn, String playerToken, int x, int y, int plane, String errorLabel) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("x", x);
+        body.addProperty("y", y);
+        body.addProperty("plane", plane);
 
         try (Response resp = post(path, body, playerToken))
         {
