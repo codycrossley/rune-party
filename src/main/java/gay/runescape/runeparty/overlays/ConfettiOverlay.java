@@ -72,7 +72,7 @@ public class ConfettiOverlay extends Overlay
         lastFrameNanos = now;
         dt = Math.min(dt, MAX_DELTA_SECS);
 
-        long until = plugin.getConfettiUntil();
+        long until = plugin.ceremonyPresentation.getConfettiUntil();
         if (until != spawnedForWindow && until > System.currentTimeMillis())
         {
             spawnBurst(client.getCanvasWidth(), resolvePalette());
@@ -121,7 +121,7 @@ public class ConfettiOverlay extends Overlay
      * on. */
     private Color[] resolvePalette()
     {
-        String winnerRsn = plugin.getWinnerRsn();
+        String winnerRsn = plugin.ceremonyPresentation.getWinnerRsn();
         String number = winnerRsn != null ? plugin.getRosterReducer().getColorNumber(winnerRsn) : null;
         RunePartyColor seatColor = RunePartyColor.forNumber(number);
         return seatColor == null ? FALLBACK_PALETTE : paletteFor(seatColor.awt);

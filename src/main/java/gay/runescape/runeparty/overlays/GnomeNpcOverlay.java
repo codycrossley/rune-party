@@ -69,7 +69,7 @@ public final class GnomeNpcOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (plugin.getPhase() != GamePhase.ACTIVE || !plugin.isCeremonyIntroRevealed())
+        if (plugin.getPhase() != GamePhase.ACTIVE || !plugin.ceremonyPresentation.isCeremonyIntroRevealed())
         {
             clear();
             return null;
@@ -97,8 +97,8 @@ public final class GnomeNpcOverlay extends Overlay
         }
 
         Set<WorldPoint> currentFlankingPoints = new HashSet<>();
-        if (plugin.isCeremonyFlankingGnomeVisible(0)) currentFlankingPoints.add(center.dx(-1));
-        if (plugin.isCeremonyFlankingGnomeVisible(1)) currentFlankingPoints.add(center.dx(1));
+        if (plugin.ceremonyPresentation.isFlankingGnomeVisible(0)) currentFlankingPoints.add(center.dx(-1));
+        if (plugin.ceremonyPresentation.isFlankingGnomeVisible(1)) currentFlankingPoints.add(center.dx(1));
         flankingProps.sync(currentFlankingPoints, k -> k, k -> client.loadModel(GOLDEN_GNOME_PROP_MODEL_ID));
 
         return null;
