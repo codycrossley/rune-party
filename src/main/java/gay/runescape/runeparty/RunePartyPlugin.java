@@ -1151,7 +1151,7 @@ public class RunePartyPlugin extends Plugin
     // one's reset() instead.
     public GoldenGnomePresentation goldenGnomePresentation;
     private CeremonyPresentation ceremonyPresentation;
-    private ItemPresentation itemPresentation;
+    public ItemPresentation itemPresentation;
     private MinigamePresentation minigamePresentation;
     public JadPresentation jadPresentation;
     public WiseOldManPresentation wiseOldManPresentation;
@@ -4743,11 +4743,11 @@ public class RunePartyPlugin extends Plugin
 
     // Delegating facade -- ItemPresentation owns the actual state. Every name/signature below is
     // unchanged, so no external caller (AnnouncementOverlay, TileOverlay) needs to change.
-    public long getItemBannerUntil() { return itemPresentation.getItemBannerUntil(); }
-    public long getItemSpinnerStart() { return itemPresentation.getItemSpinnerStart(); }
-    public long getItemSpinnerUntil() { return itemPresentation.getItemSpinnerUntil(); }
-    public String getItemGrantRsn() { return itemPresentation.getItemGrantRsn(); }
-    public String getItemGrantKey() { return itemPresentation.getItemGrantKey(); }
+    
+    
+    
+    
+    
 
     /** Whether this client has actually seen the item wheel settle on the most recently granted
      * item yet -- same "don't spoil the reveal early" shape isMinigameSelectionRevealed() already
@@ -4757,31 +4757,31 @@ public class RunePartyPlugin extends Plugin
      * lands. True whenever there's nothing to wait on: no grant has happened yet, the most recent
      * one wasn't for the local player (nothing of theirs changed, so nothing to spoil), or this
      * client only caught up on a past grant (ItemPresentation#apply never arms the spinner at all
-     * during catch-up, so getItemSpinnerStart() stays 0 in that case). RunePartyPanel's own item
+     * during catch-up, so itemPresentation.getItemSpinnerStart() stays 0 in that case). RunePartyPanel's own item
      * list reads this to briefly conceal a freshly granted item rather than showing its "Use X"
      * button before the wheel's even revealed it. */
     public boolean isItemSelectionRevealed()
     {
-        String pendingRsn = getItemGrantRsn();
+        String pendingRsn = itemPresentation.getItemGrantRsn();
         String local = getLocalRsn();
         if (pendingRsn == null || local == null || !pendingRsn.equalsIgnoreCase(local)) return true;
-        long start = getItemSpinnerStart();
+        long start = itemPresentation.getItemSpinnerStart();
         if (start == 0) return true;
         return System.currentTimeMillis() - start >= ITEM_SPINNER_SPIN_PHASE_MS;
     }
-    public long getItemGrantDescriptionUntil() { return itemPresentation.getItemGrantDescriptionUntil(); }
-    public String getItemGrantDescriptionRsn() { return itemPresentation.getItemGrantDescriptionRsn(); }
-    public String getItemGrantDescriptionKey() { return itemPresentation.getItemGrantDescriptionKey(); }
-    public long getItemCapBlockedUntil() { return itemPresentation.getItemCapBlockedUntil(); }
-    public String getItemCapBlockedRsn() { return itemPresentation.getItemCapBlockedRsn(); }
-    public int getItemCapBlockedCap() { return itemPresentation.getItemCapBlockedCap(); }
-    public long getItemUsedAnnounceUntil() { return itemPresentation.getItemUsedAnnounceUntil(); }
-    public String getItemUsedAnnounceRsn() { return itemPresentation.getItemUsedAnnounceRsn(); }
-    public String getItemUsedAnnounceItemKey() { return itemPresentation.getItemUsedAnnounceItemKey(); }
-    public long getCoinTrapAnnounceUntil() { return itemPresentation.getCoinTrapAnnounceUntil(); }
-    public String getCoinTrapAnnounceRsn() { return itemPresentation.getCoinTrapAnnounceRsn(); }
-    public WorldPoint getCoinTrapTriggerPoint() { return itemPresentation.getCoinTrapTriggerPoint(); }
-    public long getCoinTrapTriggerUntil() { return itemPresentation.getCoinTrapTriggerUntil(); }
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
 
     /** Every currently-live Coin Rush spawn, keyed by the server's own spawn id -- see
      * TileOverlay#updateCoinRushModels, the only consumer. */
