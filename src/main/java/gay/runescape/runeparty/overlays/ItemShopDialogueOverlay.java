@@ -80,10 +80,10 @@ public final class ItemShopDialogueOverlay extends ChatboxDialogueOverlay
     }
 
     @Override
-    protected String getEncounterRsn() { return plugin.getItemShopEncounterRsn(); }
+    protected String getEncounterRsn() { return plugin.itemShopPresentation.getEncounterRsn(); }
 
     @Override
-    protected long getRevealAt() { return plugin.getItemShopRevealAt(); }
+    protected long getRevealAt() { return plugin.itemShopPresentation.getRevealAt(); }
 
     @Override
     protected int getNpcId() { return RunePartyPlugin.ITEM_SHOP_NPC_ID; }
