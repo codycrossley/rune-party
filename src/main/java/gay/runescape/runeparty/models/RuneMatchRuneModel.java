@@ -13,7 +13,7 @@ import net.runelite.api.coords.LocalPoint;
 import java.util.Map;
 
 /** Spawns/clears the 3D rune models for Rune Match's own currently-revealed cards -- same
- * SceneObjectSet-backed diff/spawn shape PondModel/TableModel already use for their own
+ * SceneObjectSet-backed diff/spawn shape PondTableModel already use for their own
  * always-visible modifiers. Unlike those, which mirror whatever the server broadcasts, which cards
  * are revealed here is decided entirely client-side (see minigames.RuneMatchPresentation#
  * isRevealed) -- TileOverlay only ever passes this the subset of the 16 card tiles the LOCAL
