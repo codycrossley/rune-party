@@ -1149,7 +1149,7 @@ public class RunePartyPlugin extends Plugin
     // apply()/a dedicated method, and clears itself via reset(). Constructed once in startUp()
     // (same convention as apiClient above), not reconstructed per game -- resetState() calls each
     // one's reset() instead.
-    private GoldenGnomePresentation goldenGnomePresentation;
+    public GoldenGnomePresentation goldenGnomePresentation;
     private CeremonyPresentation ceremonyPresentation;
     private ItemPresentation itemPresentation;
     private MinigamePresentation minigamePresentation;
@@ -1162,7 +1162,7 @@ public class RunePartyPlugin extends Plugin
     // calls) rather than cosmetic banner/timing state. Same constructed-once-in-startUp/
     // reset()-via-resetState() convention as the presenters above.
     public CourseBuilder courseBuilder;
-    private SessionManager sessionManager;
+    public SessionManager sessionManager;
     private RunePartyPanel panel;
     private NavigationButton navButton;
     private RunePartyMapOverlay mapOverlay;
@@ -1809,14 +1809,14 @@ public class RunePartyPlugin extends Plugin
 
     // Delegating facade -- SessionManager owns the actual state/logic. Every name/signature below
     // is unchanged, so RunePartyPanel doesn't need to change.
-    public void createGame() { sessionManager.createGame(); }
-    public void createGameFromHardcodedCourse(HardcodedCourse course) { sessionManager.createGameFromHardcodedCourse(course); }
-    public void joinGame(String code) { sessionManager.joinGame(code); }
-    public void startGame(int maxRounds) { sessionManager.startGame(maxRounds); }
-    /** Host-only: ends the game for everyone, distinct from leaveGame() which only removes the
+    
+    
+    
+    
+    /** Host-only: ends the game for everyone, distinct from sessionManager.leaveGame() which only removes the
      * caller. The resulting GAME_ENDED event (see handleEvent) is what actually flips phase to
-     * ENDED for every connected client, this call and leaveGame() both just request it. */
-    public void endGame() { sessionManager.endGame(); }
+     * ENDED for every connected client, this call and sessionManager.leaveGame() both just request it. */
+    
 
     public void rollDice()
     {
@@ -2115,14 +2115,14 @@ public class RunePartyPlugin extends Plugin
             e -> addChatMessage("Failed to use " + Items.get(itemKey).getDisplayName() + " on " + targetRsn + ": " + e.getMessage()));
     }
 
-    public void leaveGame() { sessionManager.leaveGame(); }
+    
     /** Whether the turn order already has MAX_PLAYERS seats filled -- the client-side gate on
      * "Add to Game" (menu entry and roster popup both check this). The server doesn't currently
      * enforce this cap itself, so it's a UI guard rather than a real limit. */
-    public boolean isGameFull() { return sessionManager.isGameFull(); }
-    public void assignRole(String playerRsn, RunePartyRole role, Integer colorNumber) { sessionManager.assignRole(playerRsn, role, colorNumber); }
+    
+    
     /** Host-only kick, wired to the roster panel's "Remove Player" right-click entry. */
-    public void removePlayer(String playerRsn) { sessionManager.removePlayer(playerRsn); }
+    
 
     // -------------------------------------------------------------------------
     // Course building (host, LOBBY only) -- delegating facade, CourseBuilder owns the actual
@@ -2438,7 +2438,7 @@ public class RunePartyPlugin extends Plugin
             .setOption(HARDCODED_COURSE_LAUNCHER_OPTION)
             .setTarget("")
             .setType(MenuAction.RUNELITE)
-            .onClick(me -> createGameFromHardcodedCourse(course));
+            .onClick(me -> sessionManager.createGameFromHardcodedCourse(course));
     }
 
     /** Every currently-marked tile matching {@code predicate}, in scan order -- the one shared scan
@@ -3523,7 +3523,7 @@ public class RunePartyPlugin extends Plugin
         String targetRsn = Text.toJagexName(target.getName());
         if (targetRsn == null || targetRsn.isBlank()) return;
         if (rosterReducer.getRole(targetRsn) == RunePartyRole.PLAYER) return;
-        if (isGameFull()) return;
+        if (sessionManager.isGameFull()) return;
 
         MenuEntry parent = client.createMenuEntry(-1)
             .setOption("Add to Game")
@@ -3538,7 +3538,7 @@ public class RunePartyPlugin extends Plugin
                 .setOption(color.menuTag(color.displayName))
                 .setTarget("")
                 .setType(MenuAction.RUNELITE)
-                .onClick(me -> assignRole(targetRsn, RunePartyRole.PLAYER, color.seatNumber()));
+                .onClick(me -> sessionManager.assignRole(targetRsn, RunePartyRole.PLAYER, color.seatNumber()));
         }
     }
 
@@ -4690,8 +4690,8 @@ public class RunePartyPlugin extends Plugin
     public TileReducer getTileReducer() { return tileReducer; }
     public RosterReducer getRosterReducer() { return rosterReducer; }
     public String getGameId() { return gameId; }
-    public String getJoinCode() { return sessionManager.getJoinCode(); }
-    public String getHostRsn() { return sessionManager.getHostRsn(); }
+    
+    
     public boolean isHost() { return writeKey != null; }
     /** True once this game has been permanently locked to a Standard Course -- see
      * standardCourseKey's own field doc. Course-building tools (RunePartyPanel's own
@@ -5149,7 +5149,7 @@ public class RunePartyPlugin extends Plugin
     public String getTeleOtherUsedCasterRsn() { return teleOtherUsedAnnounce.payload != null ? teleOtherUsedAnnounce.payload.casterRsn : null; }
     public String getTeleOtherUsedTargetRsn() { return teleOtherUsedAnnounce.payload != null ? teleOtherUsedAnnounce.payload.targetRsn : null; }
     public long getTeleOtherUsedUntil() { return teleOtherUsedAnnounce.until; }
-    public long getWelcomeBannerUntil() { return sessionManager.getWelcomeBannerUntil(); }
+    
     public long getMinigameBannerUntil() { return minigamePresentation.getMinigameBannerUntil(); }
     public long getMinigameOverBannerUntil() { return minigamePresentation.getMinigameOverBannerUntil(); }
     public long getArrivalRoundBeginBannerUntil() { return minigamePresentation.getArrivalRoundBeginBannerUntil(); }
@@ -5224,26 +5224,23 @@ public class RunePartyPlugin extends Plugin
     // Delegating facade -- GoldenGnomePresentation owns the actual state. Every name/signature
     // below is unchanged, so no external caller (AnnouncementOverlay, PlayerOverlay, TileOverlay)
     // needs to change.
-    public String getGoldenGnomeOfferRsn() { return goldenGnomePresentation.getOfferRsn(); }
-    public String getGoldenGnomeOutcome() { return goldenGnomePresentation.getOutcome(); }
-    public String getGoldenGnomeOutcomeRsn() { return goldenGnomePresentation.getOutcomeRsn(); }
-    public long getGoldenGnomeOutcomeBannerUntil() { return goldenGnomePresentation.getOutcomeBannerUntil(); }
-    public String getGoldenGnomePopupRsn() { return goldenGnomePresentation.getPopupRsn(); }
-    public int getGoldenGnomePopupNewTotal() { return goldenGnomePresentation.getPopupNewTotal(); }
-    public int getGoldenGnomePopupDelta() { return goldenGnomePresentation.getPopupDelta(); }
-    public long getGoldenGnomePopupStart() { return goldenGnomePresentation.getPopupStart(); }
-    public long getGoldenGnomePopupUntil() { return goldenGnomePresentation.getPopupUntil(); }
-    public WorldPoint getGoldenGnomeMoveOldPoint() { return goldenGnomePresentation.getMoveOldPoint(); }
-    public long getGoldenGnomeMoveHideOldAt() { return goldenGnomePresentation.getMoveHideOldAt(); }
-    public WorldPoint getGoldenGnomeMoveNewPoint() { return goldenGnomePresentation.getMoveNewPoint(); }
-    public long getGoldenGnomeMoveShowNewAt() { return goldenGnomePresentation.getMoveShowNewAt(); }
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
 
     /** Lets ChanceSpacePresentation's own deferred reveal show the Golden Gnome count popup at a
      * time of its own choosing -- see GoldenGnomePresentation#showCountPopup's own doc. */
-    public void showGoldenGnomeCountPopup(String rsn, int newTotal, int delta)
-    {
-        goldenGnomePresentation.showCountPopup(rsn, newTotal, delta);
-    }
+    
 
     
     

@@ -243,7 +243,7 @@ public class PlayerOverlay extends Overlay
                 drawCoinPopup(g, p, coinPopup);
             }
 
-            if (phase == GamePhase.ACTIVE && rsn.equalsIgnoreCase(plugin.getGoldenGnomePopupRsn()))
+            if (phase == GamePhase.ACTIVE && rsn.equalsIgnoreCase(plugin.goldenGnomePresentation.getPopupRsn()))
             {
                 drawGoldenGnomePopup(g, p);
             }
@@ -389,13 +389,13 @@ public class PlayerOverlay extends Overlay
     private void drawGoldenGnomePopup(Graphics2D g, Player p)
     {
         long now = System.currentTimeMillis();
-        Float alpha = BannerAnim.fadeAlpha(plugin.getGoldenGnomePopupUntil(), RunePartyPlugin.COIN_POPUP_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.goldenGnomePresentation.getPopupUntil(), RunePartyPlugin.COIN_POPUP_FADE_MS);
         if (alpha == null) return;
 
-        long elapsed = now - plugin.getGoldenGnomePopupStart();
+        long elapsed = now - plugin.goldenGnomePresentation.getPopupStart();
         boolean showTotal = elapsed >= RunePartyPlugin.COIN_POPUP_DELTA_PHASE_MS;
-        int total = plugin.getGoldenGnomePopupNewTotal();
-        int delta = plugin.getGoldenGnomePopupDelta();
+        int total = plugin.goldenGnomePresentation.getPopupNewTotal();
+        int delta = plugin.goldenGnomePresentation.getPopupDelta();
         String text = showTotal ? (total + " Golden " + (total == 1 ? "Gnome" : "Gnomes"))
             : ((delta >= 0 ? "+" : "") + delta + " Golden " + (Math.abs(delta) == 1 ? "Gnome" : "Gnomes"));
 

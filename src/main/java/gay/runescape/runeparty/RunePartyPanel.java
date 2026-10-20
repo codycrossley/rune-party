@@ -154,7 +154,7 @@ public class RunePartyPanel extends PluginPanel
 
         joinBtn.setAlignmentX(LEFT_ALIGNMENT);
         joinBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-        joinBtn.addActionListener(e -> plugin.joinGame(joinCodeField.getText().trim()));
+        joinBtn.addActionListener(e -> plugin.sessionManager.joinGame(joinCodeField.getText().trim()));
 
         JSeparator sep = new JSeparator();
         sep.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
@@ -162,7 +162,7 @@ public class RunePartyPanel extends PluginPanel
 
         createBtn.setAlignmentX(LEFT_ALIGNMENT);
         createBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-        createBtn.addActionListener(e -> plugin.createGame());
+        createBtn.addActionListener(e -> plugin.sessionManager.createGame());
 
         card.add(joinLabel);
         card.add(Box.createVerticalStrut(4));
@@ -226,18 +226,18 @@ public class RunePartyPanel extends PluginPanel
 
         startGameBtn.setAlignmentX(LEFT_ALIGNMENT);
         startGameBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-        startGameBtn.addActionListener(e -> plugin.startGame((Integer) maxRoundsSpinner.getValue()));
+        startGameBtn.addActionListener(e -> plugin.sessionManager.startGame((Integer) maxRoundsSpinner.getValue()));
 
         endGameBtn.setAlignmentX(LEFT_ALIGNMENT);
         endGameBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-        endGameBtn.addActionListener(e -> plugin.endGame());
+        endGameBtn.addActionListener(e -> plugin.sessionManager.endGame());
 
         buildHostControlsCard();
         hostControlsCard.setAlignmentX(LEFT_ALIGNMENT);
 
         leaveGameBtn.setAlignmentX(LEFT_ALIGNMENT);
         leaveGameBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-        leaveGameBtn.addActionListener(e -> plugin.leaveGame());
+        leaveGameBtn.addActionListener(e -> plugin.sessionManager.leaveGame());
 
         buildLegendCard();
         legendCard.setAlignmentX(LEFT_ALIGNMENT);
@@ -494,7 +494,7 @@ public class RunePartyPanel extends PluginPanel
 
     private void copyJoinCodeToClipboard()
     {
-        String code = plugin.getJoinCode();
+        String code = plugin.sessionManager.getJoinCode();
         if (code == null || code.isEmpty()) return;
 
         Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(code), null);
@@ -530,7 +530,7 @@ public class RunePartyPanel extends PluginPanel
         }
 
         cardLayout.show(cardPanel, "IN_GAME");
-        String joinCode = plugin.getJoinCode();
+        String joinCode = plugin.sessionManager.getJoinCode();
         joinCodeValueLabel.setText(joinCode != null ? joinCode : "—");
         copyJoinCodeBtn.setEnabled(joinCode != null);
 
@@ -820,7 +820,7 @@ public class RunePartyPanel extends PluginPanel
             row.add(nameRow);
             row.add(statsLabel);
 
-            if (plugin.isHost() && entry.role == RunePartyRole.SPECTATOR && !plugin.isGameFull())
+            if (plugin.isHost() && entry.role == RunePartyRole.SPECTATOR && !plugin.sessionManager.isGameFull())
             {
                 JPopupMenu popup = buildAddToGamePopup(entry.rsn);
                 attachPopup(row, popup);
@@ -859,7 +859,7 @@ public class RunePartyPanel extends PluginPanel
         {
             JMenuItem colorItem = new JMenuItem(color.displayName);
             colorItem.setForeground(color.awt);
-            colorItem.addActionListener(e -> plugin.assignRole(rsn, RunePartyRole.PLAYER, color.seatNumber()));
+            colorItem.addActionListener(e -> plugin.sessionManager.assignRole(rsn, RunePartyRole.PLAYER, color.seatNumber()));
             addMenu.add(colorItem);
         }
         popup.add(addMenu);
@@ -870,7 +870,7 @@ public class RunePartyPanel extends PluginPanel
     {
         JPopupMenu popup = new JPopupMenu();
         JMenuItem removeItem = new JMenuItem("Remove Player");
-        removeItem.addActionListener(e -> plugin.removePlayer(rsn));
+        removeItem.addActionListener(e -> plugin.sessionManager.removePlayer(rsn));
         popup.add(removeItem);
         return popup;
     }
