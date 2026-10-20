@@ -2131,6 +2131,15 @@ public class RunePartyPlugin extends Plugin
     // CourseBuilder class above -- none of this is course-building itself.
     // -------------------------------------------------------------------------
 
+    /** The ground tile the cursor's currently hovering, or null if there isn't one (or it has no
+     * resolvable WorldPoint) -- shared by every "Walk here" -> custom RUNELITE entry menu hook
+     * below, each of which only cares about this tile's own point, not the Tile object itself. */
+    private WorldPoint selectedScenePoint()
+    {
+        Tile tile = client.getTopLevelWorldView().getSelectedSceneTile();
+        return tile != null ? tile.getWorldLocation() : null;
+    }
+
     /** Same "Walk here" -> custom RUNELITE entries idiom as CourseBuilder#addPresetMenuEntries, for an armed
      * requires_placement item -- only offered on the exact tile the cursor's currently over, and
      * only when that tile is genuinely one of getItemPlacementCandidates()'s own two (the server
@@ -2139,9 +2148,7 @@ public class RunePartyPlugin extends Plugin
      * rather than a more general dispatch -- generalize this once a second one exists. */
     private void addItemPlacementMenuEntries()
     {
-        Tile tile = client.getTopLevelWorldView().getSelectedSceneTile();
-        if (tile == null) return;
-        WorldPoint point = tile.getWorldLocation();
+        WorldPoint point = selectedScenePoint();
         if (point == null) return;
         String itemKey = itemPlacementKey;
         if (itemKey == null || !getItemPlacementCandidates().contains(point)) return;
@@ -2168,9 +2175,7 @@ public class RunePartyPlugin extends Plugin
      * right-click and pick it explicitly. */
     private void addClickClickClickMenuEntry()
     {
-        Tile tile = client.getTopLevelWorldView().getSelectedSceneTile();
-        if (tile == null) return;
-        WorldPoint point = tile.getWorldLocation();
+        WorldPoint point = selectedScenePoint();
         if (point == null) return;
 
         client.createMenuEntry(-1)
@@ -2186,9 +2191,7 @@ public class RunePartyPlugin extends Plugin
      * offering a doomed option. */
     private void addMageArenaCastMenuEntry()
     {
-        Tile tile = client.getTopLevelWorldView().getSelectedSceneTile();
-        if (tile == null) return;
-        WorldPoint point = tile.getWorldLocation();
+        WorldPoint point = selectedScenePoint();
         if (point == null) return;
         if (!findMageArenaTiles().contains(point)) return;
 
