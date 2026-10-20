@@ -361,6 +361,12 @@ public class AnnouncementOverlay extends Overlay
         return null;
     }
 
+    private Color seatColorOr(String rsn, Color fallback)
+    {
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.rosterReducer.getColorNumber(rsn));
+        return seatColor != null ? seatColor.awt : fallback;
+    }
+
     private void renderTurnAnnouncement(Graphics2D g)
     {
         String rsn = plugin.getTurnAnnounceRsn();
@@ -371,8 +377,7 @@ public class AnnouncementOverlay extends Overlay
 
         String text = isLocal(rsn) ? "Your Turn!" : rsn + "'s Turn";
 
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.rosterReducer.getColorNumber(rsn));
-        Color color = seatColor != null ? seatColor.awt : Color.WHITE;
+        Color color = seatColorOr(rsn, Color.WHITE);
 
         Node title = Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(36f)).color(color);
         Layout.renderCentered(g, title, drawableWidth() / 2, drawableHeight() / 4, safeTextWidth(), alpha);
@@ -389,8 +394,7 @@ public class AnnouncementOverlay extends Overlay
 
         String text = isLocal(rsn) ? "Your Turn Was Skipped!" : rsn + "'s Turn Was Skipped!";
 
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.rosterReducer.getColorNumber(rsn));
-        Color color = seatColor != null ? seatColor.awt : Color.WHITE;
+        Color color = seatColorOr(rsn, Color.WHITE);
 
         Node banner = Box.column(
                 Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(36f)).color(color),
@@ -452,8 +456,7 @@ public class AnnouncementOverlay extends Overlay
         float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), SPIN_HINT_PULSE_PERIOD_MS);
 
         Font font = FontManager.getRunescapeBoldFont().deriveFont(SPIN_HINT_SIZE);
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.rosterReducer.getColorNumber(rsn));
-        Color nameColor = seatColor != null ? seatColor.awt : SPIN_HINT_COLOR;
+        Color nameColor = seatColorOr(rsn, SPIN_HINT_COLOR);
 
         Node line = Line.of(
             Segment.plain("Waiting for ", font, SPIN_HINT_COLOR),
@@ -752,8 +755,7 @@ public class AnnouncementOverlay extends Overlay
      * real {@code Player} handle. */
     private void drawChanceSpaceToken(Graphics2D g, String rsn, int cx, int cy, float scale, float alpha)
     {
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.rosterReducer.getColorNumber(rsn));
-        Color color = seatColor != null ? seatColor.awt : Color.WHITE;
+        Color color = seatColorOr(rsn, Color.WHITE);
         int radius = Math.round(CHANCE_SPACE_TOKEN_RADIUS * scale);
 
         g.setColor(RunePartyRender.withAlpha(color, alpha));
@@ -2053,8 +2055,7 @@ public class AnnouncementOverlay extends Overlay
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 2 - 20;
 
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.rosterReducer.getColorNumber(rsn));
-        Color nameColor = seatColor != null ? seatColor.awt : Color.WHITE;
+        Color nameColor = seatColorOr(rsn, Color.WHITE);
         String stats = rsn + " -- " + plugin.ceremonyPresentation.getPlaceRevealGoldenGnomes() + " GG, " + plugin.ceremonyPresentation.getPlaceRevealCoins() + " coins";
 
         Node banner = Box.column(
@@ -2319,8 +2320,7 @@ public class AnnouncementOverlay extends Overlay
         int cx = drawableWidth() / 2 + jitterX;
         int cy = drawableHeight() / 2 + jitterY;
 
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.rosterReducer.getColorNumber(rsn));
-        Color color = seatColor != null ? seatColor.awt : Color.WHITE;
+        Color color = seatColorOr(rsn, Color.WHITE);
 
         g.setColor(RunePartyRender.withAlpha(Color.BLACK, alpha * 0.3f));
         g.fillRoundRect(cx - half + 4, cy - half + 4, size, size, DIE_CORNER, DIE_CORNER);
