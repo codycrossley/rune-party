@@ -3,10 +3,6 @@ package gay.runescape.runeparty.overlays;
 import gay.runescape.runeparty.GamePhase;
 import gay.runescape.runeparty.RunePartyPlugin;
 import gay.runescape.runeparty.TileReducer;
-
-import gay.runescape.runeparty.GamePhase;
-import gay.runescape.runeparty.RunePartyPlugin;
-import gay.runescape.runeparty.TileReducer;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FontMetrics;

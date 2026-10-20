@@ -516,20 +516,8 @@ public final class DanceDanceRuneScapePresentation implements MinigamePresentati
         // starts with no highlight, no score, and hasn't submitted yet, regardless of catch-up.
         // sequence itself isn't picked yet either -- see onRoundBegin, the only writer -- since
         // getCurrentRound() only reflects the round this instance is actually playing once the
-        // round has genuinely begun.
-        sequence = null;
-        sequenceTicks = 0;
-        roundDurationMs = 0;
-        tickCount = 0;
-        lastLoopNumber = -1;
-        scoredThisLoop = new boolean[0];
-        flashStartAtMillis = Collections.emptyMap();
-        highlighted = Collections.emptySet();
-        score = 0;
-        submitted = false;
-        outOfBounds = false;
-        roundStartAt = 0;
-        arrivalGate.reset();
+        // round has genuinely begun. Identical to reset()'s own body, so just delegates.
+        reset();
     }
 
     @Override
