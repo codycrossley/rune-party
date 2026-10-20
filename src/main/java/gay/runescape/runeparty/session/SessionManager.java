@@ -89,8 +89,7 @@ public final class SessionManager
         plugin.playerToken = result.playerToken;
         hostRsn = host;
         plugin.phase = GamePhase.LOBBY;
-        persistSession();
-        connectEventStream(plugin.gameId, host);
+        establishSession(host);
     }
 
     public void joinGame(String code)
@@ -107,8 +106,7 @@ public final class SessionManager
             plugin.writeKey = null;
             joinCode = code;
             plugin.phase = GamePhase.LOBBY;
-            persistSession();
-            connectEventStream(plugin.gameId, self);
+            establishSession(self);
             plugin.addChatMessage("Joined Rune Party game hosted by " + result.hostRsn);
             triggerWelcomeBanner();
         }, e -> plugin.addChatMessage("Failed to join game: " + e.getMessage()), plugin::refreshPanel);
@@ -189,6 +187,16 @@ public final class SessionManager
         final String wk = plugin.writeKey;
         plugin.submitAction("Remove player", () -> plugin.apiClient.removePlayer(gid, wk, playerRsn),
             e -> plugin.addChatMessage("Failed to remove " + playerRsn + ": " + e.getMessage()));
+    }
+
+    /** Shared tail of every path that lands the local client in a real game session -- persists it
+     * to disk, then opens the backlog-then-live event stream. Factored out purely because the same
+     * two calls, in the same order, follow every one of the four places phase gets set to LOBBY/
+     * ACTIVE for a (re)connect. */
+    private void establishSession(String rsn)
+    {
+        persistSession();
+        connectEventStream(plugin.gameId, rsn);
     }
 
     /** Arms AnnouncementOverlay's "Welcome to Rune Party Showdown" title card -- called once, right
@@ -283,8 +291,7 @@ public final class SessionManager
                 joinCode = info.joinCode;
                 hostRsn = info.hostRsn;
                 plugin.phase = "ACTIVE".equals(info.status) ? GamePhase.ACTIVE : GamePhase.LOBBY;
-                persistSession();
-                connectEventStream(plugin.gameId, self);
+                establishSession(self);
                 plugin.addChatMessage("Resumed hosting Rune Party game. Join code: " + info.joinCode);
             }
             else if (savedJoinCode != null && !savedJoinCode.isEmpty())
@@ -296,8 +303,7 @@ public final class SessionManager
                 plugin.writeKey = null;
                 joinCode = savedJoinCode;
                 plugin.phase = GamePhase.LOBBY; // corrected immediately by GAME_STARTED if the backlog replay below shows it's actually ACTIVE
-                persistSession();
-                connectEventStream(plugin.gameId, self);
+                establishSession(self);
                 plugin.addChatMessage("Resumed Rune Party session hosted by " + result.hostRsn);
             }
             else
