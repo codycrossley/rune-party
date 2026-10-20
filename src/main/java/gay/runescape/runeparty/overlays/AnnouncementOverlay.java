@@ -361,6 +361,8 @@ public class AnnouncementOverlay extends Overlay
         return null;
     }
 
+    private int centerX() { return drawableWidth() / 2; }
+
     private static float pulseAlpha(long now, float minAlpha, long periodMs)
     {
         return minAlpha + (1f - minAlpha) * BannerAnim.pulse(now, periodMs);
@@ -385,7 +387,7 @@ public class AnnouncementOverlay extends Overlay
         Color color = seatColorOr(rsn, Color.WHITE);
 
         Node title = Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(36f)).color(color);
-        Layout.renderCentered(g, title, drawableWidth() / 2, drawableHeight() / 4, safeTextWidth(), alpha);
+        Layout.renderCentered(g, title, centerX(), drawableHeight() / 4, safeTextWidth(), alpha);
     }
 
     /** Stands in for renderTurnAnnouncement when a player's turn was skipped by a Tele Block. */
@@ -405,7 +407,7 @@ public class AnnouncementOverlay extends Overlay
                 Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(36f)).color(color),
                 Text.of("Ice Barraged").font(FontManager.getRunescapeBoldFont().deriveFont(16f)).color(color))
             .gap(10);
-        Layout.renderCentered(g, banner, drawableWidth() / 2, drawableHeight() / 4, safeTextWidth(), alpha);
+        Layout.renderCentered(g, banner, centerX(), drawableHeight() / 4, safeTextWidth(), alpha);
     }
 
     /** Dispatches to whichever half of the Spin hint applies to the local viewer: the "it's your
@@ -450,7 +452,7 @@ public class AnnouncementOverlay extends Overlay
             Segment.rainbow("SPIN", spinFont, RAINBOW_LETTER_COLORS),
             Segment.plain(suffix, normalFont, SPIN_HINT_COLOR));
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 4 + 40;
         Layout.renderCentered(g, line, centerX, y, safeTextWidth(), alpha);
     }
@@ -468,7 +470,7 @@ public class AnnouncementOverlay extends Overlay
             Segment.plain(rsn, font, nameColor),
             Segment.plain(" to roll the dice...", font, SPIN_HINT_COLOR));
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 4 + 40;
         Layout.renderCentered(g, line, centerX, y, safeTextWidth(), alpha);
     }
@@ -483,7 +485,7 @@ public class AnnouncementOverlay extends Overlay
         if (!plugin.isLocalPlayerAwaitingReturnToPosition()) return;
 
         float alpha = pulseAlpha(System.currentTimeMillis(), SPIN_HINT_MIN_ALPHA, SPIN_HINT_PULSE_PERIOD_MS);
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 4 + 40;
 
         Node message = Text.of("Return to your tile to roll the dice!").font(FontManager.getRunescapeBoldFont().deriveFont(SPIN_HINT_SIZE)).color(SPIN_HINT_COLOR);
@@ -500,7 +502,7 @@ public class AnnouncementOverlay extends Overlay
         if (plugin.phase != GamePhase.ACTIVE || plugin.currentTurnRsn != null) return;
 
         float alpha = pulseAlpha(System.currentTimeMillis(), SPIN_HINT_MIN_ALPHA, SPIN_HINT_PULSE_PERIOD_MS);
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 4 + 40;
 
         Node message = Text.of("Head to the Start Tile to begin!").font(FontManager.getRunescapeBoldFont().deriveFont(SPIN_HINT_SIZE)).color(SPIN_HINT_COLOR);
@@ -520,7 +522,7 @@ public class AnnouncementOverlay extends Overlay
 
         float alpha = pulseAlpha(System.currentTimeMillis(), GOLDEN_GNOME_OFFER_MIN_ALPHA, GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS);
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
 
         boolean isLocal = isLocal(encounterRsn);
@@ -571,7 +573,7 @@ public class AnnouncementOverlay extends Overlay
 
         float alpha = pulseAlpha(System.currentTimeMillis(), GOLDEN_GNOME_OFFER_MIN_ALPHA, GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS);
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
 
         boolean isLocal = isLocal(offerRsn);
@@ -638,7 +640,7 @@ public class AnnouncementOverlay extends Overlay
         if (text == null) return;
 
         Node message = Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OUTCOME_SIZE)).color(color);
-        Layout.renderCentered(g, message, drawableWidth() / 2, drawableHeight() / 3, safeTextWidth(), alpha);
+        Layout.renderCentered(g, message, centerX(), drawableHeight() / 3, safeTextWidth(), alpha);
     }
 
     /** Draws the "CHANCE TILE!" title card -- same rainbow single-line treatment as "ITEM SPACE!"
@@ -649,7 +651,7 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.chanceSpacePresentation.getTitleUntil(), MINIGAME_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
 
         Node title = Text.rainbow("CHANCE TILE!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
@@ -677,7 +679,7 @@ public class AnnouncementOverlay extends Overlay
         if (leftRsn == null || rightRsn == null || outcomeType == null || direction == null || slotDelayMs == null) return;
 
         long elapsed = System.currentTimeMillis() - plugin.chanceSpacePresentation.getIconsStart();
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 2;
 
         drawChanceSpaceBackdrop(g, announcementLines, centerX, y, stageAlpha);
@@ -868,7 +870,7 @@ public class AnnouncementOverlay extends Overlay
         if (text == null) return;
 
         Node message = Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OUTCOME_SIZE)).color(Color.WHITE);
-        Layout.renderCentered(g, message, drawableWidth() / 2, drawableHeight() / 3, safeTextWidth(), alpha);
+        Layout.renderCentered(g, message, centerX(), drawableHeight() / 3, safeTextWidth(), alpha);
     }
 
     /** Draws the "MINIGAME!" title card. A pure title card -- instructions are shown by the
@@ -878,7 +880,7 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.minigamePresentation.getMinigameBannerUntil(), MINIGAME_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
 
         Node title = Text.rainbow("MINIGAME!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
@@ -891,7 +893,7 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.minigamePresentation.getMinigameOverBannerUntil(), MINIGAME_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
 
         Node title = Text.rainbow("MINIGAME OVER!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
@@ -908,7 +910,7 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.minigamePresentation.getArrivalRoundBeginBannerUntil(), MINIGAME_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 2;
 
         Node title = Text.rainbow("BEGIN!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(MINIGAME_COUNTDOWN_SIZE));
@@ -929,7 +931,7 @@ public class AnnouncementOverlay extends Overlay
         try { color = Color.decode(colorHex); }
         catch (NumberFormatException e) { return; }
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 2;
 
         Node message = Text.of("This is your team color!").font(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE)).color(color);
@@ -968,7 +970,7 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.itemPresentation.getItemBannerUntil(), MINIGAME_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
 
         Node title = Text.rainbow("ITEM SPACE!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
@@ -1016,7 +1018,7 @@ public class AnnouncementOverlay extends Overlay
         Item item = Items.get(plugin.itemPresentation.getItemGrantDescriptionKey());
         if (rsn == null || item == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
 
         boolean isLocal = isLocal(rsn);
@@ -1037,7 +1039,7 @@ public class AnnouncementOverlay extends Overlay
         String rsn = plugin.itemPresentation.getItemCapBlockedRsn();
         if (rsn == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
         int cap = plugin.itemPresentation.getItemCapBlockedCap();
 
@@ -1065,7 +1067,7 @@ public class AnnouncementOverlay extends Overlay
         Item item = Items.get(plugin.itemPresentation.getItemUsedAnnounceItemKey());
         if (rsn == null || item == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
 
         boolean isLocal = isLocal(rsn);
@@ -1090,7 +1092,7 @@ public class AnnouncementOverlay extends Overlay
         String target = plugin.getTeleBlockCastTargetRsn();
         if (caster == null || target == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
 
         boolean isCaster = isLocal(caster);
@@ -1119,7 +1121,7 @@ public class AnnouncementOverlay extends Overlay
         String target = plugin.getTeleOtherUsedTargetRsn();
         if (caster == null || target == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
 
         String casterPart = isLocal(caster) ? "You" : caster;
@@ -1139,7 +1141,7 @@ public class AnnouncementOverlay extends Overlay
         String rsn = plugin.itemPresentation.getCoinTrapAnnounceRsn();
         if (rsn == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
 
         String title = (isLocal(rsn) ? "You" : rsn) + " landed on a Coin Trap!";
@@ -1161,7 +1163,7 @@ public class AnnouncementOverlay extends Overlay
         String kind = plugin.wiseOldManPresentation.getStolenKind();
         if (thief == null || victim == null || kind == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
 
         String thiefLabel = isLocal(thief) ? "You" : thief;
@@ -1235,7 +1237,7 @@ public class AnnouncementOverlay extends Overlay
         if (text == null) return;
 
         Node message = Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(ITEM_SHOP_OUTCOME_SIZE)).color(color);
-        Layout.renderCentered(g, message, drawableWidth() / 2, drawableHeight() / 3, safeTextWidth(), alpha);
+        Layout.renderCentered(g, message, centerX(), drawableHeight() / 3, safeTextWidth(), alpha);
     }
 
     /** How far the wheel has rotated at {@code elapsed} into its spin -- eased to a stop, then held
@@ -1272,7 +1274,7 @@ public class AnnouncementOverlay extends Overlay
         int n = wheelEntries.size();
         float segmentDeg = 360f / n;
 
-        int cx = drawableWidth() / 2;
+        int cx = centerX();
         int cy = drawableHeight() / 2;
         float radius = WHEEL_RADIUS * scale;
 
@@ -1380,7 +1382,7 @@ public class AnnouncementOverlay extends Overlay
 
         float alpha = pulseAlpha(now, MINIGAME_READY_CHECK_MIN_ALPHA, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
 
         int maxWidth = safeTextWidth();
@@ -1454,7 +1456,7 @@ public class AnnouncementOverlay extends Overlay
             ? 1.4f - 0.4f * (withinTick / (float) MINIGAME_COUNTDOWN_POP_MS)
             : 1f;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 2;
 
         Node message = number >= 1
@@ -1476,7 +1478,7 @@ public class AnnouncementOverlay extends Overlay
         long now = System.currentTimeMillis();
         float alpha = pulseAlpha(now, MINIGAME_READY_CHECK_MIN_ALPHA, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 2;
 
         String text;
@@ -1520,7 +1522,7 @@ public class AnnouncementOverlay extends Overlay
 
         int phase = (int) Math.min(2, elapsed / RunePartyPlugin.RAINBOW_RUSH_LIGHT_PHASE_MS); // 0=red, 1=orange, 2=green
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int centerY = drawableHeight() / 2;
 
         int boxWidth = TRAFFIC_LIGHT_DOT_RADIUS * 2 + TRAFFIC_LIGHT_PADDING * 2;
@@ -1613,7 +1615,7 @@ public class AnnouncementOverlay extends Overlay
             text = localWon ? "Your team's Jad won!" : "The other team's Jad won!";
         }
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 2;
 
         Node message = Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_TITLE_SIZE)).color(color);
@@ -1638,7 +1640,7 @@ public class AnnouncementOverlay extends Overlay
         long now = System.currentTimeMillis();
         if (now >= endsAt) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
 
         int secondsLeft = (int) Math.max(0, Math.ceil((endsAt - now) / 1000.0));
@@ -1668,7 +1670,7 @@ public class AnnouncementOverlay extends Overlay
         if (dashEndsAt != 0 && now < dashEndsAt) return;
 
         float alpha = pulseAlpha(now, MINIGAME_READY_CHECK_MIN_ALPHA, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 2;
 
         String text = plugin.isLocalPlayerAssignedBrutus()
@@ -1698,7 +1700,7 @@ public class AnnouncementOverlay extends Overlay
         long now = System.currentTimeMillis();
         if (now >= endsAt) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
 
         int secondsLeft = (int) Math.max(0, Math.ceil((endsAt - now) / 1000.0));
@@ -1717,7 +1719,7 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.minigamePresentation.brutusAttack().getDashResultBannerUntil(), DEFAULT_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
 
         String text = plugin.minigamePresentation.brutusAttack().isDashResultHit() ? "HIT!" : "MISS!";
@@ -1766,7 +1768,7 @@ public class AnnouncementOverlay extends Overlay
      * is up, it gets the usual centered slot. */
     private void renderEliminationLines(Graphics2D g, long localUntil, long othersUntil, String othersRsn)
     {
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
         Font font = FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE);
 
@@ -1799,7 +1801,7 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.minigamePresentation.getMinigameScoreBannerUntil(), MINIGAME_REWARDS_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
         int maxWidth = safeTextWidth();
 
@@ -1827,7 +1829,7 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.minigamePresentation.getMinigameRewardsBannerUntil(), MINIGAME_REWARDS_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
         int maxWidth = safeTextWidth();
 
@@ -1882,7 +1884,7 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.minigamePresentation.getRoundCompleteBannerUntil(), ROUND_COMPLETE_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
         int maxWidth = safeTextWidth();
 
@@ -1922,7 +1924,7 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.ceremonyPresentation.getCeremonyTitleBannerUntil(), GAME_OVER_TITLE_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 2 - 20;
 
         Node title = Text.rainbow("GOLDEN GNOME AWARDS!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(GAME_OVER_TITLE_SIZE));
@@ -1944,7 +1946,7 @@ public class AnnouncementOverlay extends Overlay
         long now = System.currentTimeMillis();
         float alpha = pulseAlpha(now, MINIGAME_READY_CHECK_MIN_ALPHA, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 2;
 
         Node message = Text.of("Everyone must gather in the arena!").font(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE)).color(Color.WHITE);
@@ -1960,7 +1962,7 @@ public class AnnouncementOverlay extends Overlay
         String line = plugin.ceremonyPresentation.getGnomeLine();
         if (line == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 2;
 
         Node message = Text.of(line).font(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE)).color(Color.WHITE);
@@ -1976,7 +1978,7 @@ public class AnnouncementOverlay extends Overlay
         String description = plugin.ceremonyPresentation.getBonusObjectiveDescription();
         if (description == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 2;
 
         String ordinal = plugin.ceremonyPresentation.getBonusObjectiveRoundIndex() == 1 ? "first" : plugin.ceremonyPresentation.getBonusObjectiveRoundIndex() == 2 ? "second" : (plugin.ceremonyPresentation.getBonusObjectiveRoundIndex() + "th");
@@ -1994,7 +1996,7 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.ceremonyPresentation.getBonusSuspenseBannerUntil(), WINNER_INTRO_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 2;
 
         Node message = Text.of("The Golden Gnome is awarded to...").font(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE)).color(Color.WHITE);
@@ -2015,7 +2017,7 @@ public class AnnouncementOverlay extends Overlay
         List<String> winners = plugin.ceremonyPresentation.getBonusWinners();
         if (winners.isEmpty()) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 2;
 
         String names = String.join(" and ", winners);
@@ -2028,7 +2030,7 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.ceremonyPresentation.getGameOverBannerUntil(), GAME_OVER_TITLE_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 2 - 20;
 
         Node title = Text.rainbow("GAME OVER!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(GAME_OVER_TITLE_SIZE));
@@ -2041,7 +2043,7 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.ceremonyPresentation.getWinnerIntroBannerUntil(), WINNER_INTRO_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 2;
 
         Node message = Text.of("Now it's time to see the winner...").font(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE)).color(Color.WHITE);
@@ -2057,7 +2059,7 @@ public class AnnouncementOverlay extends Overlay
         String rsn = plugin.ceremonyPresentation.getPlaceRevealRsn();
         if (rsn == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 2 - 20;
 
         Color nameColor = seatColorOr(rsn, Color.WHITE);
@@ -2078,7 +2080,7 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.ceremonyPresentation.getWinnerSuspenseUntil(), WINNER_SUSPENSE_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 2;
 
         Node message = Text.of("And the winner is...").font(FontManager.getRunescapeBoldFont().deriveFont(WINNER_SUSPENSE_SIZE)).color(Color.WHITE);
@@ -2094,7 +2096,7 @@ public class AnnouncementOverlay extends Overlay
         String rsn = plugin.ceremonyPresentation.getWinnerRsn();
         if (rsn == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 2 - 10;
 
         Text name = Text.rainbow(rsn, RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(WINNER_REVEAL_NAME_SIZE));
@@ -2132,7 +2134,7 @@ public class AnnouncementOverlay extends Overlay
         int travel = drawableHeight() + size.height;
         int topY = drawableHeight() - Math.round(progress * travel);
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         credits.paint(g, centerX - size.width / 2, topY, maxWidth, 1f);
     }
 
@@ -2185,7 +2187,7 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.sessionManager.getWelcomeBannerUntil(), WELCOME_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
 
         Node banner = Box.column(
@@ -2203,7 +2205,7 @@ public class AnnouncementOverlay extends Overlay
         Float alpha = BannerAnim.fadeAlpha(plugin.getGameStartBannerUntil(), GAME_START_FADE_MS);
         if (alpha == null) return;
 
-        int centerX = drawableWidth() / 2;
+        int centerX = centerX();
         int y = drawableHeight() / 3;
 
         // No subtitle here -- renderStartHereHint's own larger, white, pulsing "Head to the Start
@@ -2322,7 +2324,7 @@ public class AnnouncementOverlay extends Overlay
 
         int size = Math.round(DIE_SIZE * scale);
         int half = size / 2;
-        int cx = drawableWidth() / 2 + jitterX;
+        int cx = centerX() + jitterX;
         int cy = drawableHeight() / 2 + jitterY;
 
         Color color = seatColorOr(rsn, Color.WHITE);
