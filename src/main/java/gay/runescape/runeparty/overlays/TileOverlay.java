@@ -60,6 +60,8 @@ import java.util.Random;
 @Slf4j
 public class TileOverlay extends Overlay
 {
+    private LocalPoint toLocalPoint(WorldPoint wp) { return LocalPoint.fromWorld(client.getTopLevelWorldView(), wp); }
+
     private static final Color COLOR_ROUTE_LINE    = new Color(255, 255, 255, 100);
     private static final Color COLOR_TARGET_ARROW  = new Color(255, 215, 0);
 
@@ -495,7 +497,7 @@ public class TileOverlay extends Overlay
         }
         if (center == null || minX == null) return;
 
-        LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), center);
+        LocalPoint lp = toLocalPoint(center);
         if (lp == null) return;
 
         Polygon poly = Perspective.getCanvasTileAreaPoly(client, lp, maxX - minX + 1, maxY - minY + 1, center.getPlane(), 0);
@@ -571,7 +573,7 @@ public class TileOverlay extends Overlay
             // WorldPoint.toLocalInstance, which expects a template point and would find nothing
             // for an instance one (and would light every copy of a repeated POH room chunk for a
             // template one). Outside instances the two are identical.
-            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), wp);
+            LocalPoint lp = toLocalPoint(wp);
             if (lp == null) continue;
 
             Polygon poly = Perspective.getCanvasTilePoly(client, lp);
@@ -620,7 +622,7 @@ public class TileOverlay extends Overlay
 
         for (WorldPoint threatened : plugin.computeMageArenaCastTiles(wp))
         {
-            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), threatened);
+            LocalPoint lp = toLocalPoint(threatened);
             if (lp == null) continue;
             Polygon poly = Perspective.getCanvasTilePoly(client, lp);
             if (poly == null) continue;
@@ -962,7 +964,7 @@ public class TileOverlay extends Overlay
 
     private Point tileCenterOnCanvas(WorldPoint wp)
     {
-        LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), wp);
+        LocalPoint lp = toLocalPoint(wp);
         if (lp == null) return null;
         Polygon poly = Perspective.getCanvasTilePoly(client, lp);
         if (poly == null) return null;
@@ -1037,7 +1039,7 @@ public class TileOverlay extends Overlay
         // See renderBrutusAttackCrashZone's own doc for why this is LocalPoint.fromWorld directly,
         // not WorldPoint.toLocalInstance -- wp is already an instance coordinate (POH-safe), not a
         // template one.
-        LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), wp);
+        LocalPoint lp = toLocalPoint(wp);
         if (lp == null) return;
 
         Polygon poly = Perspective.getCanvasTilePoly(client, lp);
@@ -1083,7 +1085,7 @@ public class TileOverlay extends Overlay
 
         // See renderBrutusAttackCrashZone's own doc for why this is LocalPoint.fromWorld directly,
         // not WorldPoint.toLocalInstance.
-        LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), entry.point);
+        LocalPoint lp = toLocalPoint(entry.point);
         if (lp == null) return;
 
         Polygon poly = Perspective.getCanvasTilePoly(client, lp);
@@ -1161,7 +1163,7 @@ public class TileOverlay extends Overlay
     {
         // See renderBrutusAttackCrashZone's own doc for why this is LocalPoint.fromWorld directly,
         // not WorldPoint.toLocalInstance.
-        LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), point);
+        LocalPoint lp = toLocalPoint(point);
         if (lp == null) return;
 
         Polygon poly = Perspective.getCanvasTilePoly(client, lp);
@@ -1254,7 +1256,7 @@ public class TileOverlay extends Overlay
 
         // See renderBrutusAttackCrashZone's own doc for why this is LocalPoint.fromWorld directly,
         // not WorldPoint.toLocalInstance.
-        LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), entry.point);
+        LocalPoint lp = toLocalPoint(entry.point);
         if (lp == null) return;
 
         Polygon poly = Perspective.getCanvasTilePoly(client, lp);
