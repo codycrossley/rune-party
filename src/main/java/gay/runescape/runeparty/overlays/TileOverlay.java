@@ -62,6 +62,12 @@ public class TileOverlay extends Overlay
 {
     private LocalPoint toLocalPoint(WorldPoint wp) { return LocalPoint.fromWorld(client.getTopLevelWorldView(), wp); }
 
+    private Polygon canvasTilePoly(WorldPoint wp)
+    {
+        LocalPoint lp = toLocalPoint(wp);
+        return lp == null ? null : Perspective.getCanvasTilePoly(client, lp);
+    }
+
     private static final Color COLOR_ROUTE_LINE    = new Color(255, 255, 255, 100);
     private static final Color COLOR_TARGET_ARROW  = new Color(255, 215, 0);
 
@@ -573,10 +579,7 @@ public class TileOverlay extends Overlay
             // WorldPoint.toLocalInstance, which expects a template point and would find nothing
             // for an instance one (and would light every copy of a repeated POH room chunk for a
             // template one). Outside instances the two are identical.
-            LocalPoint lp = toLocalPoint(wp);
-            if (lp == null) continue;
-
-            Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+            Polygon poly = canvasTilePoly(wp);
             if (poly == null) continue;
 
             g.setColor(BRUTUS_CRASH_ZONE_FILL_COLOR);
@@ -622,9 +625,7 @@ public class TileOverlay extends Overlay
 
         for (WorldPoint threatened : plugin.computeMageArenaCastTiles(wp))
         {
-            LocalPoint lp = toLocalPoint(threatened);
-            if (lp == null) continue;
-            Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+            Polygon poly = canvasTilePoly(threatened);
             if (poly == null) continue;
             g.draw(roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX));
         }
@@ -964,9 +965,7 @@ public class TileOverlay extends Overlay
 
     private Point tileCenterOnCanvas(WorldPoint wp)
     {
-        LocalPoint lp = toLocalPoint(wp);
-        if (lp == null) return null;
-        Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+        Polygon poly = canvasTilePoly(wp);
         if (poly == null) return null;
         Rectangle bounds = poly.getBounds();
         return new Point(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
@@ -1039,10 +1038,7 @@ public class TileOverlay extends Overlay
         // See renderBrutusAttackCrashZone's own doc for why this is LocalPoint.fromWorld directly,
         // not WorldPoint.toLocalInstance -- wp is already an instance coordinate (POH-safe), not a
         // template one.
-        LocalPoint lp = toLocalPoint(wp);
-        if (lp == null) return;
-
-        Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+        Polygon poly = canvasTilePoly(wp);
         if (poly == null) return;
 
         g.setColor(color);
@@ -1085,10 +1081,7 @@ public class TileOverlay extends Overlay
 
         // See renderBrutusAttackCrashZone's own doc for why this is LocalPoint.fromWorld directly,
         // not WorldPoint.toLocalInstance.
-        LocalPoint lp = toLocalPoint(entry.point);
-        if (lp == null) return;
-
-        Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+        Polygon poly = canvasTilePoly(entry.point);
         if (poly == null) return;
 
         g.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), fillAlpha));
@@ -1163,10 +1156,7 @@ public class TileOverlay extends Overlay
     {
         // See renderBrutusAttackCrashZone's own doc for why this is LocalPoint.fromWorld directly,
         // not WorldPoint.toLocalInstance.
-        LocalPoint lp = toLocalPoint(point);
-        if (lp == null) return;
-
-        Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+        Polygon poly = canvasTilePoly(point);
         if (poly == null) return;
 
         g.setColor(fill);
@@ -1256,10 +1246,7 @@ public class TileOverlay extends Overlay
 
         // See renderBrutusAttackCrashZone's own doc for why this is LocalPoint.fromWorld directly,
         // not WorldPoint.toLocalInstance.
-        LocalPoint lp = toLocalPoint(entry.point);
-        if (lp == null) return;
-
-        Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+        Polygon poly = canvasTilePoly(entry.point);
         if (poly == null) return;
 
         Path2D shape = roundedInsetPolygon(poly, TILE_OUTLINE_INSET_PX, TILE_OUTLINE_CORNER_RADIUS_PX);
