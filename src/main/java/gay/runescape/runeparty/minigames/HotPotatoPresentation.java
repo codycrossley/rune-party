@@ -105,6 +105,7 @@ public final class HotPotatoPresentation implements MinigamePresentationFeature
         // Same reasoning as every other mini-game's own reset above -- a fresh Hot Potato instance
         // starts with no holder assigned yet (see HOT_POTATO_ASSIGNED, the only other writer) and
         // hasn't become playable yet either.
+        awaitingPassFinish = false;
         holder = null;
         roundStartAt = 0;
         eliminatedRsns.clear();

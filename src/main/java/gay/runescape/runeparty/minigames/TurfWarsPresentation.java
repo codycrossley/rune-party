@@ -157,6 +157,7 @@ public final class TurfWarsPresentation implements MinigamePresentationFeature
     {
         // Same reasoning as CoinRushPresentation's own onStarted -- teamColors starts fresh too: a
         // new round's assignment hasn't been announced yet.
+        teamAssignedBanner.reset();
         teamColors.clear();
         roundStartAt = 0;
         arrivalGate.reset();

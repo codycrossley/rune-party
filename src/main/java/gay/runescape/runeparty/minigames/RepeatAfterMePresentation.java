@@ -232,6 +232,7 @@ public final class RepeatAfterMePresentation implements MinigamePresentationFeat
     @Override
     public void onStarted(boolean catchingUp)
     {
+        awaitingSpinFinish = false;
         roundNumber = 0;
         targetIndices = new HashSet<>();
         attemptedIndices.clear();

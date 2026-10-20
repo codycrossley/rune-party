@@ -33,6 +33,7 @@ public final class CrabRavePresentation implements MinigamePresentationFeature
     @Override
     public void onStarted(boolean catchingUp)
     {
+        awaitingDanceFinish = false;
         roundStartAt = 0;
         danceCount = 0;
         submitted = false;

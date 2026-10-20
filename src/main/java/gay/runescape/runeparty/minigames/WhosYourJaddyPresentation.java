@@ -96,6 +96,7 @@ public final class WhosYourJaddyPresentation implements MinigamePresentationFeat
     {
         // Same reasoning as every other mini-game's own reset in onStarted -- a fresh Jaddy duel
         // hasn't resolved yet, regardless of catch-up.
+        resolvedBanner.reset();
         winningColor = null;
         lastReportedZoneColor = null;
     }
