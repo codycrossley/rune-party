@@ -13,10 +13,9 @@ import gay.runescape.runeparty.models.BalloonModel;
 import gay.runescape.runeparty.models.CoinRushModel;
 import gay.runescape.runeparty.models.CoinTrapModel;
 import gay.runescape.runeparty.models.GoldenGnomeModel;
-import gay.runescape.runeparty.models.PondModel;
+import gay.runescape.runeparty.models.PondTableModel;
 import gay.runescape.runeparty.models.RuneMatchRuneModel;
 import gay.runescape.runeparty.models.SandwichItemModel;
-import gay.runescape.runeparty.models.TableModel;
 import gay.runescape.runeparty.minigames.RepeatAfterMePresentation;
 import net.runelite.api.Client;
 import net.runelite.api.Perspective;
@@ -204,13 +203,12 @@ public class TileOverlay extends Overlay
     private final CoinTrapModel coinTrapModel;
     private final CoinRushModel coinRushModel;
     private final ArenaFireModel arenaFireModel;
-    private final PondModel pondModel;
-    private final TableModel tableModel;
+    private final PondTableModel pondTableModel;
     private final SandwichItemModel sandwichItemModel;
     private final RuneMatchRuneModel runeMatchRuneModel;
     private final BalloonModel balloonModel;
 
-    // Guards arenaFireModel/tableModel/pondModel's own update() calls below (see
+    // Guards arenaFireModel/pondTableModel's own update() calls below (see
     // renderCommittedCourse) against redoing their SceneObjectSet diff/spawn work on every single
     // one of the ~50 frames/sec render() runs -- once a RuneLiteObject is spawned and positioned,
     // the game engine itself keeps drawing it every frame with zero further plugin involvement, so
@@ -239,8 +237,7 @@ public class TileOverlay extends Overlay
         this.coinTrapModel = new CoinTrapModel(client, plugin);
         this.coinRushModel = new CoinRushModel(client, plugin);
         this.arenaFireModel = new ArenaFireModel(client);
-        this.pondModel = new PondModel(client);
-        this.tableModel = new TableModel(client);
+        this.pondTableModel = new PondTableModel(client);
         this.sandwichItemModel = new SandwichItemModel(client);
         this.runeMatchRuneModel = new RuneMatchRuneModel(client);
         this.balloonModel = new BalloonModel(client, plugin);
@@ -259,8 +256,7 @@ public class TileOverlay extends Overlay
             clearCoinTrapModels();
             clearCoinRushModels();
             clearArenaFireModels();
-            clearPondModels();
-            clearTableModels();
+            clearPondTableModels();
             clearSandwichItemModels();
             clearRuneMatchModels();
             clearBalloonModels();
@@ -364,7 +360,7 @@ public class TileOverlay extends Overlay
             if ("GOLDEN_GNOME_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see models/GoldenGnomeModel
             if ("COIN_TRAP_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see models/CoinTrapModel
             if ("ARENA_TILE".equals(entry.tileType) && ArenaFireModel.isDead(entry.color)) continue; // rendered as a 3D model instead, see models/ArenaFireModel
-            if ("POND_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see models/PondModel
+            if ("POND_TILE".equals(entry.tileType)) continue; // rendered as a 3D model instead, see models/PondTableModel
             if ("FISHING_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderFishingZoneOutline
             if ("SANDWICH_RUSH_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- these tiles never change color, so an individual fill per tile is just noise
             if ("HOT_POTATO_TILE".equals(entry.tileType)) continue; // rendered as one merged-zone outline instead, see renderArenaOutline below -- same "never change color, individual fill is just noise" reasoning as Sandwich Rush's own SANDWICH_RUSH_TILE
@@ -439,8 +435,7 @@ public class TileOverlay extends Overlay
         if (currentRevision != lastModelSyncRevision || minigameSelectionPending != lastModelSyncPending)
         {
             arenaFireModel.update(entries);
-            tableModel.update(entries);
-            pondModel.update(entries);
+            pondTableModel.update(entries);
             lastModelSyncRevision = currentRevision;
             lastModelSyncPending = minigameSelectionPending;
         }
@@ -722,16 +717,10 @@ public class TileOverlay extends Overlay
         arenaFireModel.clear();
     }
 
-    /** Despawns and forgets every Pond RuneLiteObject. */
-    public void clearPondModels()
+    /** Despawns and forgets every Fish bowl and Table RuneLiteObject. */
+    public void clearPondTableModels()
     {
-        pondModel.clear();
-    }
-
-    /** Despawns and forgets every Table RuneLiteObject. */
-    public void clearTableModels()
-    {
-        tableModel.clear();
+        pondTableModel.clear();
     }
 
     /** Draws a bouncing, pulsing arrow -- in the mover's own RunePartyColor, falls back to gold if
