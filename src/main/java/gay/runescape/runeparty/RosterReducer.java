@@ -260,9 +260,7 @@ public class RosterReducer
                 // except a full syncFromRoster. numberByPlayer is cleared since their old
                 // turn-order slot is now stale; colorNumberByPlayer is also cleared -- removing a
                 // player frees their seat color for a new player.
-                String playerRaw = Json.requiredStr(e.payload, type, "player");
-                if (playerRaw == null) return;
-                String key = canonicalKey(playerRaw);
+                String key = resolveKey(e, type);
                 if (key == null) return;
                 roleByPlayer.put(key, RunePartyRole.SPECTATOR);
                 actuallyJoined.put(key, false);
@@ -272,9 +270,7 @@ public class RosterReducer
             }
             case Events.COINS_CHANGED:
             {
-                String playerRaw = Json.requiredStr(e.payload, type, "player");
-                if (playerRaw == null) return;
-                String key = canonicalKey(playerRaw);
+                String key = resolveKey(e, type);
                 if (key == null) return;
                 Integer coins = Json.requiredInt(e.payload, type, "coins");
                 if (coins != null) coinsByPlayer.put(key, coins);
@@ -289,9 +285,7 @@ public class RosterReducer
                 // overwrite with the new running total, identically. Without this case, a lost (or
                 // won) Golden Gnome would change the real server-side count while the roster/stats
                 // overlay kept showing the stale total forever.
-                String playerRaw = Json.requiredStr(e.payload, type, "player");
-                if (playerRaw == null) return;
-                String key = canonicalKey(playerRaw);
+                String key = resolveKey(e, type);
                 if (key == null) return;
                 Integer count = Json.requiredInt(e.payload, type, "goldenGnomeCount");
                 if (count != null) goldenGnomeCountByPlayer.put(key, count);
@@ -324,9 +318,7 @@ public class RosterReducer
             {
                 // `player` is who got blocked (the target), not who cast it. `stacks` is the new
                 // total, not a delta, same shape COINS_CHANGED/GOLDEN_GNOME_PURCHASED already carry.
-                String playerRaw = Json.requiredStr(e.payload, type, "player");
-                if (playerRaw == null) return;
-                String key = canonicalKey(playerRaw);
+                String key = resolveKey(e, type);
                 if (key == null) return;
                 Integer stacks = Json.requiredInt(e.payload, type, "stacks");
                 if (stacks != null) teleblockedByPlayer.put(key, stacks);
@@ -334,9 +326,7 @@ public class RosterReducer
             }
             case Events.TURN_SKIPPED:
             {
-                String playerRaw = Json.requiredStr(e.payload, type, "player");
-                if (playerRaw == null) return;
-                String key = canonicalKey(playerRaw);
+                String key = resolveKey(e, type);
                 if (key == null) return;
                 Integer stacksRemaining = Json.requiredInt(e.payload, type, "stacksRemaining");
                 if (stacksRemaining != null) teleblockedByPlayer.put(key, stacksRemaining);
@@ -344,18 +334,14 @@ public class RosterReducer
             }
             case Events.HOME_TELEPORT_ARMED:
             {
-                String playerRaw = Json.requiredStr(e.payload, type, "player");
-                if (playerRaw == null) return;
-                String key = canonicalKey(playerRaw);
+                String key = resolveKey(e, type);
                 if (key == null) return;
                 homeTeleportPendingByPlayer.add(key);
                 break;
             }
             case Events.HOME_TELEPORT_ARRIVED:
             {
-                String playerRaw = Json.requiredStr(e.payload, type, "player");
-                if (playerRaw == null) return;
-                String key = canonicalKey(playerRaw);
+                String key = resolveKey(e, type);
                 if (key == null) return;
                 homeTeleportPendingByPlayer.remove(key);
                 break;
@@ -399,6 +385,15 @@ public class RosterReducer
             case SPECTATOR: return 1;
             default:        return 2;
         }
+    }
+
+    /** The event's own "player" field, resolved straight to its canonical roster key (or null if
+     * either step fails) -- shared by every apply() case below that only ever needs the key itself,
+     * not the raw name too (see PLAYER_JOINED, the one exception that still reads playerRaw
+     * directly for its own displayName() call). */
+    private String resolveKey(ApiClient.EventOut e, String type)
+    {
+        return canonicalKey(Json.requiredStr(e.payload, type, "player"));
     }
 
     private static String canonicalKey(String raw)
