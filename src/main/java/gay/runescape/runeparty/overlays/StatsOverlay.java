@@ -81,7 +81,7 @@ public class StatsOverlay extends Overlay
         // standings are meant to be revealed one beat at a time (see CeremonyPresentation's own
         // doc); this HUD's own always-current coin/Golden Gnome totals would spoil that reveal by
         // just sitting there showing the real numbers the whole time.
-        if (plugin.isCeremonyStarted()) return null;
+        if (plugin.ceremonyPresentation.isCeremonyStarted()) return null;
 
         // seatedPlayers() excludes both spectators and a host-added PLAYER who hasn't run the join
         // flow themselves yet, keeping this HUD to players actually in the game right now.

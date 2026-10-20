@@ -410,7 +410,7 @@ public class TileOverlay extends Overlay
         // outline above) -- the real board swap can land while the final mini-game's own rewards/
         // round-complete recap is still playing (see CeremonyPresentation's own doc), so without
         // this the arena floor could visibly appear before that recap actually finishes.
-        if (plugin.isCeremonyIntroRevealed())
+        if (plugin.ceremonyPresentation.isCeremonyIntroRevealed())
         {
             renderArenaOutline(g, entries, "CEREMONY_TILE", CEREMONY_ARENA_OUTLINE_COLOR);
         }

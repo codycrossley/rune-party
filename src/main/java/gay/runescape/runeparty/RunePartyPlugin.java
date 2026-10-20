@@ -1150,7 +1150,7 @@ public class RunePartyPlugin extends Plugin
     // (same convention as apiClient above), not reconstructed per game -- resetState() calls each
     // one's reset() instead.
     public GoldenGnomePresentation goldenGnomePresentation;
-    private CeremonyPresentation ceremonyPresentation;
+    public CeremonyPresentation ceremonyPresentation;
     public ItemPresentation itemPresentation;
     private MinigamePresentation minigamePresentation;
     public JadPresentation jadPresentation;
@@ -3271,7 +3271,7 @@ public class RunePartyPlugin extends Plugin
      * banner has actually had its chance to appear. currentTurnRsn itself is real state, set the
      * instant TURN_STARTED lands -- but the banner announcing it is cosmetic, deliberately delayed
      * behind turnEffectGateUntil so it doesn't stomp over e.g. the previous mini-game's rewards/
-     * round recap still showing. isCeremonyStarted() is checked here because currentTurnRsn is
+     * round recap still showing. ceremonyPresentation.isCeremonyStarted() is checked here because currentTurnRsn is
      * never cleared once the ceremony takes over at the end of the game (GamePhase.ACTIVE
      * deliberately stays true throughout it, see CeremonyPresentation's own doc) -- without this,
      * a stale "roll the dice" reminder for whoever had the last real turn would keep reappearing
@@ -3282,7 +3282,7 @@ public class RunePartyPlugin extends Plugin
      * and a direct Player#getWorldLocation() call here would crash off the client thread. */
     public boolean isLocalPlayerReadyToRoll()
     {
-        if (phase != GamePhase.ACTIVE || pendingRoll || rollRequestSubmitted || minigamePresentation.isActive() || isCeremonyStarted()) return false;
+        if (phase != GamePhase.ACTIVE || pendingRoll || rollRequestSubmitted || minigamePresentation.isActive() || ceremonyPresentation.isCeremonyStarted()) return false;
         if (System.currentTimeMillis() < turnEffectGateUntil) return false;
         if (goldenGnomePresentation.getOfferRsn() != null) return false;
 
@@ -3309,7 +3309,7 @@ public class RunePartyPlugin extends Plugin
      * drops that check entirely, the encounter gate has to be explicit instead. */
     public boolean isLocalPlayerReadyToUseItem()
     {
-        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || isCeremonyStarted()) return false;
+        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || ceremonyPresentation.isCeremonyStarted()) return false;
         if (jadPresentation.getEncounterRsn() != null || wiseOldManPresentation.getEncounterRsn() != null
             || itemShopPresentation.getEncounterRsn() != null || goldenGnomePresentation.getOfferRsn() != null) return false;
         if (System.currentTimeMillis() < turnEffectGateUntil) return false;
@@ -3330,7 +3330,7 @@ public class RunePartyPlugin extends Plugin
      * in edge cases, same tolerance every other cached-vs-live check in this file already accepts. */
     public boolean isLocalPlayerAwaitingReturnToPosition()
     {
-        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || isCeremonyStarted()) return false;
+        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || ceremonyPresentation.isCeremonyStarted()) return false;
         String self = localRsn();
         if (self == null || !self.equalsIgnoreCase(currentTurnRsn)) return false;
         return !standingOnTrackedPositionCached;
@@ -3345,7 +3345,7 @@ public class RunePartyPlugin extends Plugin
      * and nobody's rolled" is the whole story either way. */
     public boolean isAwaitingSomeonesRoll()
     {
-        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || isCeremonyStarted()) return false;
+        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || ceremonyPresentation.isCeremonyStarted()) return false;
         if (System.currentTimeMillis() < turnEffectGateUntil) return false;
         return currentTurnRsn != null;
     }
@@ -5169,34 +5169,34 @@ public class RunePartyPlugin extends Plugin
     public String getJaddyResolvedLocalZoneColor() { return minigamePresentation.jaddy().getResolvedLocalZoneColor(); }
     // Delegating facade -- CeremonyPresentation owns the actual state. Every name/signature below
     // is unchanged, so no external caller (AnnouncementOverlay, ConfettiOverlay) needs to change.
-    public boolean isCeremonyStarted() { return ceremonyPresentation.isCeremonyStarted(); }
-    public boolean isCeremonyIntroRevealed() { return ceremonyPresentation.isCeremonyIntroRevealed(); }
-    public boolean isCeremonyGatherMessageRevealed() { return ceremonyPresentation.isCeremonyGatherMessageRevealed(); }
-    public boolean isCeremonyFlankingGnomeVisible(int index) { return ceremonyPresentation.isFlankingGnomeVisible(index); }
-    public long getCeremonyTitleBannerUntil() { return ceremonyPresentation.getCeremonyTitleBannerUntil(); }
-    public long getGnomeLineUntil() { return ceremonyPresentation.getGnomeLineUntil(); }
-    public String getGnomeLine() { return ceremonyPresentation.getGnomeLine(); }
-    public long getBonusObjectiveBannerUntil() { return ceremonyPresentation.getBonusObjectiveBannerUntil(); }
-    public long getBonusSuspenseBannerUntil() { return ceremonyPresentation.getBonusSuspenseBannerUntil(); }
-    public int getBonusObjectiveRoundIndex() { return ceremonyPresentation.getBonusObjectiveRoundIndex(); }
-    public String getBonusObjectiveDisplayName() { return ceremonyPresentation.getBonusObjectiveDisplayName(); }
-    public String getBonusObjectiveDescription() { return ceremonyPresentation.getBonusObjectiveDescription(); }
-    public long getBonusWinnerBannerUntil() { return ceremonyPresentation.getBonusWinnerBannerUntil(); }
-    public List<String> getBonusWinners() { return ceremonyPresentation.getBonusWinners(); }
-    public List<RosterReducer.RosterEntry> getGameOverStandings() { return ceremonyPresentation.getGameOverStandings(); }
-    public long getGameOverBannerUntil() { return ceremonyPresentation.getGameOverBannerUntil(); }
-    public long getWinnerIntroBannerUntil() { return ceremonyPresentation.getWinnerIntroBannerUntil(); }
-    public long getPlaceRevealUntil() { return ceremonyPresentation.getPlaceRevealUntil(); }
-    public String getPlaceRevealRsn() { return ceremonyPresentation.getPlaceRevealRsn(); }
-    public int getPlaceRevealRank() { return ceremonyPresentation.getPlaceRevealRank(); }
-    public int getPlaceRevealCoins() { return ceremonyPresentation.getPlaceRevealCoins(); }
-    public int getPlaceRevealGoldenGnomes() { return ceremonyPresentation.getPlaceRevealGoldenGnomes(); }
-    public long getWinnerSuspenseUntil() { return ceremonyPresentation.getWinnerSuspenseUntil(); }
-    public long getWinnerRevealUntil() { return ceremonyPresentation.getWinnerRevealUntil(); }
-    public String getWinnerRsn() { return ceremonyPresentation.getWinnerRsn(); }
-    public long getConfettiUntil() { return ceremonyPresentation.getConfettiUntil(); }
-    public long getCeremonyCreditsStart() { return ceremonyPresentation.getCeremonyCreditsStart(); }
-    public long getCeremonyCreditsUntil() { return ceremonyPresentation.getCeremonyCreditsUntil(); }
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     /** {@code rsn}'s currently-showing coin popup, or null if none -- see PlayerOverlay#
      * drawCoinPopup, the only consumer. Drops expired entries off the front of this player's queue
      * first (see coinPopups's own doc for why it's a queue, not a single slot) so an old, already-

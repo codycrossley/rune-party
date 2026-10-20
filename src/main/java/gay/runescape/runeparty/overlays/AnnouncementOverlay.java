@@ -1905,7 +1905,7 @@ public class AnnouncementOverlay extends Overlay
      * renderMinigameBanner's own "MINIGAME!" already gets. */
     private void renderCeremonyTitleBanner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getCeremonyTitleBannerUntil(), GAME_OVER_TITLE_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.ceremonyPresentation.getCeremonyTitleBannerUntil(), GAME_OVER_TITLE_FADE_MS);
         if (alpha == null) return;
 
         int centerX = drawableWidth() / 2;
@@ -1924,8 +1924,8 @@ public class AnnouncementOverlay extends Overlay
      * flags are split). Hides the instant the Gnome's own first line lands (getGnomeLine() != null). */
     private void renderCeremonyGatherMessage(Graphics2D g)
     {
-        if (!plugin.isCeremonyGatherMessageRevealed()) return;
-        if (plugin.getGnomeLine() != null) return;
+        if (!plugin.ceremonyPresentation.isCeremonyGatherMessageRevealed()) return;
+        if (plugin.ceremonyPresentation.getGnomeLine() != null) return;
 
         long now = System.currentTimeMillis();
         float alpha = MINIGAME_READY_CHECK_MIN_ALPHA + (1f - MINIGAME_READY_CHECK_MIN_ALPHA) * BannerAnim.pulse(now, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
@@ -1941,9 +1941,9 @@ public class AnnouncementOverlay extends Overlay
      * treatment renderWinnerIntroBanner already uses. */
     private void renderGnomeLine(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getGnomeLineUntil(), WINNER_INTRO_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.ceremonyPresentation.getGnomeLineUntil(), WINNER_INTRO_FADE_MS);
         if (alpha == null) return;
-        String line = plugin.getGnomeLine();
+        String line = plugin.ceremonyPresentation.getGnomeLine();
         if (line == null) return;
 
         int centerX = drawableWidth() / 2;
@@ -1957,15 +1957,15 @@ public class AnnouncementOverlay extends Overlay
      * bonus Golden Gnome round's own objective, see CeremonyPresentation#handleBonusObjectiveAnnounced. */
     private void renderBonusObjectiveBanner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getBonusObjectiveBannerUntil(), WINNER_INTRO_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.ceremonyPresentation.getBonusObjectiveBannerUntil(), WINNER_INTRO_FADE_MS);
         if (alpha == null) return;
-        String description = plugin.getBonusObjectiveDescription();
+        String description = plugin.ceremonyPresentation.getBonusObjectiveDescription();
         if (description == null) return;
 
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 2;
 
-        String ordinal = plugin.getBonusObjectiveRoundIndex() == 1 ? "first" : plugin.getBonusObjectiveRoundIndex() == 2 ? "second" : (plugin.getBonusObjectiveRoundIndex() + "th");
+        String ordinal = plugin.ceremonyPresentation.getBonusObjectiveRoundIndex() == 1 ? "first" : plugin.ceremonyPresentation.getBonusObjectiveRoundIndex() == 2 ? "second" : (plugin.ceremonyPresentation.getBonusObjectiveRoundIndex() + "th");
         Node message = Text.of("The " + ordinal + " Golden Gnome is awarded to the player who " + description + "...")
             .font(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE)).color(Color.WHITE);
         Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
@@ -1977,7 +1977,7 @@ public class AnnouncementOverlay extends Overlay
      * is..." beat already uses for the main end-game reveal. */
     private void renderBonusSuspenseBanner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getBonusSuspenseBannerUntil(), WINNER_INTRO_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.ceremonyPresentation.getBonusSuspenseBannerUntil(), WINNER_INTRO_FADE_MS);
         if (alpha == null) return;
 
         int centerX = drawableWidth() / 2;
@@ -1996,9 +1996,9 @@ public class AnnouncementOverlay extends Overlay
      * the overall winner's fireworks. */
     private void renderBonusWinnerBanner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getBonusWinnerBannerUntil(), WINNER_INTRO_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.ceremonyPresentation.getBonusWinnerBannerUntil(), WINNER_INTRO_FADE_MS);
         if (alpha == null) return;
-        List<String> winners = plugin.getBonusWinners();
+        List<String> winners = plugin.ceremonyPresentation.getBonusWinners();
         if (winners.isEmpty()) return;
 
         int centerX = drawableWidth() / 2;
@@ -2011,7 +2011,7 @@ public class AnnouncementOverlay extends Overlay
 
     private void renderGameOverBanner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getGameOverBannerUntil(), GAME_OVER_TITLE_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.ceremonyPresentation.getGameOverBannerUntil(), GAME_OVER_TITLE_FADE_MS);
         if (alpha == null) return;
 
         int centerX = drawableWidth() / 2;
@@ -2024,7 +2024,7 @@ public class AnnouncementOverlay extends Overlay
     /** Second beat -- "Now it's time to see the winner...", bridging into the standings countdown. */
     private void renderWinnerIntroBanner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getWinnerIntroBannerUntil(), WINNER_INTRO_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.ceremonyPresentation.getWinnerIntroBannerUntil(), WINNER_INTRO_FADE_MS);
         if (alpha == null) return;
 
         int centerX = drawableWidth() / 2;
@@ -2038,9 +2038,9 @@ public class AnnouncementOverlay extends Overlay
      * reveal per call, worst-place first, stopping once only the top two players remain. */
     private void renderPlaceReveal(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getPlaceRevealUntil(), PLACE_REVEAL_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.ceremonyPresentation.getPlaceRevealUntil(), PLACE_REVEAL_FADE_MS);
         if (alpha == null) return;
-        String rsn = plugin.getPlaceRevealRsn();
+        String rsn = plugin.ceremonyPresentation.getPlaceRevealRsn();
         if (rsn == null) return;
 
         int centerX = drawableWidth() / 2;
@@ -2048,10 +2048,10 @@ public class AnnouncementOverlay extends Overlay
 
         RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
         Color nameColor = seatColor != null ? seatColor.awt : Color.WHITE;
-        String stats = rsn + " -- " + plugin.getPlaceRevealGoldenGnomes() + " GG, " + plugin.getPlaceRevealCoins() + " coins";
+        String stats = rsn + " -- " + plugin.ceremonyPresentation.getPlaceRevealGoldenGnomes() + " GG, " + plugin.ceremonyPresentation.getPlaceRevealCoins() + " coins";
 
         Node banner = Box.column(
-                Text.of("In " + ordinal(plugin.getPlaceRevealRank()) + " place...")
+                Text.of("In " + ordinal(plugin.ceremonyPresentation.getPlaceRevealRank()) + " place...")
                     .font(FontManager.getRunescapeBoldFont().deriveFont(PLACE_REVEAL_RANK_SIZE)).color(Color.LIGHT_GRAY),
                 Text.of(stats)
                     .font(FontManager.getRunescapeBoldFont().deriveFont(PLACE_REVEAL_LINE_SIZE)).color(nameColor))
@@ -2062,7 +2062,7 @@ public class AnnouncementOverlay extends Overlay
     /** Penultimate beat -- "And the winner is...", the last breath before renderWinnerReveal. */
     private void renderWinnerSuspenseBanner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getWinnerSuspenseUntil(), WINNER_SUSPENSE_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.ceremonyPresentation.getWinnerSuspenseUntil(), WINNER_SUSPENSE_FADE_MS);
         if (alpha == null) return;
 
         int centerX = drawableWidth() / 2;
@@ -2076,9 +2076,9 @@ public class AnnouncementOverlay extends Overlay
      * Gnome tally. Played alongside ConfettiOverlay's burst, which renders separately. */
     private void renderWinnerReveal(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getWinnerRevealUntil(), WINNER_REVEAL_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.ceremonyPresentation.getWinnerRevealUntil(), WINNER_REVEAL_FADE_MS);
         if (alpha == null) return;
-        String rsn = plugin.getWinnerRsn();
+        String rsn = plugin.ceremonyPresentation.getWinnerRsn();
         if (rsn == null) return;
 
         int centerX = drawableWidth() / 2;
@@ -2086,7 +2086,7 @@ public class AnnouncementOverlay extends Overlay
 
         Text name = Text.rainbow(rsn, RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(WINNER_REVEAL_NAME_SIZE));
 
-        List<RosterReducer.RosterEntry> standings = plugin.getGameOverStandings();
+        List<RosterReducer.RosterEntry> standings = plugin.ceremonyPresentation.getGameOverStandings();
         RosterReducer.RosterEntry winner = standings.isEmpty() ? null : standings.get(0);
         Node banner = winner == null ? name
             : Box.column(name, Text.of(winner.goldenGnomeCount + " Golden Gnomes, " + winner.coins + " coins")
@@ -2102,8 +2102,8 @@ public class AnnouncementOverlay extends Overlay
      * own run it is on every frame to place the block. */
     private void renderCeremonyCredits(Graphics2D g)
     {
-        long start = plugin.getCeremonyCreditsStart();
-        long until = plugin.getCeremonyCreditsUntil();
+        long start = plugin.ceremonyPresentation.getCeremonyCreditsStart();
+        long until = plugin.ceremonyPresentation.getCeremonyCreditsUntil();
         if (start <= 0 || until <= start) return;
         long now = System.currentTimeMillis();
         if (now < start || now >= until) return;
