@@ -6,7 +6,6 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.coords.WorldPoint;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 /** Every payload-field reader used to fold an event's JsonObject payload into client state.
@@ -78,8 +77,7 @@ public final class Json
      * destination for a single roll. Never null, only empty. */
     public static List<Integer> safeIntList(JsonObject o, String key)
     {
-        if (o == null || !o.has(key) || o.get(key).isJsonNull() || !o.get(key).isJsonArray()) return Collections.emptyList();
-        JsonArray arr = o.get(key).getAsJsonArray();
+        JsonArray arr = safeArray(o, key);
         List<Integer> out = new ArrayList<>(arr.size());
         for (int i = 0; i < arr.size(); i++)
         {
@@ -94,8 +92,7 @@ public final class Json
      * null, only empty. */
     public static List<String> safeStrList(JsonObject o, String key)
     {
-        if (o == null || !o.has(key) || o.get(key).isJsonNull() || !o.get(key).isJsonArray()) return Collections.emptyList();
-        JsonArray arr = o.get(key).getAsJsonArray();
+        JsonArray arr = safeArray(o, key);
         List<String> out = new ArrayList<>(arr.size());
         for (int i = 0; i < arr.size(); i++)
         {
@@ -110,8 +107,7 @@ public final class Json
      * safeIntList). */
     public static int[] safeIntArray(JsonObject o, String key)
     {
-        if (o == null || !o.has(key) || o.get(key).isJsonNull() || !o.get(key).isJsonArray()) return new int[0];
-        JsonArray arr = o.get(key).getAsJsonArray();
+        JsonArray arr = safeArray(o, key);
         int[] out = new int[arr.size()];
         for (int i = 0; i < arr.size(); i++)
         {
@@ -132,8 +128,7 @@ public final class Json
      * in the list. Never null, only empty. */
     public static List<MinigameReward> safeMinigameRewards(JsonObject o, String key)
     {
-        if (o == null || !o.has(key) || o.get(key).isJsonNull() || !o.get(key).isJsonArray()) return Collections.emptyList();
-        JsonArray arr = o.get(key).getAsJsonArray();
+        JsonArray arr = safeArray(o, key);
         List<MinigameReward> out = new ArrayList<>(arr.size());
         for (int i = 0; i < arr.size(); i++)
         {
@@ -155,8 +150,7 @@ public final class Json
      * null, only empty. */
     public static List<MinigameScore> safeMinigameScores(JsonObject o, String key)
     {
-        if (o == null || !o.has(key) || o.get(key).isJsonNull() || !o.get(key).isJsonArray()) return Collections.emptyList();
-        JsonArray arr = o.get(key).getAsJsonArray();
+        JsonArray arr = safeArray(o, key);
         List<MinigameScore> out = new ArrayList<>(arr.size());
         for (int i = 0; i < arr.size(); i++)
         {
