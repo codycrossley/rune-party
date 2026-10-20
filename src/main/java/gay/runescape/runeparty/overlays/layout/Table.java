@@ -69,9 +69,7 @@ public final class Table extends Node
     public Dimension measure(Graphics2D g, int maxWidth)
     {
         Resolved r = resolve(g, maxWidth);
-        int widest = 0;
-        for (List<SegmentRow.Resolved> row : r.rows) widest = Math.max(widest, SegmentRow.sumWidth(row));
-        return new Dimension(widest, r.scaledRowHeight * rows.size());
+        return new Dimension(widestRow(r.rows), r.scaledRowHeight * rows.size());
     }
 
     @Override
@@ -84,9 +82,7 @@ public final class Table extends Node
         // x = centerX0 - measuredWidth/2 before calling paint, so x + measuredWidth/2 == centerX0
         // (the same truncating integer division cancels both ways) -- letting each row re-center
         // itself around that point exactly like drawStandingsLine's own per-row centering did.
-        int tableWidth = 0;
-        for (List<SegmentRow.Resolved> row : r.rows) tableWidth = Math.max(tableWidth, SegmentRow.sumWidth(row));
-        int centerX = x + tableWidth / 2;
+        int centerX = x + widestRow(r.rows) / 2;
 
         int rowY = y;
         for (List<SegmentRow.Resolved> row : r.rows)
@@ -102,6 +98,13 @@ public final class Table extends Node
     {
         Resolved r = resolve(g, maxWidth);
         return r.rows.isEmpty() ? 0 : SegmentRow.maxAscent(r.rows.get(0));
+    }
+
+    private static int widestRow(List<List<SegmentRow.Resolved>> rows)
+    {
+        int widest = 0;
+        for (List<SegmentRow.Resolved> row : rows) widest = Math.max(widest, SegmentRow.sumWidth(row));
+        return widest;
     }
 
     private Resolved resolve(Graphics2D g, int maxWidth)
