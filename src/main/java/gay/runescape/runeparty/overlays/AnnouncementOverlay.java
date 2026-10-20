@@ -363,6 +363,11 @@ public class AnnouncementOverlay extends Overlay
 
     private int centerX() { return drawableWidth() / 2; }
 
+    private void renderCentered(Graphics2D g, Node content, int y, float alpha)
+    {
+        Layout.renderCentered(g, content, centerX(), y, safeTextWidth(), alpha);
+    }
+
     private static float pulseAlpha(long now, float minAlpha, long periodMs)
     {
         return minAlpha + (1f - minAlpha) * BannerAnim.pulse(now, periodMs);
@@ -454,7 +459,7 @@ public class AnnouncementOverlay extends Overlay
 
         int centerX = centerX();
         int y = drawableHeight() / 4 + 40;
-        Layout.renderCentered(g, line, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, line, y, alpha);
     }
 
     /** The bystander half of the Spin hint -- "Waiting for &lt;player&gt; to roll the dice...". */
@@ -472,7 +477,7 @@ public class AnnouncementOverlay extends Overlay
 
         int centerX = centerX();
         int y = drawableHeight() / 4 + 40;
-        Layout.renderCentered(g, line, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, line, y, alpha);
     }
 
     /** The on-screen text half of TileOverlay's own "Return Here!" arrow -- shown under the exact
@@ -489,7 +494,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 4 + 40;
 
         Node message = Text.of("Return to your tile to roll the dice!").font(FontManager.getRunescapeBoldFont().deriveFont(SPIN_HINT_SIZE)).color(SPIN_HINT_COLOR);
-        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, message, y, alpha);
     }
 
     /** The on-screen text half of TileOverlay's own "Start Here!" arrow -- shown under the exact
@@ -506,7 +511,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 4 + 40;
 
         Node message = Text.of("Head to the Start Tile to begin!").font(FontManager.getRunescapeBoldFont().deriveFont(SPIN_HINT_SIZE)).color(SPIN_HINT_COLOR);
-        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, message, y, alpha);
     }
 
     /** Draws the Jad encounter -- the awakening announcement, Jad's taunt, a cosmetic countdown to
@@ -655,7 +660,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 3;
 
         Node title = Text.rainbow("CHANCE TILE!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
-        Layout.renderCentered(g, title, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, title, y, alpha);
     }
 
     /** Draws the second Chance Tile reveal stage: a player token on each side of the screen and,
@@ -884,7 +889,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 3;
 
         Node title = Text.rainbow("MINIGAME!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
-        Layout.renderCentered(g, title, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, title, y, alpha);
     }
 
     /** The closing bookend to renderMinigameBanner's "MINIGAME!". */
@@ -897,7 +902,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 3;
 
         Node title = Text.rainbow("MINIGAME OVER!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
-        Layout.renderCentered(g, title, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, title, y, alpha);
     }
 
     /** The "you're off" moment an arrival-gated mini-game's own gather message
@@ -914,7 +919,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 2;
 
         Node title = Text.rainbow("BEGIN!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(MINIGAME_COUNTDOWN_SIZE));
-        Layout.renderCentered(g, title, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, title, y, alpha);
     }
 
     /** Turf Wars' once-per-round reveal -- "This is your team color!" drawn in that player's own
@@ -935,7 +940,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 2;
 
         Node message = Text.of("This is your team color!").font(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE)).color(color);
-        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, message, y, alpha);
     }
 
     /** Draws the mini-game selection spinner -- a rainbow prize wheel, one segment per registered
@@ -974,7 +979,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 3;
 
         Node title = Text.rainbow("ITEM SPACE!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
-        Layout.renderCentered(g, title, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, title, y, alpha);
     }
 
     /** Draws the Item Space wheel -- same shared drawWheel routine as renderMinigameSpinner, one
@@ -1027,7 +1032,7 @@ public class AnnouncementOverlay extends Overlay
         Text title = Text.of(item.getDisplayName()).font(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_TITLE_SIZE)).color(WELCOME_TITLE_COLOR);
         Node banner = subtitle == null ? title
             : Box.column(title, Text.of(subtitle).font(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_SUBTITLE_SIZE)).color(Color.LIGHT_GRAY)).gap(10);
-        Layout.renderCentered(g, banner, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, banner, y, alpha);
     }
 
     /** Fires instead of renderItemSpinner when the mover is already at the item cap -- no wheel,
@@ -1054,7 +1059,7 @@ public class AnnouncementOverlay extends Overlay
                 Text.of(title).font(FontManager.getRunescapeBoldFont().deriveFont(ITEM_CAP_BLOCKED_TITLE_SIZE)).color(Color.WHITE),
                 Text.of(subtitle).font(FontManager.getRunescapeBoldFont().deriveFont(ITEM_CAP_BLOCKED_SUBTITLE_SIZE)).color(Color.LIGHT_GRAY))
             .gap(10);
-        Layout.renderCentered(g, banner, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, banner, y, alpha);
     }
 
     /** Draws "You used/&lt;rsn&gt; used &lt;item&gt;!" plus that item's own subtitle. Only shown
@@ -1079,7 +1084,7 @@ public class AnnouncementOverlay extends Overlay
         Text title = Text.of(titleText).font(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_TITLE_SIZE)).color(Color.WHITE);
         Node banner = subtitle == null ? title
             : Box.column(title, Text.of(subtitle).font(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_SUBTITLE_SIZE)).color(Color.LIGHT_GRAY)).gap(10);
-        Layout.renderCentered(g, banner, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, banner, y, alpha);
     }
 
     /** Draws "You/&lt;caster&gt; cast Ice Barrage on &lt;target&gt;/you!" plus a matching subtitle.
@@ -1107,7 +1112,7 @@ public class AnnouncementOverlay extends Overlay
                 Text.of(title).font(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_TITLE_SIZE)).color(Color.WHITE),
                 Text.of(subtitle).font(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_SUBTITLE_SIZE)).color(Color.LIGHT_GRAY))
             .gap(10);
-        Layout.renderCentered(g, banner, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, banner, y, alpha);
     }
 
     /** Draws "You/&lt;caster&gt; used Tele Other on &lt;target&gt;!" -- single line, no subtitle,
@@ -1129,7 +1134,7 @@ public class AnnouncementOverlay extends Overlay
         String title = casterPart + " used Tele Other on " + targetPart + "!";
 
         Node message = Text.of(title).font(FontManager.getRunescapeBoldFont().deriveFont(ITEM_USED_ANNOUNCE_TITLE_SIZE)).color(Color.WHITE);
-        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, message, y, alpha);
     }
 
     /** Draws "You/&lt;rsn&gt; landed on a Coin Trap!" -- no subtitle, since the actual coin numbers
@@ -1147,7 +1152,7 @@ public class AnnouncementOverlay extends Overlay
         String title = (isLocal(rsn) ? "You" : rsn) + " landed on a Coin Trap!";
 
         Node message = Text.of(title).font(FontManager.getRunescapeBoldFont().deriveFont(COIN_TRAP_ANNOUNCE_TITLE_SIZE)).color(Color.WHITE);
-        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, message, y, alpha);
     }
 
     /** Draws "&lt;thief&gt; stole N coins from &lt;victim&gt;!" or "...a Golden Gnome from
@@ -1172,7 +1177,7 @@ public class AnnouncementOverlay extends Overlay
         String title = thiefLabel + " stole " + what + " from " + victimLabel + "!";
 
         Node message = Text.of(title).font(FontManager.getRunescapeBoldFont().deriveFont(WISE_OLD_MAN_STOLEN_TITLE_SIZE)).color(Color.WHITE);
-        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, message, y, alpha);
     }
 
     /** Draws the Item Shop purchase follow-up -- "You/&lt;rsn&gt; purchased &lt;item&gt;!",
@@ -1500,7 +1505,7 @@ public class AnnouncementOverlay extends Overlay
         }
 
         Node message = Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE)).color(Color.WHITE);
-        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, message, y, alpha);
     }
 
     /** Rainbow Rush's own "get ready" beat, shown center-screen right where renderArrivalGatherMessage
@@ -1619,7 +1624,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 2;
 
         Node message = Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_TITLE_SIZE)).color(color);
-        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, message, y, alpha);
     }
 
     /** Crab Rave's own big centered countdown, ticking down from getCrabRaveEndsAt() -- same
@@ -1678,7 +1683,7 @@ public class AnnouncementOverlay extends Overlay
             : "Head to the target zone (teal)!";
 
         Node message = Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE)).color(Color.WHITE);
-        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, message, y, alpha);
     }
 
     /** Brutus Attack's own big centered countdown for the current round's 10-second dash window,
@@ -1724,7 +1729,7 @@ public class AnnouncementOverlay extends Overlay
 
         String text = plugin.minigamePresentation.brutusAttack().isDashResultHit() ? "HIT!" : "MISS!";
         Node message = Text.rainbow(text, RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
-        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, message, y, alpha);
     }
 
     // Vertical gap between the local "You were eliminated!" line and the "<rsn> was eliminated!"
@@ -1928,7 +1933,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 2 - 20;
 
         Node title = Text.rainbow("GOLDEN GNOME AWARDS!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(GAME_OVER_TITLE_SIZE));
-        Layout.renderCentered(g, title, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, title, y, alpha);
     }
 
     /** Persistent "gather in the arena" message for the Golden Gnome Awards -- same
@@ -1950,7 +1955,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 2;
 
         Node message = Text.of("Everyone must gather in the arena!").font(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OFFER_SUBTITLE_SIZE)).color(Color.WHITE);
-        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, message, y, alpha);
     }
 
     /** One of the Gnome's own scripted lines, center-screen -- same plain white text-banner
@@ -1966,7 +1971,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 2;
 
         Node message = Text.of(line).font(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE)).color(Color.WHITE);
-        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, message, y, alpha);
     }
 
     /** "The &lt;Nth&gt; Golden Gnome is awarded to the player who &lt;description&gt;..." -- one
@@ -1984,7 +1989,7 @@ public class AnnouncementOverlay extends Overlay
         String ordinal = plugin.ceremonyPresentation.getBonusObjectiveRoundIndex() == 1 ? "first" : plugin.ceremonyPresentation.getBonusObjectiveRoundIndex() == 2 ? "second" : (plugin.ceremonyPresentation.getBonusObjectiveRoundIndex() + "th");
         Node message = Text.of("The " + ordinal + " Golden Gnome is awarded to the player who " + description + "...")
             .font(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE)).color(Color.WHITE);
-        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, message, y, alpha);
     }
 
     /** "The Golden Gnome is awarded to..." -- the suspense beat CeremonyPresentation#
@@ -2000,7 +2005,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 2;
 
         Node message = Text.of("The Golden Gnome is awarded to...").font(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE)).color(Color.WHITE);
-        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, message, y, alpha);
     }
 
     /** "That player is... &lt;name(s)&gt;!" -- the reveal half of a bonus Golden Gnome round, see
@@ -2022,7 +2027,7 @@ public class AnnouncementOverlay extends Overlay
 
         String names = String.join(" and ", winners);
         Node message = Text.rainbow(names + "!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(BONUS_WINNER_NAME_SIZE));
-        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, message, y, alpha);
     }
 
     private void renderGameOverBanner(Graphics2D g)
@@ -2034,7 +2039,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 2 - 20;
 
         Node title = Text.rainbow("GAME OVER!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(GAME_OVER_TITLE_SIZE));
-        Layout.renderCentered(g, title, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, title, y, alpha);
     }
 
     /** Second beat -- "Now it's time to see the winner...", bridging into the standings countdown. */
@@ -2047,7 +2052,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 2;
 
         Node message = Text.of("Now it's time to see the winner...").font(FontManager.getRunescapeBoldFont().deriveFont(WINNER_INTRO_SIZE)).color(Color.WHITE);
-        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, message, y, alpha);
     }
 
     /** The dramatic countdown itself -- one "In &lt;Nth&gt; place... &lt;Player&gt; -- N coins"
@@ -2071,7 +2076,7 @@ public class AnnouncementOverlay extends Overlay
                 Text.of(stats)
                     .font(FontManager.getRunescapeBoldFont().deriveFont(PLACE_REVEAL_LINE_SIZE)).color(nameColor))
             .gap(14);
-        Layout.renderCentered(g, banner, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, banner, y, alpha);
     }
 
     /** Penultimate beat -- "And the winner is...", the last breath before renderWinnerReveal. */
@@ -2084,7 +2089,7 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 2;
 
         Node message = Text.of("And the winner is...").font(FontManager.getRunescapeBoldFont().deriveFont(WINNER_SUSPENSE_SIZE)).color(Color.WHITE);
-        Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, message, y, alpha);
     }
 
     /** The payoff -- the winner's name in the rainbow treatment, plus their final coins/Golden
@@ -2106,7 +2111,7 @@ public class AnnouncementOverlay extends Overlay
         Node banner = winner == null ? name
             : Box.column(name, Text.of(winner.goldenGnomeCount + " Golden Gnomes, " + winner.coins + " coins")
                 .font(FontManager.getRunescapeBoldFont().deriveFont(WINNER_REVEAL_SUBTITLE_SIZE)).color(Color.LIGHT_GRAY)).gap(14);
-        Layout.renderCentered(g, banner, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, banner, y, alpha);
     }
 
     /** The whole game's own true last word -- see this file's own credits constants block above
@@ -2195,7 +2200,7 @@ public class AnnouncementOverlay extends Overlay
                 Text.rainbow("RUNE PARTY", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(RUNE_PARTY_SIZE)),
                 Text.of("SHOWDOWN").font(MARIO_PARTY_FONT.deriveFont(SHOWDOWN_SIZE)).color(WELCOME_TITLE_COLOR))
             .gap(14);
-        Layout.renderCentered(g, banner, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, banner, y, alpha);
     }
 
     /** Draws the "HERE WE GO!" banner when the game starts, plus an instruction to gather on the
@@ -2212,7 +2217,7 @@ public class AnnouncementOverlay extends Overlay
         // Tile to begin!" already covers this, and having both onscreen at once was a needless
         // duplicate (small/gray, easy to miss besides).
         Node title = Text.rainbow("HERE WE GO!", RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(GAME_START_TITLE_SIZE));
-        Layout.renderCentered(g, title, centerX, y, safeTextWidth(), alpha);
+        renderCentered(g, title, y, alpha);
     }
 
     /** The width every "centerX = drawableWidth() / N" position formula in this file is actually
