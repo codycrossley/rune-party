@@ -182,7 +182,7 @@ public final class BalloonModel
      * already document for this exact RuneLite API. */
     private Model buildModel(String rsn, int level)
     {
-        String colorNumber = plugin.getRosterReducer().getColorNumber(rsn);
+        String colorNumber = plugin.rosterReducer.getColorNumber(rsn);
         RunePartyColor seatColor = RunePartyColor.forNumber(colorNumber);
         Color targetColor = seatColor != null ? seatColor.awt : Color.WHITE;
 

@@ -67,7 +67,7 @@ public class JadEncounter extends Overlay
     private volatile WorldPoint facing;
 
     // When the object is actually allowed to start showing -- the later of "now" or
-    // plugin.getTurnEffectGateUntil(), computed once inside spawn(), not re-checked every frame.
+    // plugin.turnEffectGateUntil, computed once inside spawn(), not re-checked every frame.
     // See JadPresentation#revealAt's own doc for why this must be a fixed timestamp decided once.
     private volatile long revealAt;
 
@@ -103,7 +103,7 @@ public class JadEncounter extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (plugin.getPhase() != GamePhase.ACTIVE)
+        if (plugin.phase != GamePhase.ACTIVE)
         {
             clear();
             return null;
@@ -205,7 +205,7 @@ public class JadEncounter extends Overlay
         this.jadCenter = center;
         this.facing = facing;
         long now = System.currentTimeMillis();
-        this.revealAt = Math.max(now, plugin.getTurnEffectGateUntil());
+        this.revealAt = Math.max(now, plugin.turnEffectGateUntil);
     }
 
     /** Plays the smash animation (lordmagmus_smash, RunePartyPlugin.JAD_SMASH_ANIMATION_ID) once,

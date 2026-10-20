@@ -168,7 +168,7 @@ public class SandwichRushHudOverlay extends Overlay
     {
         String self = plugin.getLocalRsn();
         if (self == null) return false;
-        for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().seatedPlayers())
+        for (RosterReducer.RosterEntry entry : plugin.rosterReducer.seatedPlayers())
         {
             if (entry.rsn.equalsIgnoreCase(self)) return true;
         }

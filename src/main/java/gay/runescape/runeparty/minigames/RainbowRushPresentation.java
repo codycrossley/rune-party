@@ -94,7 +94,7 @@ public final class RainbowRushPresentation implements MinigamePresentationFeatur
     public void onTick(Player selfPlayer)
     {
         WorldPoint arrivalPos = selfPlayer != null ? selfPlayer.getWorldLocation() : null;
-        TileReducer.TileEntry start = plugin.getTileReducer().tileAtIndex(0);
+        TileReducer.TileEntry start = plugin.tileReducer.tileAtIndex(0);
         arrivalGate.confirmIfMatched(arrivalPos != null && start != null && arrivalPos.equals(start.point));
 
         if (roundStartAt == 0 || submitted) return;
@@ -103,7 +103,7 @@ public final class RainbowRushPresentation implements MinigamePresentationFeatur
         WorldPoint pos = selfPlayer != null ? selfPlayer.getWorldLocation() : null;
         if (pos != null)
         {
-            Integer pathIndex = plugin.getTileReducer().pathIndexAt(pos);
+            Integer pathIndex = plugin.tileReducer.pathIndexAt(pos);
             if (pathIndex != null) visitedPathIndices.add(pathIndex);
         }
 
@@ -111,7 +111,7 @@ public final class RainbowRushPresentation implements MinigamePresentationFeatur
         // pathIndex sequence (see TileReducer#realTileCount's own doc), and courseLength()'s "one
         // past the highest index" would then demand more tiles than actually exist, making a real
         // finish mathematically impossible.
-        int realTileCount = plugin.getTileReducer().realTileCount();
+        int realTileCount = plugin.tileReducer.realTileCount();
         boolean finished = realTileCount > 0 && visitedPathIndices.size() >= realTileCount;
         boolean timedOut = System.currentTimeMillis() >= getEndsAt();
         if (finished || timedOut)

@@ -1112,9 +1112,8 @@ public class RunePartyPlugin extends Plugin
      * other place in this plugin that needs a Gson (see its own FILE_GSON doc); RunePartyFonts'
      * own dialogue-font.json parsing is instead handed this plugin's gson field directly via
      * RunePartyFonts#init, called from startUp(). */
-    public Gson getGson() { return gson; }
 
-    private TileReducer tileReducer;
+    public TileReducer tileReducer;
     private TileOverlay tileOverlay;
     private StatsOverlay statsOverlay;
     private CoinRushScoreboardOverlay coinRushScoreboardOverlay;
@@ -1141,7 +1140,7 @@ public class RunePartyPlugin extends Plugin
     private DanceDanceRuneScapeOverlay danceDanceRuneScapeOverlay;
     private DanceDanceRuneScapeHudOverlay danceDanceRuneScapeHudOverlay;
     private HardcodedCourseLauncherOverlay hardcodedCourseLauncherOverlay;
-    private RosterReducer rosterReducer;
+    public RosterReducer rosterReducer;
     public ApiClient apiClient; // public: presenters in the minigames subpackage issue their own requests
     public EventSocket eventSocket;
 
@@ -1169,13 +1168,13 @@ public class RunePartyPlugin extends Plugin
     // Toggled by the panel's "Show Map"/"Hide Map" button (see toggleMap) -- read by
     // RunePartyMapOverlay#render (whether to draw at all) and AnnouncementOverlay#render (which
     // suppresses every banner/announcement while this is true, see that class's own doc).
-    private volatile boolean mapShowing = false;
+    public volatile boolean mapShowing = false;
 
     // Server-wide, not game-scoped -- fetched once at startup (see loadTileTypeCatalog) rather
     // than per-game like the roster, since the tiles/ registry it mirrors never changes at
     // runtime. Empty until the fetch completes (or forever, if it fails) -- every consumer
     // (TileOverlay, RunePartyMapOverlay) already falls back to a default color/label on a miss.
-    private volatile Map<String, ApiClient.TileTypeOut> tileTypeCatalog = new LinkedHashMap<>();
+    public volatile Map<String, ApiClient.TileTypeOut> tileTypeCatalog = new LinkedHashMap<>();
 
     public final ExecutorService executor = Executors.newSingleThreadExecutor(r ->
     {
@@ -1209,7 +1208,7 @@ public class RunePartyPlugin extends Plugin
      * ever needs to touch this one field, not every downstream announcement. Never moves backward:
      * an effect that lands while another is still settling extends the gate rather than shortening
      * it. */
-    private volatile long turnEffectGateUntil = 0;
+    public volatile long turnEffectGateUntil = 0;
 
     public volatile GamePhase phase = GamePhase.DISCONNECTED;
 
@@ -1227,7 +1226,7 @@ public class RunePartyPlugin extends Plugin
     // ---- turn engine ----
     public volatile String currentTurnRsn = null;
     public volatile Integer lastDiceRoll = null;
-    private volatile boolean pendingRoll = false;
+    public volatile boolean pendingRoll = false;
     // Guards the Spin-emote roll trigger against double-submitting while a roll request is in
     // flight but the server's DICE_ROLLED echo (which flips pendingRoll) hasn't landed yet -- see
     // onAnimationChanged and rollDice().
@@ -1253,7 +1252,7 @@ public class RunePartyPlugin extends Plugin
     // Candidate destination tiles for the current roll -- more than one when the roll's path
     // crosses a fork (see TileOverlay#renderTargetArrow, which draws one arrow per candidate).
     // Never null, only ever empty.
-    private volatile List<Integer> pendingTargetIndices = Collections.emptyList();
+    public volatile List<Integer> pendingTargetIndices = Collections.emptyList();
     // The wider "everywhere this roll passes within reach of" set (see DICE_ROLLED's own
     // reachableIndices field and _reachable_within's doc) -- at most `value` steps out, not just
     // exactly `value` like pendingTargetIndices. Used to gate TileOverlay#renderGoldenGnomePurchaseArrow
@@ -1261,7 +1260,7 @@ public class RunePartyPlugin extends Plugin
     // a visual hint, since the real "does this actually trigger an offer" decision is made
     // authoritatively server-side once confirm_arrival reports where the player actually walked
     // (see confirm_arrival's own _route_crosses_golden_gnome). Never null, only ever empty.
-    private volatile List<Integer> pendingReachableIndices = Collections.emptyList();
+    public volatile List<Integer> pendingReachableIndices = Collections.emptyList();
     private volatile boolean arrivalSubmitted = false; // guards confirm-arrival from firing every tick while the echo is in flight
     // Guards confirmHomeTeleportArrival the same way arrivalSubmitted guards confirmArrival --
     // see onGameTick's own Home Teleport check, which is independent of pendingRoll (see that
@@ -1279,8 +1278,8 @@ public class RunePartyPlugin extends Plugin
     // MINIGAME_ENDED too in case a round ends abnormally (host force-end) before the local
     // 30-second timer would have fired the submission itself. ----
     private volatile boolean fishingCatchSubmitted = false;
-    private int shrimpCount = 0;
-    private int anchovyCount = 0;
+    public int shrimpCount = 0;
+    public int anchovyCount = 0;
     // ---- Click, Click, Click (entirely client-local until the one final submission -- clicks are
     // never reported per-click). Every left-click on bare ground while this mini-game is playable
     // records that WorldPoint here (see onMenuEntryAdded's own Click, Click, Click branch /
@@ -1309,19 +1308,19 @@ public class RunePartyPlugin extends Plugin
     // Real state, applied catch-up or not: whether the current turn's player has already spent
     // their one-item-per-turn allowance -- reset on every TURN_STARTED, set by ITEM_USED. Mirrors
     // the server's own itemUsedThisTurn.
-    private volatile boolean itemUsedThisTurn = false;
+    public volatile boolean itemUsedThisTurn = false;
     // Non-null while a requires_placement item (see Item#requiresPlacement) is armed -- set by
     // beginItemPlacement, cleared by cancelItemPlacement or a successful placement. Client-local
     // only: the server never hears about this until the actual place-coin-trap call goes out, so
     // there's no "used but not yet placed" state to reconcile if the player backs out. See
     // getItemPlacementCandidates for the two tiles this arms "Place <item>" on.
-    private volatile String itemPlacementKey = null;
+    public volatile String itemPlacementKey = null;
     // Non-null while a requires_target item (see Item#requiresTarget) is armed -- set by
     // beginItemTargeting, cleared by cancelItemTargeting or a successful confirmItemTargetOn.
     // Same client-local-only shape as itemPlacementKey (see that field's own doc), just confirmed
     // by right-clicking another player's in-world model instead of a candidate tile -- see
     // addItemTargetMenuEntry.
-    private volatile String itemTargetKey = null;
+    public volatile String itemTargetKey = null;
     // Recomputed once per game tick from onGameTick (the client thread) -- see
     // isStandingOnTrackedPosition, whose Player#getWorldLocation() call asserts it's never invoked
     // off the client thread. isLocalPlayerReadyToRoll() reads this cached copy instead of calling
@@ -1342,8 +1341,8 @@ public class RunePartyPlugin extends Plugin
     // the only writers). boardViewSavedPitch/Yaw/Zoom are only ever read/written from inside a
     // clientThread.invoke callback (same thread every writer already runs on), so no volatile
     // needed on those three; boardViewActive itself is read from RunePartyPanel (Swing EDT) via
-    // isBoardViewActive(), hence volatile. ----
-    private volatile boolean boardViewActive = false;
+    // boardViewActive, hence volatile. ----
+    public volatile boolean boardViewActive = false;
     private int boardViewSavedPitch;
     private int boardViewSavedYaw;
     private int boardViewSavedZoom;
@@ -1354,7 +1353,7 @@ public class RunePartyPlugin extends Plugin
     // Host-set at start (see GAME_STARTED's maxRounds) and incremented once per completed round
     // (see MINIGAME_ENDED) -- together these are what StatsOverlay's "ROUND x/y" line reads via
     // getCurrentRound/getMaxRounds. 0 until GAME_STARTED actually lands.
-    private volatile int maxRounds = 0;
+    public volatile int maxRounds = 0;
     private volatile int completedRounds = 0;
 
     // Every player's current board position (pathIndex), keyed by lowercase rsn -- mirrors the
@@ -1480,13 +1479,13 @@ public class RunePartyPlugin extends Plugin
     }
 
     // ---- dice roll popup (client-side timer -- see PlayerOverlay#drawDiceRoll) ----
-    private volatile String diceRollRsn = null;
-    private volatile int diceRollValue = 0;
+    public volatile String diceRollRsn = null;
+    public volatile int diceRollValue = 0;
     // How much of diceRollValue came from a banked item bonus (see DICE_ROLLED's "bonus" field) --
     // 0 for a plain roll, in which case AnnouncementOverlay#renderDiceRoll's timeline is unchanged.
-    private volatile int diceRollBonus = 0;
-    private volatile long diceRollStart = 0;
-    private volatile long diceRollUntil = 0;
+    public volatile int diceRollBonus = 0;
+    public volatile long diceRollStart = 0;
+    public volatile long diceRollUntil = 0;
 
     @Override
     protected void startUp()
@@ -1654,7 +1653,7 @@ public class RunePartyPlugin extends Plugin
     }
 
     /** Flips whether RunePartyMapOverlay draws its full-screen course map -- see RunePartyPanel's
-     * "Show Map"/"Hide Map" button (that label swap is refresh()'s own job, reading isMapShowing()
+     * "Show Map"/"Hide Map" button (that label swap is refresh()'s own job, reading mapShowing
      * back), the only caller. Nothing to lazily create/dispose of anymore -- unlike the Swing
      * dialog this replaced, the overlay's already registered for the plugin's whole lifetime (see
      * startUp()) and simply skips drawing while mapShowing is false, same as every other overlay's
@@ -1663,11 +1662,6 @@ public class RunePartyPlugin extends Plugin
     {
         mapShowing = !mapShowing;
         refreshPanel();
-    }
-
-    public boolean isMapShowing()
-    {
-        return mapShowing;
     }
 
     /** Toggles between the normal player-driven camera and a steep, near-straight-down "board
@@ -1737,8 +1731,6 @@ public class RunePartyPlugin extends Plugin
         client.setCameraYawTarget(boardViewSavedYaw);
         client.setVarcIntValue(VARC_CAMERA_ZOOM, boardViewSavedZoom);
     }
-
-    public boolean isBoardViewActive() { return boardViewActive; }
 
     /** The local player's own RSN, or null if unresolvable -- same lookup localRsn() already does
      * for every action method here, just exposed for RunePartyMapOverlay to tell "you" apart from
@@ -2018,7 +2010,7 @@ public class RunePartyPlugin extends Plugin
      * &lt;item&gt;" entry. Refuses silently rather than arming a placement that'd only 409 anyway. */
     public void beginItemPlacement(String itemKey)
     {
-        if (itemKey == null || !isLocalPlayerReadyToUseItem() || isItemUsedThisTurn()) return;
+        if (itemKey == null || !isLocalPlayerReadyToUseItem() || itemUsedThisTurn) return;
         if (!Items.get(itemKey).requiresPlacement()) return;
         itemPlacementKey = itemKey;
         refreshPanel();
@@ -2080,7 +2072,7 @@ public class RunePartyPlugin extends Plugin
      * right-click-a-tile (see addItemTargetMenuEntry/confirmItemTargetOn). */
     public void beginItemTargeting(String itemKey)
     {
-        if (itemKey == null || !isLocalPlayerReadyToUseItem() || isItemUsedThisTurn()) return;
+        if (itemKey == null || !isLocalPlayerReadyToUseItem() || itemUsedThisTurn) return;
         if (!Items.get(itemKey).requiresTarget()) return;
         itemTargetKey = itemKey;
         refreshPanel();
@@ -3576,11 +3568,6 @@ public class RunePartyPlugin extends Plugin
             .onClick(me -> confirmItemTargetOn(targetRsn));
     }
 
-    public Map<String, ApiClient.TileTypeOut> getTileTypeCatalog()
-    {
-        return tileTypeCatalog;
-    }
-
     /** Fetches the tile-type color/label/description catalog once, at startup -- see
      * ApiClient#fetchTileTypes's own doc for why this doesn't need re-fetching per game the way
      * syncRosterSnapshot does. Leaves tileTypeCatalog empty on failure rather than retrying; every
@@ -3623,10 +3610,6 @@ public class RunePartyPlugin extends Plugin
      * long as a Jad encounter's genuinely pending, not one preset window), so it checks this
      * directly every frame instead of going through scheduleAfterTurnEffects. Also read by
      * models/JadEncounter#spawn for the same reason, one package over. */
-    public long getTurnEffectGateUntil()
-    {
-        return turnEffectGateUntil;
-    }
 
     /** Appends a new CoinPopup to {@code rsn}'s own queue (see coinPopups's own doc for why this
      * is a queue, not a single slot) and extends the turn-effect gate to match. Shared by
@@ -4685,11 +4668,6 @@ public class RunePartyPlugin extends Plugin
     // -------------------------------------------------------------------------
     // Getters (consumed by TileOverlay now, PlayerOverlay/stats overlay/panel later)
     // -------------------------------------------------------------------------
-
-    public GamePhase getPhase() { return phase; }
-    public TileReducer getTileReducer() { return tileReducer; }
-    public RosterReducer getRosterReducer() { return rosterReducer; }
-    public String getGameId() { return gameId; }
     
     
     public boolean isHost() { return writeKey != null; }
@@ -4697,15 +4675,6 @@ public class RunePartyPlugin extends Plugin
      * standardCourseKey's own field doc. Course-building tools (RunePartyPanel's own
      * courseToolsPanel) stay hidden for the rest of this game's life once this flips true. */
     public boolean isStandardCourseLocked() { return standardCourseKey != null; }
-    
-    
-    
-    public String getCurrentTurnRsn() { return currentTurnRsn; }
-    public Integer getLastDiceRoll() { return lastDiceRoll; }
-    public boolean isPendingRoll() { return pendingRoll; }
-    public boolean isItemUsedThisTurn() { return itemUsedThisTurn; }
-    public List<Integer> getPendingTargetIndices() { return pendingTargetIndices; }
-    public List<Integer> getPendingReachableIndices() { return pendingReachableIndices; }
     // Delegating facade -- MinigamePresentation owns the actual state. Every name/signature below
     // is unchanged, so no external caller (AnnouncementOverlay, RunePartyPanel, StatsOverlay)
     // needs to change.
@@ -4812,8 +4781,6 @@ public class RunePartyPlugin extends Plugin
     
     /** This round's own local catch counts so far -- see FishingCatchOverlay, the only consumer.
      * Client-local only -- nobody but the local player ever sees these. */
-    public int getShrimpCount() { return shrimpCount; }
-    public int getAnchovyCount() { return anchovyCount; }
 
     
     /** When the current Click, Click, Click round's own local click-timer should stop -- 0 if no
@@ -5109,9 +5076,6 @@ public class RunePartyPlugin extends Plugin
         return pos.getY() == brutusY && pos.getPlane() == brutusPlane
             && Math.abs(pos.getX() - brutusX) <= BRUTUS_HITBOX_RADIUS_TILES;
     }
-
-    public String getItemPlacementKey() { return itemPlacementKey; }
-    public String getItemTargetKey() { return itemTargetKey; }
     
     
     
@@ -5120,8 +5084,6 @@ public class RunePartyPlugin extends Plugin
      * isMinigamePlayable() (a fixed local timer off MINIGAME_COUNTDOWN_STARTED), this is a real
      * server signal, true for however long or short the round actually took to begin. See
      * AnnouncementOverlay#renderArenaGatherMessage, the only current reader. */
-    
-    public int getMaxRounds() { return maxRounds; }
     /** 1-indexed round currently in progress, capped at maxRounds so the round the final
      * MINIGAME_ENDED just completed doesn't briefly read as "one past the end" before GAME_ENDED
      * lands -- 0 before GAME_STARTED has set maxRounds at all. See StatsOverlay's "ROUND x/y" line,
@@ -5208,11 +5170,6 @@ public class RunePartyPlugin extends Plugin
         }
         return head;
     }
-    public String getDiceRollRsn() { return diceRollRsn; }
-    public int getDiceRollValue() { return diceRollValue; }
-    public int getDiceRollBonus() { return diceRollBonus; }
-    public long getDiceRollStart() { return diceRollStart; }
-    public long getDiceRollUntil() { return diceRollUntil; }
     // Delegating facade -- GoldenGnomePresentation owns the actual state. Every name/signature
     // below is unchanged, so no external caller (AnnouncementOverlay, PlayerOverlay, TileOverlay)
     // needs to change.

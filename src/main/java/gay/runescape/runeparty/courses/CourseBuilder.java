@@ -63,10 +63,10 @@ public final class CourseBuilder
     public void clearCourse()
     {
         Set<WorldPoint> uniquePoints = new HashSet<>();
-        for (TileReducer.TileEntry entry : plugin.getTileReducer().snapshot()) uniquePoints.add(entry.point);
+        for (TileReducer.TileEntry entry : plugin.tileReducer.snapshot()) uniquePoints.add(entry.point);
         if (uniquePoints.isEmpty()) return;
 
-        for (WorldPoint wp : uniquePoints) plugin.getTileReducer().unmarkLocal(wp, null);
+        for (WorldPoint wp : uniquePoints) plugin.tileReducer.unmarkLocal(wp, null);
 
         final String gid = plugin.gameId;
         final String wk = plugin.writeKey;

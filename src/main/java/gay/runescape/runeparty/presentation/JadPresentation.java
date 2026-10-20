@@ -32,7 +32,7 @@ public final class JadPresentation
     private volatile long awakenedAt = 0;
     // When the encounter reveal (banner + Jad's own 3D model, see JadEncounter) is actually allowed
     // to start showing -- the later of "when the server's real bow window itself starts" (now plus
-    // settleMs, see below) or plugin.getTurnEffectGateUntil(), computed once right here when
+    // settleMs, see below) or plugin.turnEffectGateUntil, computed once right here when
     // JAD_AWAKENED lands, not re-checked every frame. Re-checking the live gate every frame and
     // extending it forward while showing created a self-inflicted flashing loop in an earlier
     // version (draw a frame, extend the gate past "now", the next frame reads that extension as
@@ -88,7 +88,7 @@ public final class JadPresentation
                     // awakenedAt is set equal to it rather than to "now" or "now + settleMs".
                     Integer settleMs = Json.safeInt(e.payload, "settleMs");
                     long serverIntendedStart = now + (settleMs != null ? settleMs : 0);
-                    revealAt = Math.max(serverIntendedStart, plugin.getTurnEffectGateUntil());
+                    revealAt = Math.max(serverIntendedStart, plugin.turnEffectGateUntil);
                     awakenedAt = revealAt;
                     plugin.addChatMessage(encounterRsn + " has awakened Jad!");
                 }

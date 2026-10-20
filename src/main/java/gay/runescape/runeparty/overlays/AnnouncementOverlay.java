@@ -281,8 +281,8 @@ public class AnnouncementOverlay extends Overlay
     {
         // Hide every banner while the full-screen course map is up -- nothing here has a "missed
         // it" state, so skipping frames is safe.
-        if (plugin.isMapShowing()) return null;
-        GamePhase phase = plugin.getPhase();
+        if (plugin.mapShowing) return null;
+        GamePhase phase = plugin.phase;
         // ENDED is included so the end-game awards ceremony can still render past the instant the
         // phase flips; every other render* call below is still gated on its own until-timestamp.
         if (phase != GamePhase.ACTIVE && phase != GamePhase.LOBBY && phase != GamePhase.ENDED) return null;
@@ -370,7 +370,7 @@ public class AnnouncementOverlay extends Overlay
 
         String text = isLocal(rsn) ? "Your Turn!" : rsn + "'s Turn";
 
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.rosterReducer.getColorNumber(rsn));
         Color color = seatColor != null ? seatColor.awt : Color.WHITE;
 
         Node title = Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(36f)).color(color);
@@ -388,7 +388,7 @@ public class AnnouncementOverlay extends Overlay
 
         String text = isLocal(rsn) ? "Your Turn Was Skipped!" : rsn + "'s Turn Was Skipped!";
 
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.rosterReducer.getColorNumber(rsn));
         Color color = seatColor != null ? seatColor.awt : Color.WHITE;
 
         Node banner = Box.column(
@@ -408,7 +408,7 @@ public class AnnouncementOverlay extends Overlay
             return;
         }
 
-        String moverRsn = plugin.getCurrentTurnRsn();
+        String moverRsn = plugin.currentTurnRsn;
         if (moverRsn == null) return;
         if (isLocal(moverRsn)) return;
         if (!plugin.isAwaitingSomeonesRoll()) return;
@@ -424,8 +424,8 @@ public class AnnouncementOverlay extends Overlay
         float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), SPIN_HINT_PULSE_PERIOD_MS);
 
         String self = plugin.getLocalRsn();
-        boolean hasItems = self != null && !plugin.isItemUsedThisTurn()
-            && !plugin.getRosterReducer().getItems(self).isEmpty();
+        boolean hasItems = self != null && !plugin.itemUsedThisTurn
+            && !plugin.rosterReducer.getItems(self).isEmpty();
 
         String suffix = hasItems ? " emote to roll the dice, or use an item in the panel." : " emote to roll the dice.";
 
@@ -451,7 +451,7 @@ public class AnnouncementOverlay extends Overlay
         float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), SPIN_HINT_PULSE_PERIOD_MS);
 
         Font font = FontManager.getRunescapeBoldFont().deriveFont(SPIN_HINT_SIZE);
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.rosterReducer.getColorNumber(rsn));
         Color nameColor = seatColor != null ? seatColor.awt : SPIN_HINT_COLOR;
 
         Node line = Line.of(
@@ -488,7 +488,7 @@ public class AnnouncementOverlay extends Overlay
      * exclusive with both, since neither of those can fire before turn order has begun. */
     private void renderStartHereHint(Graphics2D g)
     {
-        if (plugin.getPhase() != GamePhase.ACTIVE || plugin.getCurrentTurnRsn() != null) return;
+        if (plugin.phase != GamePhase.ACTIVE || plugin.currentTurnRsn != null) return;
 
         float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), SPIN_HINT_PULSE_PERIOD_MS);
         int centerX = drawableWidth() / 2;
@@ -751,7 +751,7 @@ public class AnnouncementOverlay extends Overlay
      * real {@code Player} handle. */
     private void drawChanceSpaceToken(Graphics2D g, String rsn, int cx, int cy, float scale, float alpha)
     {
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.rosterReducer.getColorNumber(rsn));
         Color color = seatColor != null ? seatColor.awt : Color.WHITE;
         int radius = Math.round(CHANCE_SPACE_TOKEN_RADIUS * scale);
 
@@ -1400,7 +1400,7 @@ public class AnnouncementOverlay extends Overlay
         Layout.renderCentered(g, emoteLine, centerX, afterInstructionsY + 36, maxWidth, alpha);
 
         Set<String> ready = plugin.minigamePresentation.getMinigameReadyRsns();
-        List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
+        List<RosterReducer.RosterEntry> players = plugin.rosterReducer.seatedPlayers();
         players.sort(Comparator.comparing((RosterReducer.RosterEntry e) -> e.number));
 
         Font nameFont = FontManager.getRunescapeBoldFont().deriveFont(MINIGAME_READY_CHECK_LINE_SIZE);
@@ -1796,7 +1796,7 @@ public class AnnouncementOverlay extends Overlay
             scoreByRsn.put(score.rsn.toLowerCase(), score.score);
         }
 
-        List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
+        List<RosterReducer.RosterEntry> players = plugin.rosterReducer.seatedPlayers();
         players.sort(Comparator
             .comparingInt((RosterReducer.RosterEntry e) -> scoreByRsn.getOrDefault(e.rsn.toLowerCase(), 0))
             .reversed()
@@ -1838,7 +1838,7 @@ public class AnnouncementOverlay extends Overlay
             rewardByRsn.put(reward.rsn.toLowerCase(), reward.coins);
         }
 
-        List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
+        List<RosterReducer.RosterEntry> players = plugin.rosterReducer.seatedPlayers();
         players.sort(Comparator
             .comparingInt((RosterReducer.RosterEntry e) -> rewardByRsn.getOrDefault(e.rsn.toLowerCase(), 0))
             .reversed()
@@ -1877,7 +1877,7 @@ public class AnnouncementOverlay extends Overlay
 
         // No "Current Standings" label here per user feedback -- the ranked list right below
         // already makes clear what it's showing on its own.
-        List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
+        List<RosterReducer.RosterEntry> players = plugin.rosterReducer.seatedPlayers();
         players.sort(Comparator
             .comparingInt((RosterReducer.RosterEntry e) -> e.goldenGnomeCount).reversed()
             .thenComparing(Comparator.comparingInt((RosterReducer.RosterEntry e) -> e.coins).reversed()));
@@ -2046,7 +2046,7 @@ public class AnnouncementOverlay extends Overlay
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 2 - 20;
 
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.rosterReducer.getColorNumber(rsn));
         Color nameColor = seatColor != null ? seatColor.awt : Color.WHITE;
         String stats = rsn + " -- " + plugin.ceremonyPresentation.getPlaceRevealGoldenGnomes() + " GG, " + plugin.ceremonyPresentation.getPlaceRevealCoins() + " coins";
 
@@ -2249,18 +2249,18 @@ public class AnnouncementOverlay extends Overlay
      * enters these branches. */
     private void renderDiceRoll(Graphics2D g)
     {
-        String rsn = plugin.getDiceRollRsn();
+        String rsn = plugin.diceRollRsn;
         if (rsn == null) return;
 
-        Float alpha = BannerAnim.fadeAlpha(plugin.getDiceRollUntil(), RunePartyPlugin.DICE_ROLL_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.diceRollUntil, RunePartyPlugin.DICE_ROLL_FADE_MS);
         if (alpha == null) return;
         long now = System.currentTimeMillis();
 
-        long elapsed = now - plugin.getDiceRollStart();
+        long elapsed = now - plugin.diceRollStart;
         boolean spinning = elapsed < RunePartyPlugin.DICE_ROLL_SPIN_PHASE_MS;
 
-        int bonus = plugin.getDiceRollBonus();
-        int total = plugin.getDiceRollValue();
+        int bonus = plugin.diceRollBonus;
+        int total = plugin.diceRollValue;
         int base = total - bonus;
 
         // Sub-phase boundaries within the bonus reveal, relative to the moment the spin ends. All
@@ -2312,7 +2312,7 @@ public class AnnouncementOverlay extends Overlay
         int cx = drawableWidth() / 2 + jitterX;
         int cy = drawableHeight() / 2 + jitterY;
 
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(rsn));
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.rosterReducer.getColorNumber(rsn));
         Color color = seatColor != null ? seatColor.awt : Color.WHITE;
 
         g.setColor(RunePartyRender.withAlpha(Color.BLACK, alpha * 0.3f));

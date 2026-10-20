@@ -113,7 +113,7 @@ public class PlayerOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        GamePhase phase = plugin.getPhase();
+        GamePhase phase = plugin.phase;
         if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE) return null;
 
         for (Player p : client.getPlayers())
@@ -184,7 +184,7 @@ public class PlayerOverlay extends Overlay
             // A mini-game isn't anyone's "turn" -- everyone submits independently -- so the glow/
             // thick border is suppressed then too, matching StatsOverlay's same carve-out.
             boolean onTurn = phase == GamePhase.ACTIVE && !plugin.minigamePresentation.isActive()
-                && rsn.equalsIgnoreCase(plugin.getCurrentTurnRsn());
+                && rsn.equalsIgnoreCase(plugin.currentTurnRsn);
             // Mutually exclusive with onTurn by construction -- isHotPotatoActive() implies a
             // mini-game is active, which onTurn's own check above already rules out.
             boolean holdingHotPotato = phase == GamePhase.ACTIVE && plugin.minigamePresentation.isKeyActive(RunePartyPlugin.HOT_POTATO_KEY) && plugin.isMinigamePlayable()

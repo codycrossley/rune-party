@@ -132,7 +132,7 @@ public class JaddyDuelModel extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (plugin.getPhase() != GamePhase.ACTIVE)
+        if (plugin.phase != GamePhase.ACTIVE)
         {
             clear();
             return null;
