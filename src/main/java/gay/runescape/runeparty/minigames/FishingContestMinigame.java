@@ -1,20 +1,15 @@
 package gay.runescape.runeparty.minigames;
 
-import java.awt.AlphaComposite;
-import java.awt.Composite;
+import gay.runescape.runeparty.WheelEntry;
+
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
-import java.io.IOException;
-import java.io.InputStream;
-import javax.imageio.ImageIO;
-import lombok.extern.slf4j.Slf4j;
 
 /** A Pond players catch fish from by performing the Headbang emote nearby, whose local catch tally
  * renders via a dedicated corner overlay (see FishingCatchOverlay). */
-@Slf4j
 public class FishingContestMinigame implements Minigame
 {
-    private static final BufferedImage ICON = loadIcon();
+    private static final BufferedImage ICON = WheelEntry.loadIcon(FishingContestMinigame.class, "/gay/runescape/runeparty/minigame_icons/fishing-contest.png", "Fishing Contest wheel icon");
 
     @Override
     public String getKey()
@@ -32,19 +27,5 @@ public class FishingContestMinigame implements Minigame
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
         drawIconImage(g, ICON, x, y, size, alpha);
-    }
-
-    private static BufferedImage loadIcon()
-    {
-        try (InputStream is = FishingContestMinigame.class.getResourceAsStream("/gay/runescape/runeparty/minigame_icons/fishing-contest.png"))
-        {
-            if (is == null) throw new IOException("fishing-contest.png resource not found");
-            return ImageIO.read(is);
-        }
-        catch (IOException e)
-        {
-            log.warn("Failed to load the Fishing Contest wheel icon", e);
-            return null;
-        }
     }
 }

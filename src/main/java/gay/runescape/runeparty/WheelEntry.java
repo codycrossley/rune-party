@@ -4,6 +4,10 @@ import java.awt.AlphaComposite;
 import java.awt.Composite;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.InputStream;
+import javax.imageio.ImageIO;
+import org.slf4j.LoggerFactory;
 
 /** Anything that can appear as a segment on AnnouncementOverlay's spinner wheel -- a name shown
  * once the wheel settles, and an icon drawn in its own wedge. Extended by Minigame and Item, the
@@ -37,5 +41,25 @@ public interface WheelEntry
         g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, Math.min(1f, alpha))));
         g.drawImage(icon, x - w / 2, y - h / 2, w, h, null);
         g.setComposite(original);
+    }
+
+    /** Loads a classpath PNG resource for a wheel entry's own ICON field -- warns and returns null
+     * (rather than throwing) on any failure, since a missing icon should degrade to "draws
+     * nothing" rather than crash the whole plugin. {@code cls} is the implementer's own class
+     * (used both as the classloader to resolve {@code resourcePath} against, and as the logger
+     * name, matching what each implementer's own former {@code @Slf4j}-generated logger would have
+     * used). {@code logLabel} is what the warning calls it, e.g. "Coin Rush wheel icon". */
+    static BufferedImage loadIcon(Class<?> cls, String resourcePath, String logLabel)
+    {
+        try (InputStream is = cls.getResourceAsStream(resourcePath))
+        {
+            if (is == null) throw new IOException(resourcePath + " resource not found");
+            return ImageIO.read(is);
+        }
+        catch (IOException e)
+        {
+            LoggerFactory.getLogger(cls).warn("Failed to load the " + logLabel, e);
+            return null;
+        }
     }
 }

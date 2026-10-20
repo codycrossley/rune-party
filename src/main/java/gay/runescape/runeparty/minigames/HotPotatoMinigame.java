@@ -1,21 +1,16 @@
 package gay.runescape.runeparty.minigames;
 
-import java.awt.AlphaComposite;
-import java.awt.Composite;
+import gay.runescape.runeparty.WheelEntry;
+
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
-import java.io.IOException;
-import java.io.InputStream;
-import javax.imageio.ImageIO;
-import lombok.extern.slf4j.Slf4j;
 
 /** Entirely emote-driven (the SPIN emote passes it, see RunePartyPlugin#isLocalPlayerHoldingHotPotato/
  * onAnimationChanged). The status overview (who's holding it, the round countdown) renders
  * center-screen via HotPotatoOverlay instead. */
-@Slf4j
 public class HotPotatoMinigame implements Minigame
 {
-    private static final BufferedImage ICON = loadIcon();
+    private static final BufferedImage ICON = WheelEntry.loadIcon(HotPotatoMinigame.class, "/gay/runescape/runeparty/minigame_icons/hot-potato.png", "Hot Potato wheel icon");
 
     @Override
     public String getKey()
@@ -37,17 +32,4 @@ public class HotPotatoMinigame implements Minigame
 
     /** Distinct from HotPotatoOverlay's own bundled potato.png (a larger, steadier in-world/HUD
      * raster) -- this one's sized and cached purely for the wheel-icon slot. */
-    private static BufferedImage loadIcon()
-    {
-        try (InputStream is = HotPotatoMinigame.class.getResourceAsStream("/gay/runescape/runeparty/minigame_icons/hot-potato.png"))
-        {
-            if (is == null) throw new IOException("hot-potato.png resource not found");
-            return ImageIO.read(is);
-        }
-        catch (IOException e)
-        {
-            log.warn("Failed to load the Hot Potato wheel icon", e);
-            return null;
-        }
-    }
 }
