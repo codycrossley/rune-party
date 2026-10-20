@@ -361,6 +361,11 @@ public class AnnouncementOverlay extends Overlay
         return null;
     }
 
+    private static float pulseAlpha(long now, float minAlpha, long periodMs)
+    {
+        return minAlpha + (1f - minAlpha) * BannerAnim.pulse(now, periodMs);
+    }
+
     private Color seatColorOr(String rsn, Color fallback)
     {
         RunePartyColor seatColor = RunePartyColor.forNumber(plugin.rosterReducer.getColorNumber(rsn));
@@ -426,7 +431,7 @@ public class AnnouncementOverlay extends Overlay
      * noticeable. */
     private void renderSpinHintSelf(Graphics2D g)
     {
-        float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), SPIN_HINT_PULSE_PERIOD_MS);
+        float alpha = pulseAlpha(System.currentTimeMillis(), SPIN_HINT_MIN_ALPHA, SPIN_HINT_PULSE_PERIOD_MS);
 
         String self = plugin.getLocalRsn();
         boolean hasItems = self != null && !plugin.itemUsedThisTurn
@@ -453,7 +458,7 @@ public class AnnouncementOverlay extends Overlay
     /** The bystander half of the Spin hint -- "Waiting for &lt;player&gt; to roll the dice...". */
     private void renderSpinHintWaiting(Graphics2D g, String rsn)
     {
-        float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), SPIN_HINT_PULSE_PERIOD_MS);
+        float alpha = pulseAlpha(System.currentTimeMillis(), SPIN_HINT_MIN_ALPHA, SPIN_HINT_PULSE_PERIOD_MS);
 
         Font font = FontManager.getRunescapeBoldFont().deriveFont(SPIN_HINT_SIZE);
         Color nameColor = seatColorOr(rsn, SPIN_HINT_COLOR);
@@ -477,7 +482,7 @@ public class AnnouncementOverlay extends Overlay
     {
         if (!plugin.isLocalPlayerAwaitingReturnToPosition()) return;
 
-        float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), SPIN_HINT_PULSE_PERIOD_MS);
+        float alpha = pulseAlpha(System.currentTimeMillis(), SPIN_HINT_MIN_ALPHA, SPIN_HINT_PULSE_PERIOD_MS);
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 4 + 40;
 
@@ -494,7 +499,7 @@ public class AnnouncementOverlay extends Overlay
     {
         if (plugin.phase != GamePhase.ACTIVE || plugin.currentTurnRsn != null) return;
 
-        float alpha = SPIN_HINT_MIN_ALPHA + (1f - SPIN_HINT_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), SPIN_HINT_PULSE_PERIOD_MS);
+        float alpha = pulseAlpha(System.currentTimeMillis(), SPIN_HINT_MIN_ALPHA, SPIN_HINT_PULSE_PERIOD_MS);
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 4 + 40;
 
@@ -513,7 +518,7 @@ public class AnnouncementOverlay extends Overlay
         if (plugin.jadPresentation.isSmashTriggered()) return;
         if (System.currentTimeMillis() < plugin.jadPresentation.getRevealAt()) return;
 
-        float alpha = GOLDEN_GNOME_OFFER_MIN_ALPHA + (1f - GOLDEN_GNOME_OFFER_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS);
+        float alpha = pulseAlpha(System.currentTimeMillis(), GOLDEN_GNOME_OFFER_MIN_ALPHA, GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS);
 
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 3;
@@ -564,7 +569,7 @@ public class AnnouncementOverlay extends Overlay
         String offerRsn = plugin.goldenGnomePresentation.getOfferRsn();
         if (offerRsn == null) return;
 
-        float alpha = GOLDEN_GNOME_OFFER_MIN_ALPHA + (1f - GOLDEN_GNOME_OFFER_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS);
+        float alpha = pulseAlpha(System.currentTimeMillis(), GOLDEN_GNOME_OFFER_MIN_ALPHA, GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS);
 
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 3;
@@ -1373,7 +1378,7 @@ public class AnnouncementOverlay extends Overlay
         boolean spinnerDone = plugin.minigamePresentation.isMinigameSpinnerSkippedForClient() || (spinnerUntil != 0 && now >= spinnerUntil);
         if (!spinnerDone) return;
 
-        float alpha = MINIGAME_READY_CHECK_MIN_ALPHA + (1f - MINIGAME_READY_CHECK_MIN_ALPHA) * BannerAnim.pulse(now, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
+        float alpha = pulseAlpha(now, MINIGAME_READY_CHECK_MIN_ALPHA, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
 
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 3;
@@ -1469,7 +1474,7 @@ public class AnnouncementOverlay extends Overlay
         if (plugin.minigamePresentation.isRoundBegun()) return;
 
         long now = System.currentTimeMillis();
-        float alpha = MINIGAME_READY_CHECK_MIN_ALPHA + (1f - MINIGAME_READY_CHECK_MIN_ALPHA) * BannerAnim.pulse(now, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
+        float alpha = pulseAlpha(now, MINIGAME_READY_CHECK_MIN_ALPHA, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
 
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 2;
@@ -1662,7 +1667,7 @@ public class AnnouncementOverlay extends Overlay
         long dashEndsAt = plugin.minigamePresentation.brutusAttack().getDashEndsAt();
         if (dashEndsAt != 0 && now < dashEndsAt) return;
 
-        float alpha = MINIGAME_READY_CHECK_MIN_ALPHA + (1f - MINIGAME_READY_CHECK_MIN_ALPHA) * BannerAnim.pulse(now, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
+        float alpha = pulseAlpha(now, MINIGAME_READY_CHECK_MIN_ALPHA, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 2;
 
@@ -1937,7 +1942,7 @@ public class AnnouncementOverlay extends Overlay
         if (plugin.ceremonyPresentation.getGnomeLine() != null) return;
 
         long now = System.currentTimeMillis();
-        float alpha = MINIGAME_READY_CHECK_MIN_ALPHA + (1f - MINIGAME_READY_CHECK_MIN_ALPHA) * BannerAnim.pulse(now, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
+        float alpha = pulseAlpha(now, MINIGAME_READY_CHECK_MIN_ALPHA, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
 
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 2;
