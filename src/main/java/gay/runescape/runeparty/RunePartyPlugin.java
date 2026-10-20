@@ -3475,6 +3475,18 @@ public class RunePartyPlugin extends Plugin
         return available;
     }
 
+    /** The other player's own RSN a Follow-option menu entry's own actor resolves to -- shared by
+     * addToGameMenuEntry/addItemTargetMenuEntry, which only differ in what they do once they have
+     * it. Null if the actor isn't a Player, is the local player, or has no resolvable name. */
+    private String targetRsnFromMenuEntry(MenuEntryAdded event)
+    {
+        if (!(event.getMenuEntry().getActor() instanceof Player)) return null;
+        Player target = (Player) event.getMenuEntry().getActor();
+        if (target == null || target == client.getLocalPlayer() || target.getName() == null) return null;
+        String targetRsn = Text.toJagexName(target.getName());
+        return targetRsn == null || targetRsn.isBlank() ? null : targetRsn;
+    }
+
     /** Adds an "Add to Game" submenu -- one entry per currently-available seat color (see
      * availableSeatColors) -- on another player's Follow option, host-only, so the host can pull a
      * spectator into the turn order with a specific color rather than always following whatever
@@ -3484,13 +3496,8 @@ public class RunePartyPlugin extends Plugin
     {
         if (!isHost() || gameId == null) return;
         if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE) return;
-        if (!(event.getMenuEntry().getActor() instanceof Player)) return;
-
-        Player target = (Player) event.getMenuEntry().getActor();
-        if (target == null || target == client.getLocalPlayer() || target.getName() == null) return;
-
-        String targetRsn = Text.toJagexName(target.getName());
-        if (targetRsn == null || targetRsn.isBlank()) return;
+        String targetRsn = targetRsnFromMenuEntry(event);
+        if (targetRsn == null) return;
         if (rosterReducer.getRole(targetRsn) == RunePartyRole.PLAYER) return;
         if (sessionManager.isGameFull()) return;
 
@@ -3522,13 +3529,8 @@ public class RunePartyPlugin extends Plugin
     {
         String itemKey = itemTargetKey;
         if (itemKey == null || phase != GamePhase.ACTIVE) return;
-        if (!(event.getMenuEntry().getActor() instanceof Player)) return;
-
-        Player target = (Player) event.getMenuEntry().getActor();
-        if (target == null || target == client.getLocalPlayer() || target.getName() == null) return;
-
-        String targetRsn = Text.toJagexName(target.getName());
-        if (targetRsn == null || targetRsn.isBlank()) return;
+        String targetRsn = targetRsnFromMenuEntry(event);
+        if (targetRsn == null) return;
         if (rosterReducer.getRole(targetRsn) != RunePartyRole.PLAYER) return;
 
         client.createMenuEntry(-1)
