@@ -73,9 +73,9 @@ public class HotPotatoOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (!plugin.isHotPotatoActive() || !plugin.isMinigamePlayable()) return null;
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.HOT_POTATO_KEY) || !plugin.isMinigamePlayable()) return null;
 
-        List<RosterReducer.RosterEntry> seated = plugin.getRosterReducer().seatedPlayers();
+        List<RosterReducer.RosterEntry> seated = plugin.rosterReducer.seatedPlayers();
         if (seated.isEmpty()) return null;
         seated.sort((a, b) ->
         {
@@ -84,7 +84,7 @@ public class HotPotatoOverlay extends Overlay
             return Integer.compare(na, nb);
         });
 
-        String holder = plugin.getHotPotatoHolder();
+        String holder = plugin.minigamePresentation.hotPotato().getHolder();
         boolean localHolding = plugin.isLocalPlayerHoldingHotPotato();
 
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
@@ -94,7 +94,7 @@ public class HotPotatoOverlay extends Overlay
         Font timerFont = RunePartyFonts.MARIO_PARTY.deriveFont(TIMER_SIZE);
         Font hintFont = FontManager.getRunescapeBoldFont().deriveFont(HINT_SIZE);
 
-        long remainingMs = plugin.getHotPotatoEndsAt() - System.currentTimeMillis();
+        long remainingMs = plugin.minigamePresentation.hotPotato().getEndsAt() - System.currentTimeMillis();
         long remainingSec = Math.max(0, (remainingMs + 999) / 1000);
         String timerText = String.valueOf(remainingSec);
         Color timerColor = remainingMs <= URGENT_THRESHOLD_MS ? URGENT_COLOR : HINT_COLOR;
@@ -156,7 +156,7 @@ public class HotPotatoOverlay extends Overlay
             {
                 g.drawImage(potatoIcon, x - POTATO_SIZE / 2, tokenCenterY - TOKEN_RADIUS - POTATO_CLEARANCE - POTATO_SIZE, POTATO_SIZE, POTATO_SIZE, null);
             }
-            else if (skullIcon != null && plugin.getHotPotatoEliminatedRsns().contains(entry.rsn.toLowerCase(Locale.ROOT)))
+            else if (skullIcon != null && plugin.minigamePresentation.hotPotato().getEliminatedRsns().contains(entry.rsn.toLowerCase(Locale.ROOT)))
             {
                 g.drawImage(skullIcon, x - POTATO_SIZE / 2, tokenCenterY - TOKEN_RADIUS - POTATO_CLEARANCE - POTATO_SIZE, POTATO_SIZE, POTATO_SIZE, null);
             }

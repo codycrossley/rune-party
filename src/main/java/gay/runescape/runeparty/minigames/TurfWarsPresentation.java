@@ -251,7 +251,7 @@ public final class TurfWarsPresentation implements MinigamePresentationFeature
         String assigned = teamColors.get(self.toLowerCase(Locale.ROOT));
         if (assigned == null) return false;
 
-        RunePartyColor seat = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(self));
+        RunePartyColor seat = RunePartyColor.forNumber(plugin.rosterReducer.getColorNumber(self));
         if (seat == null) return false;
         String seatHex = String.format("#%02X%02X%02X", seat.awt.getRed(), seat.awt.getGreen(), seat.awt.getBlue());
         return !assigned.equalsIgnoreCase(seatHex);

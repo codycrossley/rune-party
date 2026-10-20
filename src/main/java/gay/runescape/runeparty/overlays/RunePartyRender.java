@@ -1,11 +1,16 @@
 package gay.runescape.runeparty.overlays;
 
+import gay.runescape.runeparty.RunePartyPlugin;
+import gay.runescape.runeparty.net.ApiClient;
+
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
+import java.util.HashMap;
+import java.util.Map;
 import net.runelite.api.Client;
 import net.runelite.api.Model;
 import net.runelite.api.ModelData;
@@ -66,7 +71,7 @@ public final class RunePartyRender
 
     /** Same merge as {@link #loadNpcChatheadModel}, but returns the raw, pre-lit {@link ModelData}
      * instead of a finished {@link Model} -- for a caller whose in-world model is recolored by
-     * hand (see ItemShopNpcOverlay's own RECOLOR_FIND/RECOLOR_REPLACE doc) and needs its chathead
+     * hand (see InteriorNpcOverlay's own applyRecolor doc) and needs its chathead
      * portrait recolored to match before calling {@code ModelData#light()} itself -- otherwise the
      * dialogue box's portrait shows the NPC's stock colors while the model standing on the tile
      * shows the recolored ones. Same "null while not cached yet, keep calling every frame"
@@ -225,5 +230,49 @@ public final class RunePartyRender
         g.drawString(text, x + 1, y + 1);
         g.setColor(withAlpha(color, alpha));
         g.drawString(text, x, y);
+    }
+
+    /** Fallback used by {@link #resolveTileColor}/{@link #defaultTileColor} when a tile type isn't
+     * in the served catalog (yet, or ever). */
+    static final Color UNKNOWN_TILE_COLOR = new Color(255, 255, 0);
+
+    // Memoizes Color.decode() by hex string -- resolveTileColor/defaultTileColor used to re-parse
+    // and re-allocate a Color from the same fixed hex string on every call, for every tile, every
+    // single frame both TileOverlay and RunePartyMapOverlay render. decode(hex) is a pure function
+    // of hex alone, so caching by hex string is always correct regardless of which tile/tileType/
+    // overlay asked for it -- only the successful decode is cached; a malformed hex's own
+    // NumberFormatException still propagates to the caller uncached every time. Client-thread-only,
+    // like every other caller of this class, so a plain HashMap needs no synchronization.
+    private static final Map<String, Color> decodedColorCache = new HashMap<>();
+
+    private static Color decodeColor(String hex)
+    {
+        Color cached = decodedColorCache.get(hex);
+        if (cached != null) return cached;
+        Color decoded = Color.decode(hex);
+        decodedColorCache.put(hex, decoded);
+        return decoded;
+    }
+
+    /** Looks up this tile type's color in the served catalog rather than a hardcoded table --
+     * falls back to {@link #UNKNOWN_TILE_COLOR} for a type the catalog doesn't have (yet, or
+     * ever). Shared by TileOverlay and RunePartyMapOverlay, which both need the exact same
+     * tile-type-to-color mapping -- the live board and the minimap can never disagree about what
+     * color a tile type is. */
+    static Color defaultTileColor(RunePartyPlugin plugin, String tileType)
+    {
+        ApiClient.TileTypeOut t = plugin.tileTypeCatalog.get(tileType);
+        if (t == null || t.colorHex == null) return UNKNOWN_TILE_COLOR;
+        try { return decodeColor(t.colorHex); }
+        catch (NumberFormatException e) { return UNKNOWN_TILE_COLOR; }
+    }
+
+    /** {@code hex} first (a tile's own explicit override color, if it has one), falling back to
+     * {@link #defaultTileColor} for that tile type otherwise -- see that method's own doc. */
+    static Color resolveTileColor(RunePartyPlugin plugin, String hex, String tileType)
+    {
+        if (hex == null || hex.isBlank()) return defaultTileColor(plugin, tileType);
+        try { return decodeColor(hex); }
+        catch (NumberFormatException e) { return defaultTileColor(plugin, tileType); }
     }
 }

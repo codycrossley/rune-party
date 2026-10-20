@@ -114,11 +114,11 @@ public class TileReducer
         unmarkLocal(new WorldPoint(x, y, plane), tileType);
     }
 
-    /** The actual tile-set mutation behind applyMark, factored out so course-authoring tools (see
-     * CourseBuilder's own Dev Mode doc) can write a tile directly -- client-local, no server
-     * round-trip, no JSON involved -- and have it render identically to a server-committed one,
-     * since every renderer (TileOverlay/RunePartyMapOverlay) only ever reads this same map back
-     * out via snapshot()/tileAtIndex()/etc. with no notion of where an entry came from. */
+    /** The actual tile-set mutation behind applyMark, factored out so CourseBuilder#clearCourse
+     * can also write directly -- client-local, no server round-trip, no JSON involved -- and have
+     * it render identically to a server-committed tile, since every renderer (TileOverlay/
+     * RunePartyMapOverlay) only ever reads this same map back out via snapshot()/tileAtIndex()/etc.
+     * with no notion of where an entry came from. */
     public void markLocal(WorldPoint point, String tileType, String color, Integer orientation, Integer pathIndex, int[] nextIndices)
     {
         if (point == null || tileType == null) return;

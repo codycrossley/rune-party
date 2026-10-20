@@ -44,8 +44,8 @@ import gay.runescape.runeparty.overlays.FishingCatchOverlay;
 import gay.runescape.runeparty.overlays.RuneMatchOverlay;
 import gay.runescape.runeparty.overlays.HardcodedCourseLauncherOverlay;
 import gay.runescape.runeparty.overlays.HotPotatoOverlay;
+import gay.runescape.runeparty.overlays.InteriorNpcOverlay;
 import gay.runescape.runeparty.overlays.ItemShopDialogueOverlay;
-import gay.runescape.runeparty.overlays.ItemShopNpcOverlay;
 import gay.runescape.runeparty.overlays.JadEncounter;
 import gay.runescape.runeparty.overlays.JaddyDuelModel;
 import gay.runescape.runeparty.overlays.PlayerOverlay;
@@ -58,10 +58,8 @@ import gay.runescape.runeparty.overlays.TileOverlay;
 import gay.runescape.runeparty.overlays.TurfWarsScoreOverlay;
 import gay.runescape.runeparty.overlays.WiseOldManDialogueOverlay;
 import gay.runescape.runeparty.overlays.GnomeNpcOverlay;
-import gay.runescape.runeparty.overlays.WiseOldManNpcOverlay;
 import java.awt.Color;
 import java.awt.event.KeyEvent;
-import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
@@ -110,7 +108,6 @@ import net.runelite.client.audio.AudioPlayer;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
-import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.game.SpriteManager;
 import net.runelite.client.input.MouseManager;
 import net.runelite.client.plugins.Plugin;
@@ -597,7 +594,7 @@ public class RunePartyPlugin extends Plugin
      * would just stack a second, redundant "BEGIN!" on top of that. Brutus Attack is ALSO excluded
      * despite using its own bespoke renderBrutusAttackGatherMessage instead of the generic one: that
      * one repeats fresh before each of its own 3 rounds off a different lifecycle than
-     * isMinigameRoundBegun()'s single one-shot latch (see that method's own doc), so it isn't a
+     * minigamePresentation.isRoundBegun()'s single one-shot latch (see that method's own doc), so it isn't a
      * fit for this same "fire once, when the round begins" flash without its own separate handling
      * -- left out of scope here rather than half-wired. */
     public static final Set<String> ARRIVAL_GATHER_KEYS = Set.of(
@@ -623,23 +620,6 @@ public class RunePartyPlugin extends Plugin
         keys.add(RAINBOW_RUSH_KEY);
         GATHER_MESSAGE_KEYS = Collections.unmodifiableSet(keys);
     }
-
-    /** Every mini-game that actually board-swaps in a dedicated arena (see each one's own
-     * prepare()/app.py's MinigameContext.arena_center) -- the only ones a host-placed spawn point
-     * (see CourseBuilder#enterMinigameSpawnPlacementMode) means anything for. Coin Rush, True or
-     * False, Click Click Click, and Rainbow Rush are deliberately excluded: none of them swap the
-     * board at all (Rainbow Rush repaints the existing course instead), so placing a spawn point
-     * for one would be dead configuration with nothing to ever read it. */
-    public static final Set<String> BOARD_SWAPPING_MINIGAME_KEYS = Set.of(
-        ARENA_KEY, TURF_WARS_KEY, SANDWICH_RUSH_KEY, JADDY_KEY, HOT_POTATO_KEY, DANCE_DANCE_RUNESCAPE_KEY,
-        REPEAT_AFTER_ME_KEY, CRAB_RAVE_KEY, BRUTUS_ATTACK_KEY, FISHING_CONTEST_KEY, RUNE_MATCH_KEY, MAGE_ARENA_KEY);
-
-    /** Matches the server's own ceremony.py CEREMONY_KEY exactly -- used only for the
-     * minigameSpawnPoints/arena_offset override lookups the Golden Gnome Awards ceremony shares
-     * with every real board-swapping mini-game above (see RunePartyPanel's own CEREMONY_ENTRY).
-     * Not a real mini-game key: there's no ceremony entry in Minigames, and it's deliberately kept
-     * out of BOARD_SWAPPING_MINIGAME_KEYS too, since that set means "the wheel can pick this." */
-    public static final String CEREMONY_KEY = "ceremony";
 
     /** How long AnnouncementOverlay's mini-game final-score recap ("how did everyone do") stays up
      * -- triggered on MINIGAME_ENDED (see triggerMinigameScoreBanner), shown *after* the "MINIGAME
@@ -719,9 +699,23 @@ public class RunePartyPlugin extends Plugin
     public static final long JAD_OUTCOME_BANNER_DURATION_MS = GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
 
     // The Wise Old Man himself (RuneMonk npc id 2108), and the animation he idles on while
-    // standing beside his own tile (WiseOldManNpcOverlay, the only reader of either).
+    // standing beside his own tile (InteriorNpcOverlay, the only reader of either).
     public static final int WISE_OLD_MAN_NPC_ID = 2108;
     public static final int WISE_OLD_MAN_IDLE_ANIMATION_ID = 813;
+    // This NPC's own custom recolor find/replace pairs (packed-HSL swap slots), paired by index --
+    // values above Short.MAX_VALUE are genuine packed-HSL bit patterns, not out of range; Java just
+    // has no unsigned short literal, so they need an explicit narrowing cast the same way any color
+    // above 0x7FFF always would. Read by both InteriorNpcOverlay (the in-world model) and
+    // WiseOldManDialogueOverlay (the chathead portrait) so neither drifts from the other -- see
+    // InteriorNpcOverlay#applyRecolor's own doc.
+    public static final short[] WISE_OLD_MAN_RECOLOR_FIND =
+    {
+        (short) 8741, (short) 7700, (short) 926, (short) 11200, (short) 25238,
+    };
+    public static final short[] WISE_OLD_MAN_RECOLOR_REPLACE =
+    {
+        (short) 8856, (short) 42787, (short) 43963, (short) 8617, (short) 8856,
+    };
 
     // The Golden Gnome Awards' own Gnome (RuneMonk npc id 4233), and the animation he idles on at
     // the ceremony arena's own center (GnomeNpcOverlay, the only reader of either).
@@ -740,11 +734,23 @@ public class RunePartyPlugin extends Plugin
     public static final long WISE_OLD_MAN_OUTCOME_BANNER_DURATION_MS = GOLDEN_GNOME_OUTCOME_BANNER_DURATION_MS;
 
     // The Item Shop's own shopkeeper (RuneMonk npc id 2151), and the animation he idles on while
-    // standing beside his own tile (ItemShopNpcOverlay, the only reader of either). 808 (a generic
+    // standing beside his own tile (InteriorNpcOverlay, the only reader of either). 808 (a generic
     // stand-idle) is a placeholder, same "will adjust later" status the prices below carry -- swap
     // it for whatever this NPC's real idle animation turns out to be.
     public static final int ITEM_SHOP_NPC_ID = 2151;
     public static final int ITEM_SHOP_NPC_IDLE_ANIMATION_ID = 808;
+    // This NPC's own custom recolor find/replace pairs -- see WISE_OLD_MAN_RECOLOR_FIND's own doc
+    // just above for why these are packed-HSL shorts, and InteriorNpcOverlay#applyRecolor's own doc
+    // for why both the in-world model and ItemShopDialogueOverlay's own chathead read these same
+    // two arrays.
+    public static final short[] ITEM_SHOP_RECOLOR_FIND =
+    {
+        (short) 8741, (short) 25238, (short) 8078, (short) 908, (short) 4626, (short) 6798,
+    };
+    public static final short[] ITEM_SHOP_RECOLOR_REPLACE =
+    {
+        (short) 47502, (short) 47502, (short) 47382, (short) 47382, (short) 12, (short) 6057,
+    };
 
     /** One item this Item Shop sells -- itemKey matches the server's own items/__init__.py
      * REGISTRY (see Items.java, the client-side twin) so the dialogue can pull each item's real
@@ -1106,9 +1112,8 @@ public class RunePartyPlugin extends Plugin
      * other place in this plugin that needs a Gson (see its own FILE_GSON doc); RunePartyFonts'
      * own dialogue-font.json parsing is instead handed this plugin's gson field directly via
      * RunePartyFonts#init, called from startUp(). */
-    public Gson getGson() { return gson; }
 
-    private TileReducer tileReducer;
+    public TileReducer tileReducer;
     private TileOverlay tileOverlay;
     private StatsOverlay statsOverlay;
     private CoinRushScoreboardOverlay coinRushScoreboardOverlay;
@@ -1119,10 +1124,10 @@ public class RunePartyPlugin extends Plugin
     private JaddyDuelModel jaddyDuelModel;
     private CrabRaveNpcOverlay crabRaveNpcOverlay;
     private CrabRaveHudOverlay crabRaveHudOverlay;
-    private WiseOldManNpcOverlay wiseOldManNpcOverlay;
+    private InteriorNpcOverlay wiseOldManNpcOverlay;
     private GnomeNpcOverlay gnomeNpcOverlay;
     private WiseOldManDialogueOverlay wiseOldManDialogueOverlay;
-    private ItemShopNpcOverlay itemShopNpcOverlay;
+    private InteriorNpcOverlay itemShopNpcOverlay;
     private ItemShopDialogueOverlay itemShopDialogueOverlay;
     private PlayerTransformOverlay playerTransformOverlay;
     private FishingCatchOverlay fishingCatchOverlay;
@@ -1135,7 +1140,7 @@ public class RunePartyPlugin extends Plugin
     private DanceDanceRuneScapeOverlay danceDanceRuneScapeOverlay;
     private DanceDanceRuneScapeHudOverlay danceDanceRuneScapeHudOverlay;
     private HardcodedCourseLauncherOverlay hardcodedCourseLauncherOverlay;
-    private RosterReducer rosterReducer;
+    public RosterReducer rosterReducer;
     public ApiClient apiClient; // public: presenters in the minigames subpackage issue their own requests
     public EventSocket eventSocket;
 
@@ -1143,33 +1148,33 @@ public class RunePartyPlugin extends Plugin
     // apply()/a dedicated method, and clears itself via reset(). Constructed once in startUp()
     // (same convention as apiClient above), not reconstructed per game -- resetState() calls each
     // one's reset() instead.
-    private GoldenGnomePresentation goldenGnomePresentation;
-    private CeremonyPresentation ceremonyPresentation;
-    private ItemPresentation itemPresentation;
-    private MinigamePresentation minigamePresentation;
-    private JadPresentation jadPresentation;
-    private WiseOldManPresentation wiseOldManPresentation;
-    private ItemShopPresentation itemShopPresentation;
-    private ChanceSpacePresentation chanceSpacePresentation;
+    public GoldenGnomePresentation goldenGnomePresentation;
+    public CeremonyPresentation ceremonyPresentation;
+    public ItemPresentation itemPresentation;
+    public MinigamePresentation minigamePresentation;
+    public JadPresentation jadPresentation;
+    public WiseOldManPresentation wiseOldManPresentation;
+    public ItemShopPresentation itemShopPresentation;
+    public ChanceSpacePresentation chanceSpacePresentation;
     // Neither of these two is a "Presentation" -- both own real interactive behavior (building
     // RuneLite menu entries, issuing mark/unmark-tiles requests; making create/join/session API
     // calls) rather than cosmetic banner/timing state. Same constructed-once-in-startUp/
     // reset()-via-resetState() convention as the presenters above.
-    private CourseBuilder courseBuilder;
-    private SessionManager sessionManager;
+    public CourseBuilder courseBuilder;
+    public SessionManager sessionManager;
     private RunePartyPanel panel;
     private NavigationButton navButton;
     private RunePartyMapOverlay mapOverlay;
     // Toggled by the panel's "Show Map"/"Hide Map" button (see toggleMap) -- read by
     // RunePartyMapOverlay#render (whether to draw at all) and AnnouncementOverlay#render (which
     // suppresses every banner/announcement while this is true, see that class's own doc).
-    private volatile boolean mapShowing = false;
+    public volatile boolean mapShowing = false;
 
     // Server-wide, not game-scoped -- fetched once at startup (see loadTileTypeCatalog) rather
     // than per-game like the roster, since the tiles/ registry it mirrors never changes at
     // runtime. Empty until the fetch completes (or forever, if it fails) -- every consumer
     // (TileOverlay, RunePartyMapOverlay) already falls back to a default color/label on a miss.
-    private volatile Map<String, ApiClient.TileTypeOut> tileTypeCatalog = new LinkedHashMap<>();
+    public volatile Map<String, ApiClient.TileTypeOut> tileTypeCatalog = new LinkedHashMap<>();
 
     public final ExecutorService executor = Executors.newSingleThreadExecutor(r ->
     {
@@ -1203,7 +1208,7 @@ public class RunePartyPlugin extends Plugin
      * ever needs to touch this one field, not every downstream announcement. Never moves backward:
      * an effect that lands while another is still settling extends the gate rather than shortening
      * it. */
-    private volatile long turnEffectGateUntil = 0;
+    public volatile long turnEffectGateUntil = 0;
 
     public volatile GamePhase phase = GamePhase.DISCONNECTED;
 
@@ -1221,7 +1226,7 @@ public class RunePartyPlugin extends Plugin
     // ---- turn engine ----
     public volatile String currentTurnRsn = null;
     public volatile Integer lastDiceRoll = null;
-    private volatile boolean pendingRoll = false;
+    public volatile boolean pendingRoll = false;
     // Guards the Spin-emote roll trigger against double-submitting while a roll request is in
     // flight but the server's DICE_ROLLED echo (which flips pendingRoll) hasn't landed yet -- see
     // onAnimationChanged and rollDice().
@@ -1247,7 +1252,7 @@ public class RunePartyPlugin extends Plugin
     // Candidate destination tiles for the current roll -- more than one when the roll's path
     // crosses a fork (see TileOverlay#renderTargetArrow, which draws one arrow per candidate).
     // Never null, only ever empty.
-    private volatile List<Integer> pendingTargetIndices = Collections.emptyList();
+    public volatile List<Integer> pendingTargetIndices = Collections.emptyList();
     // The wider "everywhere this roll passes within reach of" set (see DICE_ROLLED's own
     // reachableIndices field and _reachable_within's doc) -- at most `value` steps out, not just
     // exactly `value` like pendingTargetIndices. Used to gate TileOverlay#renderGoldenGnomePurchaseArrow
@@ -1255,7 +1260,7 @@ public class RunePartyPlugin extends Plugin
     // a visual hint, since the real "does this actually trigger an offer" decision is made
     // authoritatively server-side once confirm_arrival reports where the player actually walked
     // (see confirm_arrival's own _route_crosses_golden_gnome). Never null, only ever empty.
-    private volatile List<Integer> pendingReachableIndices = Collections.emptyList();
+    public volatile List<Integer> pendingReachableIndices = Collections.emptyList();
     private volatile boolean arrivalSubmitted = false; // guards confirm-arrival from firing every tick while the echo is in flight
     // Guards confirmHomeTeleportArrival the same way arrivalSubmitted guards confirmArrival --
     // see onGameTick's own Home Teleport check, which is independent of pendingRoll (see that
@@ -1273,8 +1278,8 @@ public class RunePartyPlugin extends Plugin
     // MINIGAME_ENDED too in case a round ends abnormally (host force-end) before the local
     // 30-second timer would have fired the submission itself. ----
     private volatile boolean fishingCatchSubmitted = false;
-    private int shrimpCount = 0;
-    private int anchovyCount = 0;
+    public int shrimpCount = 0;
+    public int anchovyCount = 0;
     // ---- Click, Click, Click (entirely client-local until the one final submission -- clicks are
     // never reported per-click). Every left-click on bare ground while this mini-game is playable
     // records that WorldPoint here (see onMenuEntryAdded's own Click, Click, Click branch /
@@ -1303,19 +1308,19 @@ public class RunePartyPlugin extends Plugin
     // Real state, applied catch-up or not: whether the current turn's player has already spent
     // their one-item-per-turn allowance -- reset on every TURN_STARTED, set by ITEM_USED. Mirrors
     // the server's own itemUsedThisTurn.
-    private volatile boolean itemUsedThisTurn = false;
+    public volatile boolean itemUsedThisTurn = false;
     // Non-null while a requires_placement item (see Item#requiresPlacement) is armed -- set by
     // beginItemPlacement, cleared by cancelItemPlacement or a successful placement. Client-local
     // only: the server never hears about this until the actual place-coin-trap call goes out, so
     // there's no "used but not yet placed" state to reconcile if the player backs out. See
     // getItemPlacementCandidates for the two tiles this arms "Place <item>" on.
-    private volatile String itemPlacementKey = null;
+    public volatile String itemPlacementKey = null;
     // Non-null while a requires_target item (see Item#requiresTarget) is armed -- set by
     // beginItemTargeting, cleared by cancelItemTargeting or a successful confirmItemTargetOn.
     // Same client-local-only shape as itemPlacementKey (see that field's own doc), just confirmed
     // by right-clicking another player's in-world model instead of a candidate tile -- see
     // addItemTargetMenuEntry.
-    private volatile String itemTargetKey = null;
+    public volatile String itemTargetKey = null;
     // Recomputed once per game tick from onGameTick (the client thread) -- see
     // isStandingOnTrackedPosition, whose Player#getWorldLocation() call asserts it's never invoked
     // off the client thread. isLocalPlayerReadyToRoll() reads this cached copy instead of calling
@@ -1336,8 +1341,8 @@ public class RunePartyPlugin extends Plugin
     // the only writers). boardViewSavedPitch/Yaw/Zoom are only ever read/written from inside a
     // clientThread.invoke callback (same thread every writer already runs on), so no volatile
     // needed on those three; boardViewActive itself is read from RunePartyPanel (Swing EDT) via
-    // isBoardViewActive(), hence volatile. ----
-    private volatile boolean boardViewActive = false;
+    // boardViewActive, hence volatile. ----
+    public volatile boolean boardViewActive = false;
     private int boardViewSavedPitch;
     private int boardViewSavedYaw;
     private int boardViewSavedZoom;
@@ -1348,7 +1353,7 @@ public class RunePartyPlugin extends Plugin
     // Host-set at start (see GAME_STARTED's maxRounds) and incremented once per completed round
     // (see MINIGAME_ENDED) -- together these are what StatsOverlay's "ROUND x/y" line reads via
     // getCurrentRound/getMaxRounds. 0 until GAME_STARTED actually lands.
-    private volatile int maxRounds = 0;
+    public volatile int maxRounds = 0;
     private volatile int completedRounds = 0;
 
     // Every player's current board position (pathIndex), keyed by lowercase rsn -- mirrors the
@@ -1359,14 +1364,6 @@ public class RunePartyPlugin extends Plugin
     // is on pathIndex 0 (START), same default the server uses. See TileOverlay#
     // renderReturnToPositionArrow, which is what actually uses this to gate re-rolling.
     private final Map<String, Integer> playerPositions = new ConcurrentHashMap<>();
-
-    // Host-placed arena spawn point per mini-game key (see CourseBuilder's own placement-mode
-    // fields), mirroring the server's own state["minigameSpawnPoints"] -- real, durable state
-    // (folded unconditionally, catch-up or not), persists for the whole game the same way the real
-    // course tiles do. A key with no entry here just uses the default bounding-box-center
-    // placement -- see TileOverlay#renderMinigameSpawnPlacementPreview, the only reader that cares
-    // whether a given key already has one set, and RunePartyPanel's own minigame-placement section.
-    private final Map<String, WorldPoint> minigameSpawnPoints = new ConcurrentHashMap<>();
 
     // ---- pre-game gathering (GAME_STARTED fired, but currentTurnRsn still null -- see confirmStart) ----
     private volatile boolean startConfirmSubmitted = false; // guards confirm-start firing every tick while the echo is in flight
@@ -1482,13 +1479,13 @@ public class RunePartyPlugin extends Plugin
     }
 
     // ---- dice roll popup (client-side timer -- see PlayerOverlay#drawDiceRoll) ----
-    private volatile String diceRollRsn = null;
-    private volatile int diceRollValue = 0;
+    public volatile String diceRollRsn = null;
+    public volatile int diceRollValue = 0;
     // How much of diceRollValue came from a banked item bonus (see DICE_ROLLED's "bonus" field) --
     // 0 for a plain roll, in which case AnnouncementOverlay#renderDiceRoll's timeline is unchanged.
-    private volatile int diceRollBonus = 0;
-    private volatile long diceRollStart = 0;
-    private volatile long diceRollUntil = 0;
+    public volatile int diceRollBonus = 0;
+    public volatile long diceRollStart = 0;
+    public volatile long diceRollUntil = 0;
 
     @Override
     protected void startUp()
@@ -1544,7 +1541,8 @@ public class RunePartyPlugin extends Plugin
         crabRaveHudOverlay = new CrabRaveHudOverlay(this);
         overlayManager.add(crabRaveHudOverlay);
 
-        wiseOldManNpcOverlay = new WiseOldManNpcOverlay(client, this);
+        wiseOldManNpcOverlay = new InteriorNpcOverlay(client, this, this::findWiseOldManTilePoints,
+            WISE_OLD_MAN_NPC_ID, WISE_OLD_MAN_IDLE_ANIMATION_ID, WISE_OLD_MAN_RECOLOR_FIND, WISE_OLD_MAN_RECOLOR_REPLACE);
         overlayManager.add(wiseOldManNpcOverlay);
 
         gnomeNpcOverlay = new GnomeNpcOverlay(client, this);
@@ -1554,7 +1552,8 @@ public class RunePartyPlugin extends Plugin
         overlayManager.add(wiseOldManDialogueOverlay);
         wiseOldManDialogueOverlay.register();
 
-        itemShopNpcOverlay = new ItemShopNpcOverlay(client, this);
+        itemShopNpcOverlay = new InteriorNpcOverlay(client, this, this::findItemShopTilePoints,
+            ITEM_SHOP_NPC_ID, ITEM_SHOP_NPC_IDLE_ANIMATION_ID, ITEM_SHOP_RECOLOR_FIND, ITEM_SHOP_RECOLOR_REPLACE);
         overlayManager.add(itemShopNpcOverlay);
 
         itemShopDialogueOverlay = new ItemShopDialogueOverlay(client, this, mouseManager, spriteManager, rosterReducer);
@@ -1615,27 +1614,6 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
-    /** Dev Mode gates panel VISIBILITY (see isDevModeEnabled's own doc), which -- unlike every
-     * other config boolean here, each read live by some overlay's own render() every frame -- is
-     * only ever recomputed inside RunePartyPanel#refresh(). Without this, flipping Dev Mode in
-     * RuneLite's own config panel mid-session would only take visible effect whenever some
-     * unrelated event happened to trigger the next refresh(), not immediately. Also cancels
-     * "Build Custom Course"/"Place Minigame" mode the instant Dev Mode turns off, so a host can't
-     * get stuck mid-placement with no panel button left to cancel from -- doesn't touch
-     * coursePlacementMode, since placing an already-finished course stays available regardless of
-     * Dev Mode. */
-    @Subscribe
-    public void onConfigChanged(ConfigChanged event)
-    {
-        if (!"runeparty".equals(event.getGroup())) return;
-        if (!isDevModeEnabled())
-        {
-            courseBuilder.exitCustomCourseBuildMode();
-            courseBuilder.cancelMinigameSpawnPlacementMode();
-        }
-        refreshPanel();
-    }
-
     @Override
     protected void shutDown()
     {
@@ -1643,7 +1621,7 @@ public class RunePartyPlugin extends Plugin
         if (eventSocket != null) eventSocket.shutdown();
         executor.shutdownNow();
         uiTimerExec.shutdownNow();
-        if (tileOverlay != null) { tileOverlay.clearGoldenGnomeModels(); tileOverlay.clearCoinRushModels(); tileOverlay.clearSandwichItemModels(); tileOverlay.clearPondModels(); tileOverlay.clearTableModels(); overlayManager.remove(tileOverlay); }
+        if (tileOverlay != null) { tileOverlay.clearGoldenGnomeModels(); tileOverlay.clearCoinRushModels(); tileOverlay.clearSandwichItemModels(); tileOverlay.clearPondTableModels(); overlayManager.remove(tileOverlay); }
         if (statsOverlay != null) overlayManager.remove(statsOverlay);
         if (coinRushScoreboardOverlay != null) overlayManager.remove(coinRushScoreboardOverlay);
         if (playerOverlay != null) overlayManager.remove(playerOverlay);
@@ -1675,7 +1653,7 @@ public class RunePartyPlugin extends Plugin
     }
 
     /** Flips whether RunePartyMapOverlay draws its full-screen course map -- see RunePartyPanel's
-     * "Show Map"/"Hide Map" button (that label swap is refresh()'s own job, reading isMapShowing()
+     * "Show Map"/"Hide Map" button (that label swap is refresh()'s own job, reading mapShowing
      * back), the only caller. Nothing to lazily create/dispose of anymore -- unlike the Swing
      * dialog this replaced, the overlay's already registered for the plugin's whole lifetime (see
      * startUp()) and simply skips drawing while mapShowing is false, same as every other overlay's
@@ -1684,11 +1662,6 @@ public class RunePartyPlugin extends Plugin
     {
         mapShowing = !mapShowing;
         refreshPanel();
-    }
-
-    public boolean isMapShowing()
-    {
-        return mapShowing;
     }
 
     /** Toggles between the normal player-driven camera and a steep, near-straight-down "board
@@ -1759,8 +1732,6 @@ public class RunePartyPlugin extends Plugin
         client.setVarcIntValue(VARC_CAMERA_ZOOM, boardViewSavedZoom);
     }
 
-    public boolean isBoardViewActive() { return boardViewActive; }
-
     /** The local player's own RSN, or null if unresolvable -- same lookup localRsn() already does
      * for every action method here, just exposed for RunePartyMapOverlay to tell "you" apart from
      * everyone else on the map. */
@@ -1828,24 +1799,40 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
-    // Delegating facade -- SessionManager owns the actual state/logic. Every name/signature below
-    // is unchanged, so RunePartyPanel doesn't need to change.
-    public void createGame() { sessionManager.createGame(); }
-    public void createGameFromHardcodedCourse(HardcodedCourse course) { sessionManager.createGameFromHardcodedCourse(course); }
-    public void joinGame(String code) { sessionManager.joinGame(code); }
-    public void startGame(int maxRounds) { sessionManager.startGame(maxRounds); }
-    /** Host-only: ends the game for everyone, distinct from leaveGame() which only removes the
-     * caller. The resulting GAME_ENDED event (see handleEvent) is what actually flips phase to
-     * ENDED for every connected client, this call and leaveGame() both just request it. */
-    public void endGame() { sessionManager.endGame(); }
+    /** The three values nearly every player-action method below needs before it can submit
+     * anything -- see requireLocalSession, the only way to get one. Plain final fields, not a
+     * record: every call site reads s.self/s.gid/s.token directly. */
+    private static final class LocalSession
+    {
+        final String self;
+        final String gid;
+        final String token;
+
+        LocalSession(String self, String gid, String token)
+        {
+            this.self = self;
+            this.gid = gid;
+            this.token = token;
+        }
+    }
+
+    /** Resolves the local player's rsn plus the current game id/session token, or null if any one
+     * of the three isn't available yet (not actually in a live game). Was 4 hand-copied lines at
+     * 18 call sites below; now one call plus a null check. */
+    private LocalSession requireLocalSession()
+    {
+        String self = localRsn();
+        String gid = gameId;
+        String token = playerToken;
+        if (self == null || gid == null || token == null) return null;
+        return new LocalSession(self, gid, token);
+    }
 
     public void rollDice()
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
-        if (!self.equalsIgnoreCase(currentTurnRsn) || pendingRoll || rollRequestSubmitted) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
+        if (!s.self.equalsIgnoreCase(currentTurnRsn) || pendingRoll || rollRequestSubmitted) return;
 
         // Rolling abandons any still-armed item placement/targeting (see beginItemPlacement/
         // cancelItemPlacement and beginItemTargeting/cancelItemTargeting) -- the player chose to
@@ -1861,7 +1848,7 @@ public class RunePartyPlugin extends Plugin
         }
 
         rollRequestSubmitted = true;
-        submitAction("Roll dice", () -> apiClient.rollDice(gid, self, token), e ->
+        submitAction("Roll dice", () -> apiClient.rollDice(s.gid, s.self, s.token), e ->
         {
             rollRequestSubmitted = false; // let a retry (another Spin) through
             addChatMessage("Failed to roll dice: " + e.getMessage());
@@ -1872,12 +1859,10 @@ public class RunePartyPlugin extends Plugin
      * the local player's position matches the pending destination -- see checkPendingArrival(). */
     private void confirmArrival(WorldPoint pos)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
-        submitAction("Confirm arrival", () -> apiClient.confirmArrival(gid, self, token, pos.getX(), pos.getY(), pos.getPlane()), e ->
+        submitAction("Confirm arrival", () -> apiClient.confirmArrival(s.gid, s.self, s.token, pos.getX(), pos.getY(), pos.getPlane()), e ->
         {
             addChatMessage("Failed to confirm arrival: " + e.getMessage());
             // A definitive 4xx (e.g. 409 "No roll is pending") means the server has already
@@ -1903,15 +1888,13 @@ public class RunePartyPlugin extends Plugin
      * a hung round. */
     private void submitFishingCatch()
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
+        LocalSession s = requireLocalSession();
         final int shrimp = shrimpCount;
         final int anchovies = anchovyCount;
-        if (self == null || gid == null || token == null) return;
+        if (s == null) return;
 
         submitAction("Submit fishing catch",
-            () -> apiClient.submitFishingCatch(gid, self, token, anchovies, shrimp),
+            () -> apiClient.submitFishingCatch(s.gid, s.self, s.token, anchovies, shrimp),
             e -> addChatMessage("Failed to submit your fishing catch: " + e.getMessage()));
     }
 
@@ -1923,13 +1906,11 @@ public class RunePartyPlugin extends Plugin
      * staying true blocks a tick-every-retry spam; only a genuine transient failure resets it. */
     private void confirmHomeTeleportArrival(WorldPoint pos)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
         submitAction("Confirm Home Teleport arrival",
-            () -> apiClient.confirmHomeTeleportArrival(gid, self, token, pos.getX(), pos.getY(), pos.getPlane()), e ->
+            () -> apiClient.confirmHomeTeleportArrival(s.gid, s.self, s.token, pos.getX(), pos.getY(), pos.getPlane()), e ->
         {
             addChatMessage("Failed to confirm Home Teleport arrival: " + e.getMessage());
             if (!(e instanceof ApiClient.ApiHttpException) || ((ApiClient.ApiHttpException) e).code >= 500)
@@ -1948,12 +1929,10 @@ public class RunePartyPlugin extends Plugin
      * the first TURN_STARTED itself. */
     private void confirmStart(WorldPoint pos)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
-        submitAction("Confirm start", () -> apiClient.confirmStart(gid, self, token, pos.getX(), pos.getY(), pos.getPlane()), e ->
+        submitAction("Confirm start", () -> apiClient.confirmStart(s.gid, s.self, s.token, pos.getX(), pos.getY(), pos.getPlane()), e ->
         {
             addChatMessage("Failed to confirm ready: " + e.getMessage());
             startConfirmSubmitted = false; // let the next tick retry
@@ -1969,12 +1948,10 @@ public class RunePartyPlugin extends Plugin
      * regardless. */
     private void bowToJad()
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
-        submitAction("Bow to Jad", () -> apiClient.bowToJad(gid, self, token),
+        submitAction("Bow to Jad", () -> apiClient.bowToJad(s.gid, s.self, s.token),
             e -> addChatMessage("Failed to bow to Jad: " + e.getMessage()));
     }
 
@@ -1984,12 +1961,10 @@ public class RunePartyPlugin extends Plugin
      * PLAYER's made this same call. */
     private void confirmMinigameReady()
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
-        submitAction("Confirm mini-game ready", () -> apiClient.confirmMinigameReady(gid, self, token),
+        submitAction("Confirm mini-game ready", () -> apiClient.confirmMinigameReady(s.gid, s.self, s.token),
             e -> addChatMessage("Failed to confirm mini-game ready: " + e.getMessage()));
     }
 
@@ -2000,22 +1975,18 @@ public class RunePartyPlugin extends Plugin
      * network hiccup. */
     private void passHotPotato()
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
-        submitAction("Pass Hot Potato", () -> apiClient.passHotPotato(gid, self, token));
+        submitAction("Pass Hot Potato", () -> apiClient.passHotPotato(s.gid, s.self, s.token));
     }
 
     public void submitMinigameResult(int score)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
-        submitAction("Submit minigame result", () -> apiClient.submitMinigameResult(gid, self, token, score),
+        submitAction("Submit minigame result", () -> apiClient.submitMinigameResult(s.gid, s.self, s.token, score),
             e -> addChatMessage("Failed to submit mini-game result: " + e.getMessage()));
     }
 
@@ -2024,12 +1995,10 @@ public class RunePartyPlugin extends Plugin
      * use-item endpoint, so the player can still SPIN normally afterward. */
     public void useItem(String itemKey)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null || itemKey == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null || itemKey == null) return;
 
-        submitAction("Use item", () -> apiClient.useItem(gid, self, token, itemKey),
+        submitAction("Use item", () -> apiClient.useItem(s.gid, s.self, s.token, itemKey),
             e -> addChatMessage("Failed to use item: " + e.getMessage()));
     }
 
@@ -2039,7 +2008,7 @@ public class RunePartyPlugin extends Plugin
      * &lt;item&gt;" entry. Refuses silently rather than arming a placement that'd only 409 anyway. */
     public void beginItemPlacement(String itemKey)
     {
-        if (itemKey == null || !isLocalPlayerReadyToUseItem() || isItemUsedThisTurn()) return;
+        if (itemKey == null || !isLocalPlayerReadyToUseItem() || itemUsedThisTurn) return;
         if (!Items.get(itemKey).requiresPlacement()) return;
         itemPlacementKey = itemKey;
         refreshPanel();
@@ -2084,14 +2053,12 @@ public class RunePartyPlugin extends Plugin
      * player can start over via the panel if they want to retry). */
     private void placeCoinTrapAt(WorldPoint point)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
+        LocalSession s = requireLocalSession();
         itemPlacementKey = null;
         refreshPanel();
-        if (self == null || gid == null || token == null) return;
+        if (s == null) return;
 
-        submitAction("Place Coin Trap", () -> apiClient.placeCoinTrap(gid, self, token, point.getX(), point.getY(), point.getPlane()),
+        submitAction("Place Coin Trap", () -> apiClient.placeCoinTrap(s.gid, s.self, s.token, point.getX(), point.getY(), point.getPlane()),
             e -> addChatMessage("Failed to place Coin Trap: " + e.getMessage()));
     }
 
@@ -2101,7 +2068,7 @@ public class RunePartyPlugin extends Plugin
      * right-click-a-tile (see addItemTargetMenuEntry/confirmItemTargetOn). */
     public void beginItemTargeting(String itemKey)
     {
-        if (itemKey == null || !isLocalPlayerReadyToUseItem() || isItemUsedThisTurn()) return;
+        if (itemKey == null || !isLocalPlayerReadyToUseItem() || itemUsedThisTurn) return;
         if (!Items.get(itemKey).requiresTarget()) return;
         itemTargetKey = itemKey;
         refreshPanel();
@@ -2124,26 +2091,24 @@ public class RunePartyPlugin extends Plugin
      * fire-and-forget action method here already takes (see placeCoinTrapAt's own doc). */
     private void confirmItemTargetOn(String targetRsn)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
+        LocalSession s = requireLocalSession();
         final String itemKey = itemTargetKey;
         itemTargetKey = null;
         refreshPanel();
-        if (self == null || gid == null || token == null || itemKey == null) return;
+        if (s == null || itemKey == null) return;
 
-        submitAction("Use item on player", () -> apiClient.useItemOnPlayer(gid, self, token, itemKey, targetRsn),
+        submitAction("Use item on player", () -> apiClient.useItemOnPlayer(s.gid, s.self, s.token, itemKey, targetRsn),
             e -> addChatMessage("Failed to use " + Items.get(itemKey).getDisplayName() + " on " + targetRsn + ": " + e.getMessage()));
     }
 
-    public void leaveGame() { sessionManager.leaveGame(); }
+    
     /** Whether the turn order already has MAX_PLAYERS seats filled -- the client-side gate on
      * "Add to Game" (menu entry and roster popup both check this). The server doesn't currently
      * enforce this cap itself, so it's a UI guard rather than a real limit. */
-    public boolean isGameFull() { return sessionManager.isGameFull(); }
-    public void assignRole(String playerRsn, RunePartyRole role, Integer colorNumber) { sessionManager.assignRole(playerRsn, role, colorNumber); }
+    
+    
     /** Host-only kick, wired to the roster panel's "Remove Player" right-click entry. */
-    public void removePlayer(String playerRsn) { sessionManager.removePlayer(playerRsn); }
+    
 
     // -------------------------------------------------------------------------
     // Course building (host, LOBBY only) -- delegating facade, CourseBuilder owns the actual
@@ -2151,32 +2116,13 @@ public class RunePartyPlugin extends Plugin
     // need to change.
     // -------------------------------------------------------------------------
 
-    public void selectPreset(CoursePreset preset) { courseBuilder.selectPreset(preset); }
-    public void enterCoursePlacementMode() { courseBuilder.enterCoursePlacementMode(); }
+    
+    
     /** Unmarks every currently-committed course tile -- the host's "start over" button. */
-    public void clearCourse() { courseBuilder.clearCourse(); }
-    public boolean isCustomCourseBuildMode() { return courseBuilder.isCustomCourseBuildMode(); }
-    public void enterCustomCourseBuildMode() { courseBuilder.enterCustomCourseBuildMode(); }
-    public void exitCustomCourseBuildMode() { courseBuilder.exitCustomCourseBuildMode(); }
-    /** Built-in presets plus every locally-saved course -- see CourseBuilder#getAvailablePresets,
-     * the only reader besides RunePartyPanel's own presetDropdown. */
-    public List<CoursePreset> getAvailablePresets() { return courseBuilder.getAvailablePresets(); }
-    /** "Save Current Course" button's action -- see CourseBuilder#saveCurrentCourseAs's own doc. */
-    public File saveCurrentCourse(String name) { return courseBuilder.saveCurrentCourseAs(name); }
-    /** The world point of the tile currently armed via "Connect From" -- see
-     * TileOverlay#renderConnectFromIndicator, the only reader. */
-    public WorldPoint getCourseConnectFromPoint() { return courseBuilder.getCourseConnectFromPoint(); }
-
-    // ---- Mini-game spawn placement (host, LOBBY only) -- same delegating-facade shape as course
-    // building above, see CourseBuilder's own doc for why this lives there rather than a new class. ----
-    public boolean isMinigameSpawnPlacementMode() { return courseBuilder.isMinigameSpawnPlacementMode(); }
-    public String getMinigameSpawnPlacementKey() { return courseBuilder.getMinigameSpawnPlacementKey(); }
-    public void enterMinigameSpawnPlacementMode(String minigameKey) { courseBuilder.enterMinigameSpawnPlacementMode(minigameKey); }
-    public void cancelMinigameSpawnPlacementMode() { courseBuilder.cancelMinigameSpawnPlacementMode(); }
-    public void clearMinigameSpawnPoint(String minigameKey) { courseBuilder.clearMinigameSpawnPoint(minigameKey); }
-    /** This mini-game's own host-placed arena spawn point, or null if it's still using the default
-     * bounding-box-center placement -- see minigameSpawnPoints' own doc. */
-    public WorldPoint getMinigameSpawnPoint(String minigameKey) { return minigameSpawnPoints.get(minigameKey); }
+    
+    /** Built-in presets -- see CourseBuilder#getAvailablePresets, the only reader besides
+     * RunePartyPanel's own presetDropdown. */
+    
 
     // -------------------------------------------------------------------------
     // Board interaction helpers -- Golden Gnome purchase, Click Click Click tile clicks, Fishing
@@ -2289,14 +2235,14 @@ public class RunePartyPlugin extends Plugin
      * entry actually being clicked. */
     private void castMageArenaSpellAt(WorldPoint point)
     {
-        if (!isMageArenaActive() || !isLocalPlayerMageArenaMage()) return;
+        if (!minigamePresentation.isKeyActive(MAGE_ARENA_KEY) || !isLocalPlayerMageArenaMage()) return;
         String self = localRsn();
         if (self == null) return;
         minigamePresentation.mageArena().confirmCast(self, point);
     }
 
     /** Records one Click, Click, Click tile click -- called from the synthetic "Click!" menu entry
-     * (see addClickClickClickMenuEntry). Re-checks isClickClickClickActive()/
+     * (see addClickClickClickMenuEntry). Re-checks minigamePresentation.isKeyActive(CLICK_CLICK_CLICK_KEY)/
      * clickClickClickSubmitted here on top of that method's own gate, since the round could have
      * ended in the moment between the menu opening and this entry actually being clicked. A
      * repeat click on an already-recorded tile is a harmless no-op -- clickClickClickTiles is a
@@ -2304,7 +2250,7 @@ public class RunePartyPlugin extends Plugin
      * one. */
     private void registerClickClickClickTile(WorldPoint point)
     {
-        if (!isClickClickClickActive() || clickClickClickSubmitted) return;
+        if (!minigamePresentation.isKeyActive(CLICK_CLICK_CLICK_KEY) || clickClickClickSubmitted) return;
         clickClickClickTiles.add(point);
     }
 
@@ -2314,14 +2260,12 @@ public class RunePartyPlugin extends Plugin
      * uses. */
     private void submitClickClickClickResult()
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
+        LocalSession s = requireLocalSession();
         final int uniqueTiles = clickClickClickTiles.size();
-        if (self == null || gid == null || token == null) return;
+        if (s == null) return;
 
         submitAction("Submit Click, Click, Click result",
-            () -> apiClient.submitClickClickClickResult(gid, self, token, uniqueTiles),
+            () -> apiClient.submitClickClickClickResult(s.gid, s.self, s.token, uniqueTiles),
             e -> addChatMessage("Failed to submit your Click, Click, Click result: " + e.getMessage()));
     }
 
@@ -2345,7 +2289,7 @@ public class RunePartyPlugin extends Plugin
     @Subscribe
     public void onMenuOptionClicked(MenuOptionClicked event)
     {
-        if (phase != GamePhase.ACTIVE || !isBalloonPopActive() || !isMinigamePlayable()) return;
+        if (phase != GamePhase.ACTIVE || !minigamePresentation.isKeyActive(BALLOON_POP_KEY) || !isMinigamePlayable()) return;
         if (event.getMenuAction() != MenuAction.WALK) return;
 
         Player selfPlayer = client.getLocalPlayer();
@@ -2367,13 +2311,13 @@ public class RunePartyPlugin extends Plugin
     }
 
     /** Records one Balloon Pop click -- called from onMenuOptionClicked's own Balloon Pop branch.
-     * Re-checks isBalloonPopActive()/balloonPopPopped here on top of that method's own gate, since
+     * Re-checks minigamePresentation.isKeyActive(BALLOON_POP_KEY)/balloonPopPopped here on top of that method's own gate, since
      * the round could have ended in the moment between the click landing and this running. Every
      * 10th click reports a new growth level (1-9); the 100th pops the balloon outright instead --
      * see BalloonPopPresentation's own doc for why neither ever reports more often than that. */
     private void registerBalloonPopClick()
     {
-        if (!isBalloonPopActive() || balloonPopPopped) return;
+        if (!minigamePresentation.isKeyActive(BALLOON_POP_KEY) || balloonPopPopped) return;
 
         balloonPopLocalClicks++;
 
@@ -2399,13 +2343,11 @@ public class RunePartyPlugin extends Plugin
      * clients until the next one lands, not a hang. */
     private void submitBalloonPopGrowth(int level)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
         submitAction("Report Balloon Pop growth",
-            () -> apiClient.reportBalloonPopGrowth(gid, self, token, level),
+            () -> apiClient.reportBalloonPopGrowth(s.gid, s.self, s.token, level),
             e -> addChatMessage("Failed to report your Hot Click Balloon growth: " + e.getMessage()));
     }
 
@@ -2413,13 +2355,11 @@ public class RunePartyPlugin extends Plugin
      * per round, the instant registerBalloonPopClick's own local count reaches 100. */
     private void submitBalloonPopPop()
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
         submitAction("Report Balloon Pop pop",
-            () -> apiClient.reportBalloonPopPop(gid, self, token),
+            () -> apiClient.reportBalloonPopPop(s.gid, s.self, s.token),
             e -> addChatMessage("Failed to report your balloon popping: " + e.getMessage()));
     }
 
@@ -2478,7 +2418,7 @@ public class RunePartyPlugin extends Plugin
             .setOption(HARDCODED_COURSE_LAUNCHER_OPTION)
             .setTarget("")
             .setType(MenuAction.RUNELITE)
-            .onClick(me -> createGameFromHardcodedCourse(course));
+            .onClick(me -> sessionManager.createGameFromHardcodedCourse(course));
     }
 
     /** Every currently-marked tile matching {@code predicate}, in scan order -- the one shared scan
@@ -2556,7 +2496,7 @@ public class RunePartyPlugin extends Plugin
         return findTilesByType("REPEAT_AFTER_ME_TILE");
     }
 
-    /** Every currently-marked Wise Old Man tile -- see WiseOldManNpcOverlay, the only reader: a
+    /** Every currently-marked Wise Old Man tile -- see InteriorNpcOverlay, the only reader: a
      * real, host-placed course stop (unlike GoldenGnomeTile/CoinTrapTile), so unlike those two
      * there could be more than one on the same board. */
     public List<WorldPoint> findWiseOldManTilePoints()
@@ -2564,7 +2504,7 @@ public class RunePartyPlugin extends Plugin
         return findTilesByType("WISE_OLD_MAN_TILE");
     }
 
-    /** Every currently-marked Item Shop tile -- see ItemShopNpcOverlay, the only caller. */
+    /** Every currently-marked Item Shop tile -- see InteriorNpcOverlay, the only caller. */
     public List<WorldPoint> findItemShopTilePoints()
     {
         return findTilesByType("ITEM_SHOP_TILE");
@@ -2580,7 +2520,7 @@ public class RunePartyPlugin extends Plugin
     private long interiorNpcSpawnPointCacheRevision = -1;
 
     /** Where a purely-decorative NPC that "stands beside" a real course tile (Wise Old Man, the
-     * Item Shop keeper -- see WiseOldManNpcOverlay/ItemShopNpcOverlay, the only callers) should
+     * Item Shop keeper -- see InteriorNpcOverlay, the only caller) should
      * spawn -- one tile off to whichever side of the tile's own direction of travel sits closer to
      * the whole course's own rough center, so the NPC reads as standing inside the loop looking out
      * at a player walking past, regardless of which edge of the loop (or which winding direction)
@@ -2840,12 +2780,10 @@ public class RunePartyPlugin extends Plugin
      * auto-declines on the finder's behalf regardless. */
     private void respondGoldenGnomeOffer(boolean accept)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
-        submitAction("Respond to Golden Gnome offer", () -> apiClient.respondGoldenGnomeOffer(gid, self, token, accept),
+        submitAction("Respond to Golden Gnome offer", () -> apiClient.respondGoldenGnomeOffer(s.gid, s.self, s.token, accept),
             e -> addChatMessage("Failed to respond to Golden Gnome offer: " + e.getMessage()));
     }
 
@@ -2877,14 +2815,14 @@ public class RunePartyPlugin extends Plugin
         // Runs independently of the turn engine below -- a Coin Rush round has no "whose turn is
         // it" at all, every seated player can be racing for a spawn at once, so this can't share
         // the pendingRoll-gated checks the rest of onGameTick uses.
-        if (isCoinRushActive() && isMinigamePlayable())
+        if (minigamePresentation.isKeyActive(COIN_RUSH_KEY) && isMinigamePlayable())
         {
             minigamePresentation.coinRush().checkCollection(selfPlayer);
         }
 
         // Same reasoning as the Coin Rush check just above -- Sandwich Rush also has no "whose
         // turn is it," every seated player can be racing for the same ingredient at once.
-        if (isSandwichRushActive() && isMinigamePlayable())
+        if (minigamePresentation.isKeyActive(SANDWICH_RUSH_KEY) && isMinigamePlayable())
         {
             minigamePresentation.sandwichRush().checkCollection(selfPlayer);
         }
@@ -2895,9 +2833,9 @@ public class RunePartyPlugin extends Plugin
         // just watches the local 30-second timer (anchored to MINIGAME_ROUND_BEGIN) and fires the
         // single submission once it elapses, guarded by fishingCatchSubmitted so it can only ever
         // fire once per round.
-        if (isFishingContestActive() && !fishingCatchSubmitted)
+        if (minigamePresentation.isKeyActive(FISHING_CONTEST_KEY) && !fishingCatchSubmitted)
         {
-            long endsAt = getFishingContestEndsAt();
+            long endsAt = minigamePresentation.fishingContest().getEndsAt();
             if (endsAt != 0 && System.currentTimeMillis() >= endsAt)
             {
                 fishingCatchSubmitted = true;
@@ -2909,9 +2847,9 @@ public class RunePartyPlugin extends Plugin
         // 30-second timer (anchored to MINIGAME_ROUND_BEGIN) and fires the single submission once
         // it elapses -- individual clicks are recorded from the synthetic "Click!" menu entry
         // instead (see registerClickClickClickTile).
-        if (isClickClickClickActive() && !clickClickClickSubmitted)
+        if (minigamePresentation.isKeyActive(CLICK_CLICK_CLICK_KEY) && !clickClickClickSubmitted)
         {
-            long endsAt = getClickClickClickEndsAt();
+            long endsAt = minigamePresentation.clickClickClick().getEndsAt();
             if (endsAt != 0 && System.currentTimeMillis() >= endsAt)
             {
                 clickClickClickSubmitted = true;
@@ -2923,7 +2861,7 @@ public class RunePartyPlugin extends Plugin
         // cycling, local scoring, and one-shot end-of-round submission all live inside this one
         // call now (see DanceDanceRuneScapePresentation#onTick), not scattered inline the way the
         // two client-local mini-games above still are.
-        if (isDanceDanceRuneScapeActive())
+        if (minigamePresentation.isKeyActive(DANCE_DANCE_RUNESCAPE_KEY))
         {
             minigamePresentation.danceDanceRuneScape().onTick(selfPlayer);
         }
@@ -2933,7 +2871,7 @@ public class RunePartyPlugin extends Plugin
         // HotPotatoPresentation#onTick), same "replace the continuous position-ping heartbeat with a
         // self-check against already-broadcast state" shape Brutus Attack/Arena's own onTick calls
         // already established.
-        if (isHotPotatoActive())
+        if (minigamePresentation.isKeyActive(HOT_POTATO_KEY))
         {
             minigamePresentation.hotPotato().onTick(selfPlayer);
         }
@@ -2942,7 +2880,7 @@ public class RunePartyPlugin extends Plugin
         // tracking and one-shot finish report both live inside this one call (see
         // RainbowRushPresentation#onTick), same shape as Dance, Dance, RuneScape's own onTick just
         // above.
-        if (isRainbowRushActive())
+        if (minigamePresentation.isKeyActive(RAINBOW_RUSH_KEY))
         {
             minigamePresentation.rainbowRush().onTick(selfPlayer);
         }
@@ -2951,7 +2889,7 @@ public class RunePartyPlugin extends Plugin
         // clock and one-shot end-of-round submission both live inside this one call (see
         // RepeatAfterMePresentation#onTick); the actual per-spin scoring happens separately, from
         // onAnimationChanged's own EMOTE_DANCE_SPIN case, not from this per-tick call.
-        if (isRepeatAfterMeActive())
+        if (minigamePresentation.isKeyActive(REPEAT_AFTER_ME_KEY))
         {
             minigamePresentation.repeatAfterMe().onTick(selfPlayer);
         }
@@ -2960,7 +2898,7 @@ public class RunePartyPlugin extends Plugin
         // one-shot end-of-round submission both live inside this one call (see
         // CrabRavePresentation#onTick); the actual per-dance scoring happens separately, from
         // onAnimationChanged's own EMOTE_DANCE case, not from this per-tick call.
-        if (isCrabRaveActive())
+        if (minigamePresentation.isKeyActive(CRAB_RAVE_KEY))
         {
             minigamePresentation.crabRave().onTick(selfPlayer);
         }
@@ -2969,7 +2907,7 @@ public class RunePartyPlugin extends Plugin
         // confirm-brutus-arrival/confirm-brutus-dash reports both live inside this one call (see
         // BrutusAttackPresentation#onTick), replacing what a continuous position-ping mini-game
         // would otherwise have needed (see BRUTUS_ATTACK_KEY's own doc).
-        if (isBrutusAttackActive())
+        if (minigamePresentation.isKeyActive(BRUTUS_ATTACK_KEY))
         {
             minigamePresentation.brutusAttack().onTick(selfPlayer);
         }
@@ -2979,7 +2917,7 @@ public class RunePartyPlugin extends Plugin
         // (see ArenaPresentation#onTick), same "replace the continuous position-ping heartbeat with
         // a self-check against already-broadcast state" shape Brutus Attack's own onTick call just
         // above already established.
-        if (isArenaActive())
+        if (minigamePresentation.isKeyActive(ARENA_KEY))
         {
             minigamePresentation.arena().onTick(selfPlayer);
         }
@@ -2989,7 +2927,7 @@ public class RunePartyPlugin extends Plugin
         // self-check against the current active cast both live inside this one call (see
         // MageArenaPresentation#onTick); the Mage's own cast is a direct menu-click action, not
         // driven from here at all.
-        if (isMageArenaActive())
+        if (minigamePresentation.isKeyActive(MAGE_ARENA_KEY))
         {
             minigamePresentation.mageArena().onTick(selfPlayer);
         }
@@ -2999,7 +2937,7 @@ public class RunePartyPlugin extends Plugin
         // and unmatched-pair reveal timer all live inside this one call (see
         // RuneMatchPresentation#onTick); the actual per-flip scoring happens separately, from
         // onAnimationChanged's own EMOTE_DANCE_SPIN case, not from this per-tick call.
-        if (isRuneMatchActive())
+        if (minigamePresentation.isKeyActive(RUNE_MATCH_KEY))
         {
             minigamePresentation.runeMatch().onTick(selfPlayer);
         }
@@ -3008,7 +2946,7 @@ public class RunePartyPlugin extends Plugin
         // confirm-balloon-pop-arrival report lives inside this one call (see
         // BalloonPopPresentation#onTick); click counting/growth/pop reporting happens separately,
         // from the synthetic "Pop!" menu entry, not from this per-tick call.
-        if (isBalloonPopActive())
+        if (minigamePresentation.isKeyActive(BALLOON_POP_KEY))
         {
             minigamePresentation.balloonPop().onTick(selfPlayer);
         }
@@ -3024,7 +2962,7 @@ public class RunePartyPlugin extends Plugin
         // mini-game (along with Who's Your Jaddy just below) to move off the old generic
         // per-tick position heartbeat this codebase used to have (see DECISIONS.md's project-wide
         // call behind that move).
-        if (isTurfWarsActive())
+        if (minigamePresentation.isKeyActive(TURF_WARS_KEY))
         {
             minigamePresentation.turfWars().onTick(selfPlayer);
         }
@@ -3032,7 +2970,7 @@ public class RunePartyPlugin extends Plugin
         // Also independent of the turn engine below -- Who's Your Jaddy's own one-shot
         // report-jaddy-zone reports, fired every time the local player's own zone membership
         // actually changes, live inside this one call (see WhosYourJaddyPresentation#onTick).
-        if (isJaddyActive())
+        if (minigamePresentation.isKeyActive(JADDY_KEY))
         {
             minigamePresentation.jaddy().onTick(selfPlayer);
         }
@@ -3128,7 +3066,7 @@ public class RunePartyPlugin extends Plugin
         {
             addToGameMenuEntry(event);
             addItemTargetMenuEntry(event);
-            if (phase == GamePhase.ACTIVE && isMageArenaActive() && isMinigamePlayable() && isLocalPlayerMageArenaMage())
+            if (phase == GamePhase.ACTIVE && minigamePresentation.isKeyActive(MAGE_ARENA_KEY) && isMinigamePlayable() && isLocalPlayerMageArenaMage())
             {
                 addMageArenaShiftCastMenuEntry(event);
             }
@@ -3141,26 +3079,16 @@ public class RunePartyPlugin extends Plugin
             courseBuilder.addPresetMenuEntries();
             return;
         }
-        if (phase == GamePhase.LOBBY && isHost() && courseBuilder.isCustomCourseBuildMode())
-        {
-            courseBuilder.addCustomCourseBuildMenuEntries();
-            return;
-        }
-        if (phase == GamePhase.LOBBY && isHost() && courseBuilder.isMinigameSpawnPlacementMode())
-        {
-            courseBuilder.addMinigameSpawnMenuEntries();
-            return;
-        }
         if (phase == GamePhase.ACTIVE && itemPlacementKey != null)
         {
             addItemPlacementMenuEntries();
             return;
         }
-        if (phase == GamePhase.ACTIVE && isClickClickClickActive() && isMinigamePlayable())
+        if (phase == GamePhase.ACTIVE && minigamePresentation.isKeyActive(CLICK_CLICK_CLICK_KEY) && isMinigamePlayable())
         {
             addClickClickClickMenuEntry();
         }
-        if (phase == GamePhase.ACTIVE && isMageArenaActive() && isMinigamePlayable() && isLocalPlayerMageArenaMage())
+        if (phase == GamePhase.ACTIVE && minigamePresentation.isKeyActive(MAGE_ARENA_KEY) && isMinigamePlayable() && isLocalPlayerMageArenaMage())
         {
             addMageArenaCastMenuEntry();
         }
@@ -3321,7 +3249,7 @@ public class RunePartyPlugin extends Plugin
      * banner has actually had its chance to appear. currentTurnRsn itself is real state, set the
      * instant TURN_STARTED lands -- but the banner announcing it is cosmetic, deliberately delayed
      * behind turnEffectGateUntil so it doesn't stomp over e.g. the previous mini-game's rewards/
-     * round recap still showing. isCeremonyStarted() is checked here because currentTurnRsn is
+     * round recap still showing. ceremonyPresentation.isCeremonyStarted() is checked here because currentTurnRsn is
      * never cleared once the ceremony takes over at the end of the game (GamePhase.ACTIVE
      * deliberately stays true throughout it, see CeremonyPresentation's own doc) -- without this,
      * a stale "roll the dice" reminder for whoever had the last real turn would keep reappearing
@@ -3332,7 +3260,7 @@ public class RunePartyPlugin extends Plugin
      * and a direct Player#getWorldLocation() call here would crash off the client thread. */
     public boolean isLocalPlayerReadyToRoll()
     {
-        if (phase != GamePhase.ACTIVE || pendingRoll || rollRequestSubmitted || minigamePresentation.isActive() || isCeremonyStarted()) return false;
+        if (phase != GamePhase.ACTIVE || pendingRoll || rollRequestSubmitted || minigamePresentation.isActive() || ceremonyPresentation.isCeremonyStarted()) return false;
         if (System.currentTimeMillis() < turnEffectGateUntil) return false;
         if (goldenGnomePresentation.getOfferRsn() != null) return false;
 
@@ -3359,7 +3287,7 @@ public class RunePartyPlugin extends Plugin
      * drops that check entirely, the encounter gate has to be explicit instead. */
     public boolean isLocalPlayerReadyToUseItem()
     {
-        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || isCeremonyStarted()) return false;
+        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || ceremonyPresentation.isCeremonyStarted()) return false;
         if (jadPresentation.getEncounterRsn() != null || wiseOldManPresentation.getEncounterRsn() != null
             || itemShopPresentation.getEncounterRsn() != null || goldenGnomePresentation.getOfferRsn() != null) return false;
         if (System.currentTimeMillis() < turnEffectGateUntil) return false;
@@ -3380,7 +3308,7 @@ public class RunePartyPlugin extends Plugin
      * in edge cases, same tolerance every other cached-vs-live check in this file already accepts. */
     public boolean isLocalPlayerAwaitingReturnToPosition()
     {
-        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || isCeremonyStarted()) return false;
+        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || ceremonyPresentation.isCeremonyStarted()) return false;
         String self = localRsn();
         if (self == null || !self.equalsIgnoreCase(currentTurnRsn)) return false;
         return !standingOnTrackedPositionCached;
@@ -3395,7 +3323,7 @@ public class RunePartyPlugin extends Plugin
      * and nobody's rolled" is the whole story either way. */
     public boolean isAwaitingSomeonesRoll()
     {
-        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || isCeremonyStarted()) return false;
+        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || ceremonyPresentation.isCeremonyStarted()) return false;
         if (System.currentTimeMillis() < turnEffectGateUntil) return false;
         return currentTurnRsn != null;
     }
@@ -3511,16 +3439,16 @@ public class RunePartyPlugin extends Plugin
     }
 
     /** Whether a Headbang emote right now would actually roll a Fishing Contest catch -- requires
-     * isMinigamePlayable() (not just isFishingContestActive()), same "the ready-check has to
+     * isMinigamePlayable() (not just minigamePresentation.isKeyActive(FISHING_CONTEST_KEY)), same "the ready-check has to
      * actually finish first" gate every other in-round action here respects (see
      * isLocalPlayerCrabRaveDanceEligible/isLocalPlayerHoldingHotPotato's own doc). This was the one
-     * action in the file that had been checking isFishingContestActive() alone, letting a catch
+     * action in the file that had been checking minigamePresentation.isKeyActive(FISHING_CONTEST_KEY) alone, letting a catch
      * count during the ready-check screen or the "3...2...1..." countdown, before BEGIN! ever
      * showed. See onAnimationChanged's own EMOTE_DANCE_HEADBANG case and performFishingCatchRoll,
      * its two callers. */
     public boolean isLocalPlayerFishingContestEligible()
     {
-        return isFishingContestActive() && isMinigamePlayable() && !fishingCatchSubmitted;
+        return minigamePresentation.isKeyActive(FISHING_CONTEST_KEY) && isMinigamePlayable() && !fishingCatchSubmitted;
     }
 
     /** Whether {@code localPlayer} is standing on {@code rsn}'s tracked board position -- see
@@ -3573,7 +3501,7 @@ public class RunePartyPlugin extends Plugin
         String targetRsn = Text.toJagexName(target.getName());
         if (targetRsn == null || targetRsn.isBlank()) return;
         if (rosterReducer.getRole(targetRsn) == RunePartyRole.PLAYER) return;
-        if (isGameFull()) return;
+        if (sessionManager.isGameFull()) return;
 
         MenuEntry parent = client.createMenuEntry(-1)
             .setOption("Add to Game")
@@ -3588,7 +3516,7 @@ public class RunePartyPlugin extends Plugin
                 .setOption(color.menuTag(color.displayName))
                 .setTarget("")
                 .setType(MenuAction.RUNELITE)
-                .onClick(me -> assignRole(targetRsn, RunePartyRole.PLAYER, color.seatNumber()));
+                .onClick(me -> sessionManager.assignRole(targetRsn, RunePartyRole.PLAYER, color.seatNumber()));
         }
     }
 
@@ -3626,11 +3554,6 @@ public class RunePartyPlugin extends Plugin
             .onClick(me -> confirmItemTargetOn(targetRsn));
     }
 
-    public Map<String, ApiClient.TileTypeOut> getTileTypeCatalog()
-    {
-        return tileTypeCatalog;
-    }
-
     /** Fetches the tile-type color/label/description catalog once, at startup -- see
      * ApiClient#fetchTileTypes's own doc for why this doesn't need re-fetching per game the way
      * syncRosterSnapshot does. Leaves tileTypeCatalog empty on failure rather than retrying; every
@@ -3656,7 +3579,6 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
-
     /** Pushes turnEffectGateUntil forward to at least {@code untilTimestamp} -- called by whatever
      * just started a turn-effect visual with its own on-screen duration (currently only the
      * COINS_CHANGED handler, passing coinPopupUntil). A future tile effect with its own timed
@@ -3674,10 +3596,6 @@ public class RunePartyPlugin extends Plugin
      * long as a Jad encounter's genuinely pending, not one preset window), so it checks this
      * directly every frame instead of going through scheduleAfterTurnEffects. Also read by
      * models/JadEncounter#spawn for the same reason, one package over. */
-    public long getTurnEffectGateUntil()
-    {
-        return turnEffectGateUntil;
-    }
 
     /** Appends a new CoinPopup to {@code rsn}'s own queue (see coinPopups's own doc for why this
      * is a queue, not a single slot) and extends the turn-effect gate to match. Shared by
@@ -4046,27 +3964,6 @@ public class RunePartyPlugin extends Plugin
                 break;
             }
 
-            case Events.MINIGAME_SPAWN_POINT_SET:
-            {
-                // Real state, applied catch-up or not -- see minigameSpawnPoints' own doc.
-                String spawnKey = Json.requiredStr(e.payload, type, "minigameKey");
-                Integer spawnX = Json.requiredInt(e.payload, type, "x");
-                Integer spawnY = Json.requiredInt(e.payload, type, "y");
-                Integer spawnPlane = Json.requiredInt(e.payload, type, "plane");
-                if (spawnKey != null && spawnX != null && spawnY != null && spawnPlane != null)
-                {
-                    minigameSpawnPoints.put(spawnKey, new WorldPoint(spawnX, spawnY, spawnPlane));
-                }
-                break;
-            }
-
-            case Events.MINIGAME_SPAWN_POINT_CLEARED:
-            {
-                String spawnKey = Json.requiredStr(e.payload, type, "minigameKey");
-                if (spawnKey != null) minigameSpawnPoints.remove(spawnKey);
-                break;
-            }
-
             case Events.GOLDEN_GNOME_PURCHASED:
             {
                 goldenGnomePresentation.apply(e, catchingUp);
@@ -4158,6 +4055,7 @@ public class RunePartyPlugin extends Plugin
             case Events.ITEM_SHOP_PURCHASED:
             case Events.ITEM_SHOP_PURCHASE_FAILED:
             case Events.ITEM_SHOP_NO_AFFORDABLE_ITEMS:
+            case Events.ITEM_SHOP_NO_ROOM:
             case Events.ITEM_SHOP_DISMISSED:
             {
                 itemShopPresentation.apply(e, catchingUp);
@@ -4344,7 +4242,7 @@ public class RunePartyPlugin extends Plugin
                 // BalloonPopPresentation's own doc), so this is the last moment that level's still
                 // available to size the burst's own height against.
                 String winnerRsn = Json.requiredStr(e.payload, type, "player");
-                Integer winnerLevel = winnerRsn != null ? getBalloonPopGrowthLevelByPlayer().get(winnerRsn) : null;
+                Integer winnerLevel = winnerRsn != null ? minigamePresentation.balloonPop().getGrowthLevelByPlayer().get(winnerRsn) : null;
 
                 // minigamePresentation.apply folds the winner/growthLevelByPlayer removal itself
                 // unconditionally -- real state, same "fold now regardless of catch-up" shape every
@@ -4739,7 +4637,6 @@ public class RunePartyPlugin extends Plugin
         minigamePresentation.reset();
         maxRounds = 0; completedRounds = 0;
         playerPositions.clear();
-        minigameSpawnPoints.clear();
         startConfirmSubmitted = false;
         gameStartBanner.reset();
         ceremonyPresentation.reset();
@@ -4758,36 +4655,17 @@ public class RunePartyPlugin extends Plugin
     // -------------------------------------------------------------------------
     // Getters (consumed by TileOverlay now, PlayerOverlay/stats overlay/panel later)
     // -------------------------------------------------------------------------
-
-    public GamePhase getPhase() { return phase; }
-    public TileReducer getTileReducer() { return tileReducer; }
-    public RosterReducer getRosterReducer() { return rosterReducer; }
-    public String getGameId() { return gameId; }
-    public String getJoinCode() { return sessionManager.getJoinCode(); }
-    public String getHostRsn() { return sessionManager.getHostRsn(); }
+    
+    
     public boolean isHost() { return writeKey != null; }
-    /** Gates the "Build Custom Course"/"Save Current Course" authoring tools in Host Controls --
-     * see CourseBuilder's own class doc. Does NOT gate the preset dropdown/"Place"/"Clear Course",
-     * which stay available to every host regardless (picking and placing an already-finished
-     * course is an everyday action, not a dev-only one). */
-    public boolean isDevModeEnabled() { return config.devMode(); }
     /** True once this game has been permanently locked to a Standard Course -- see
      * standardCourseKey's own field doc. Course-building tools (RunePartyPanel's own
      * courseToolsPanel) stay hidden for the rest of this game's life once this flips true. */
     public boolean isStandardCourseLocked() { return standardCourseKey != null; }
-    public boolean isCoursePlacementMode() { return courseBuilder.isCoursePlacementMode(); }
-    public CoursePreset getSelectedPreset() { return courseBuilder.getSelectedPreset(); }
-    public int getPresetRotationSteps() { return courseBuilder.getPresetRotationSteps(); }
-    public String getCurrentTurnRsn() { return currentTurnRsn; }
-    public Integer getLastDiceRoll() { return lastDiceRoll; }
-    public boolean isPendingRoll() { return pendingRoll; }
-    public boolean isItemUsedThisTurn() { return itemUsedThisTurn; }
-    public List<Integer> getPendingTargetIndices() { return pendingTargetIndices; }
-    public List<Integer> getPendingReachableIndices() { return pendingReachableIndices; }
     // Delegating facade -- MinigamePresentation owns the actual state. Every name/signature below
     // is unchanged, so no external caller (AnnouncementOverlay, RunePartyPanel, StatsOverlay)
     // needs to change.
-    public boolean isMinigameActive() { return minigamePresentation.isActive(); }
+    
     /** The board tile (pathIndex) {@code rsn} is currently standing at, per the last PLAYER_MOVED
      * seen for them -- 0 (START) if they haven't moved yet this game. See TileOverlay#
      * renderReturnToPositionArrow, the only consumer. */
@@ -4797,19 +4675,19 @@ public class RunePartyPlugin extends Plugin
         Integer idx = playerPositions.get(rsn.toLowerCase(Locale.ROOT));
         return idx != null ? idx : 0;
     }
-    public String getMinigameInstructions() { return minigamePresentation.getInstructions(); }
-    public String getMinigameKey() { return minigamePresentation.getKey(); }
-    public String getMinigameDisplayName() { return minigamePresentation.getDisplayName(); }
-    public long getMinigameSpinnerStart() { return minigamePresentation.getMinigameSpinnerStart(); }
-    public long getMinigameSpinnerUntil() { return minigamePresentation.getMinigameSpinnerUntil(); }
-    public boolean isMinigameSpinnerSkippedForClient() { return minigamePresentation.isMinigameSpinnerSkippedForClient(); }
+    
+    
+    
+    
+    
+    
 
     /** Whether this client has actually seen the mini-game selection wheel settle on its result
      * yet (or skipped straight to "already known," via catch-up) -- the exact same instant
      * scheduleMinigameSpinner's own nested chat line already waits for, so the chosen mini-game's
      * name is never spoiled ahead of the wheel's own reveal. Any board-state change that's specific
      * to which mini-game got picked (e.g. Rainbow Rush recoloring the course, see TileOverlay)
-     * should gate on this rather than isMinigameActive()/isRainbowRushActive() alone -- those flip
+     * should gate on this rather than minigamePresentation.isActive()/minigamePresentation.isKeyActive(RAINBOW_RUSH_KEY) alone -- those flip
      * true the instant MINIGAME_STARTED lands, well before the wheel has actually spun to a stop. */
     public boolean isMinigameSelectionRevealed()
     {
@@ -4821,11 +4699,11 @@ public class RunePartyPlugin extends Plugin
 
     // Delegating facade -- ItemPresentation owns the actual state. Every name/signature below is
     // unchanged, so no external caller (AnnouncementOverlay, TileOverlay) needs to change.
-    public long getItemBannerUntil() { return itemPresentation.getItemBannerUntil(); }
-    public long getItemSpinnerStart() { return itemPresentation.getItemSpinnerStart(); }
-    public long getItemSpinnerUntil() { return itemPresentation.getItemSpinnerUntil(); }
-    public String getItemGrantRsn() { return itemPresentation.getItemGrantRsn(); }
-    public String getItemGrantKey() { return itemPresentation.getItemGrantKey(); }
+    
+    
+    
+    
+    
 
     /** Whether this client has actually seen the item wheel settle on the most recently granted
      * item yet -- same "don't spoil the reveal early" shape isMinigameSelectionRevealed() already
@@ -4835,31 +4713,31 @@ public class RunePartyPlugin extends Plugin
      * lands. True whenever there's nothing to wait on: no grant has happened yet, the most recent
      * one wasn't for the local player (nothing of theirs changed, so nothing to spoil), or this
      * client only caught up on a past grant (ItemPresentation#apply never arms the spinner at all
-     * during catch-up, so getItemSpinnerStart() stays 0 in that case). RunePartyPanel's own item
+     * during catch-up, so itemPresentation.getItemSpinnerStart() stays 0 in that case). RunePartyPanel's own item
      * list reads this to briefly conceal a freshly granted item rather than showing its "Use X"
      * button before the wheel's even revealed it. */
     public boolean isItemSelectionRevealed()
     {
-        String pendingRsn = getItemGrantRsn();
+        String pendingRsn = itemPresentation.getItemGrantRsn();
         String local = getLocalRsn();
         if (pendingRsn == null || local == null || !pendingRsn.equalsIgnoreCase(local)) return true;
-        long start = getItemSpinnerStart();
+        long start = itemPresentation.getItemSpinnerStart();
         if (start == 0) return true;
         return System.currentTimeMillis() - start >= ITEM_SPINNER_SPIN_PHASE_MS;
     }
-    public long getItemGrantDescriptionUntil() { return itemPresentation.getItemGrantDescriptionUntil(); }
-    public String getItemGrantDescriptionRsn() { return itemPresentation.getItemGrantDescriptionRsn(); }
-    public String getItemGrantDescriptionKey() { return itemPresentation.getItemGrantDescriptionKey(); }
-    public long getItemCapBlockedUntil() { return itemPresentation.getItemCapBlockedUntil(); }
-    public String getItemCapBlockedRsn() { return itemPresentation.getItemCapBlockedRsn(); }
-    public int getItemCapBlockedCap() { return itemPresentation.getItemCapBlockedCap(); }
-    public long getItemUsedAnnounceUntil() { return itemPresentation.getItemUsedAnnounceUntil(); }
-    public String getItemUsedAnnounceRsn() { return itemPresentation.getItemUsedAnnounceRsn(); }
-    public String getItemUsedAnnounceItemKey() { return itemPresentation.getItemUsedAnnounceItemKey(); }
-    public long getCoinTrapAnnounceUntil() { return itemPresentation.getCoinTrapAnnounceUntil(); }
-    public String getCoinTrapAnnounceRsn() { return itemPresentation.getCoinTrapAnnounceRsn(); }
-    public WorldPoint getCoinTrapTriggerPoint() { return itemPresentation.getCoinTrapTriggerPoint(); }
-    public long getCoinTrapTriggerUntil() { return itemPresentation.getCoinTrapTriggerUntil(); }
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
 
     /** Every currently-live Coin Rush spawn, keyed by the server's own spawn id -- see
      * TileOverlay#updateCoinRushModels, the only consumer. */
@@ -4867,10 +4745,10 @@ public class RunePartyPlugin extends Plugin
     /** This round's live Coin Rush tally, lowercase rsn -> coins collected so far -- see
      * StatsOverlay's live scoreboard, the only consumer. */
     public Map<String, Integer> getCoinRushScores() { return Collections.unmodifiableMap(minigamePresentation.coinRush().getScores()); }
-    public boolean isCoinRushActive() { return minigamePresentation.isKeyActive(COIN_RUSH_KEY); }
+    
     /** When the current Coin Rush round's own clock runs out -- 0 if no round is active yet or the
      * round hasn't actually become playable. */
-    public long getCoinRushEndsAt() { return minigamePresentation.coinRush().getEndsAt(); }
+    
 
     /** Every currently-live Sandwich Rush ingredient spawn, keyed by the server's own spawn id --
      * see models/SandwichItemModel, the only consumer. */
@@ -4879,124 +4757,117 @@ public class RunePartyPlugin extends Plugin
      * (see MinigamePresentation's own field doc) -- see SandwichRushHudOverlay, the only
      * consumer. */
     public Set<String> getSandwichHeld() { return Collections.unmodifiableSet(minigamePresentation.sandwichRush().getHeld()); }
-    public int getSandwichCount() { return minigamePresentation.sandwichRush().getCount(); }
-    public boolean isSandwichRushActive() { return minigamePresentation.isKeyActive(SANDWICH_RUSH_KEY); }
+    
+    
     /** When the current Sandwich Rush round's own clock runs out -- 0 if no round is active yet
      * or the round hasn't actually become playable. */
-    public long getSandwichRushEndsAt() { return minigamePresentation.sandwichRush().getEndsAt(); }
 
-    public boolean isFishingContestActive() { return minigamePresentation.isKeyActive(FISHING_CONTEST_KEY); }
+    
     /** When the current Fishing Contest round's own local catch-timer should stop -- 0 if no
      * round is active yet or the round hasn't actually become playable. */
-    public long getFishingContestEndsAt() { return minigamePresentation.fishingContest().getEndsAt(); }
+    
     /** This round's own local catch counts so far -- see FishingCatchOverlay, the only consumer.
      * Client-local only -- nobody but the local player ever sees these. */
-    public int getShrimpCount() { return shrimpCount; }
-    public int getAnchovyCount() { return anchovyCount; }
 
-    public boolean isClickClickClickActive() { return minigamePresentation.isKeyActive(CLICK_CLICK_CLICK_KEY); }
+    
     /** When the current Click, Click, Click round's own local click-timer should stop -- 0 if no
      * round is active yet or the round hasn't actually become playable. */
-    public long getClickClickClickEndsAt() { return minigamePresentation.clickClickClick().getEndsAt(); }
+    
     /** This round's own unique-tile-click count so far -- see ClickClickClickOverlay, the only
      * consumer. Client-local only -- nobody but the local player ever sees this. */
     public int getClickClickClickUniqueTileCount() { return clickClickClickTiles.size(); }
 
-    public boolean isHotPotatoActive() { return minigamePresentation.isKeyActive(HOT_POTATO_KEY); }
+    
     /** The current holder's rsn, or null before the round's own initial random assignment lands --
      * see HotPotatoOverlay and PlayerOverlay#drawToken, the two consumers. */
-    public String getHotPotatoHolder() { return minigamePresentation.hotPotato().getHolder(); }
+    
     /** When the current Hot Potato round's own clock runs out -- 0 if no round is active yet or the
      * round hasn't actually become playable. */
-    public long getHotPotatoEndsAt() { return minigamePresentation.hotPotato().getEndsAt(); }
+    
     /** Lowercase rsns eliminated for the rest of this Hot Potato round -- see PlayerOverlay#
      * drawToken, the only consumer. */
-    public Set<String> getHotPotatoEliminatedRsns() { return minigamePresentation.hotPotato().getEliminatedRsns(); }
+    
 
-    public boolean isDanceDanceRuneScapeActive() { return minigamePresentation.isKeyActive(DANCE_DANCE_RUNESCAPE_KEY); }
+    
     /** When the current Dance, Dance, RuneScape round's own clock runs out -- 0 if no round is
      * active yet or the round hasn't actually begun (see DanceDanceRuneScapePresentation's own
      * onTick doc for why "begun," not just "playable," matters here). */
-    public long getDanceDanceRuneScapeEndsAt() { return minigamePresentation.danceDanceRuneScape().getEndsAt(); }
     /** Every tile adjacent to the dance floor's anchor currently lit -- empty before the first
      * beat, more than one entry for a chord -- see DanceDanceRuneScapeOverlay, the only consumer. */
-    public Set<DanceDanceRuneScapePresentation.Direction> getDanceDanceRuneScapeHighlightedDirections() { return minigamePresentation.danceDanceRuneScape().getHighlightedDirections(); }
+    
     /** When each direction was last captured (System.currentTimeMillis()), for
      * DanceDanceRuneScapeOverlay's own brief flash -- see that class's FLASH_DURATION_MS. */
-    public Map<DanceDanceRuneScapePresentation.Direction, Long> getDanceDanceRuneScapeFlashStartTimes() { return minigamePresentation.danceDanceRuneScape().getFlashStartTimes(); }
+    
     /** The local player's own running tally this round -- see DanceDanceRuneScapeHudOverlay, the
      * only consumer. Client-local only -- nobody but the local player ever sees this. */
-    public int getDanceDanceRuneScapeScore() { return minigamePresentation.danceDanceRuneScape().getScore(); }
+    
 
-    public boolean isRainbowRushActive() { return minigamePresentation.isKeyActive(RAINBOW_RUSH_KEY); }
-    public boolean isRepeatAfterMeActive() { return minigamePresentation.isKeyActive(REPEAT_AFTER_ME_KEY); }
+    
+    
     /** This round's own target cells (0-15), for the overlay's own peek/challenge rendering. */
-    public Set<Integer> getRepeatAfterMeTargetIndices() { return minigamePresentation.repeatAfterMe().getTargetIndices(); }
+    
     /** Every cell the local player has stood-and-spun on so far this round, correct or not. */
-    public Set<Integer> getRepeatAfterMeAttemptedIndices() { return minigamePresentation.repeatAfterMe().getAttemptedIndices(); }
+    
     /** Whether this round's own sneak peek is still showing -- see RepeatAfterMePresentation#isPeekActive. */
-    public boolean isRepeatAfterMePeekActive() { return minigamePresentation.repeatAfterMe().isPeekActive(); }
+    
     /** Whether this round's own green/red reveal should be showing -- see RepeatAfterMePresentation#isRevealActive. */
-    public boolean isRepeatAfterMeRevealActive() { return minigamePresentation.repeatAfterMe().isRevealActive(); }
-    public int getRepeatAfterMeRoundNumber() { return minigamePresentation.repeatAfterMe().getRoundNumber(); }
+    
 
-    public boolean isCrabRaveActive() { return minigamePresentation.isKeyActive(CRAB_RAVE_KEY); }
+    
     /** When the current Crab Rave round's own 30-second clock runs out -- 0 if no round is active
      * yet or the round hasn't actually begun. Drives AnnouncementOverlay's own countdown number. */
-    public long getCrabRaveEndsAt() { return minigamePresentation.crabRave().getEndsAt(); }
+    
     /** The local player's own running dance tally this round -- client-local only, nobody but the
      * local player ever sees this before the end-of-round Final Score recap. */
-    public int getCrabRaveDanceCount() { return minigamePresentation.crabRave().getDanceCount(); }
+    
 
-    public boolean isBrutusAttackActive() { return minigamePresentation.isKeyActive(BRUTUS_ATTACK_KEY); }
-    public boolean isArenaActive() { return minigamePresentation.isKeyActive(ARENA_KEY); }
-    public boolean isMageArenaActive() { return minigamePresentation.isKeyActive(MAGE_ARENA_KEY); }
-    public boolean isRuneMatchActive() { return minigamePresentation.isKeyActive(RUNE_MATCH_KEY); }
+    
+    
+    
+    
     /** This round's own still-hidden Rune Match card tiles -- see TileOverlay's own per-tile
      * rendering, the only consumer. */
-    public List<WorldPoint> getRuneMatchHiddenCardTiles() { return minigamePresentation.runeMatch().getHiddenCardTiles(); }
+    
     /** This round's own permanently-solved Rune Match card tiles -- see TileOverlay's own per-tile
      * rendering, the only consumer. */
-    public List<WorldPoint> getRuneMatchSolvedCardTiles() { return minigamePresentation.runeMatch().getSolvedCardTiles(); }
+    
     /** This round's own currently-revealed Rune Match cards, keyed by card index -- see
      * TileOverlay#updateRuneMatchModels, the only consumer. */
-    public Map<Integer, RuneMatchSpawn> getRuneMatchRevealedSpawns() { return minigamePresentation.runeMatch().getRevealedSpawns(); }
+    
     /** The local player's own running count of pairs matched so far this round -- see
      * RuneMatchOverlay, the only consumer. */
-    public int getRuneMatchSolvedPairCount() { return minigamePresentation.runeMatch().getSolvedPairCount(); }
+    
 
-    public boolean isBalloonPopActive() { return minigamePresentation.isKeyActive(BALLOON_POP_KEY); }
+    
     /** Every seated player's own latest known balloon growth level (1-9), keyed by real RSN -- a
      * player who's already popped (or never reported a level at all) simply has no entry. See
      * models/BalloonModel, the only consumer. */
-    public Map<String, Integer> getBalloonPopGrowthLevelByPlayer() { return minigamePresentation.balloonPop().getGrowthLevelByPlayer(); }
+    
     /** The real RSN of this round's own Balloon Pop winner, or null if nobody's popped yet. See
      * models/BalloonModel, the only consumer. */
-    public String getBalloonPopWinnerRsn() { return minigamePresentation.balloonPop().getWinnerRsn(); }
     /** The rsn currently transformed into Brutus for this round -- null before PLAYER_TRANSFORMED
      * lands. See overlays/PlayerTransformOverlay, the only consumer. */
-    public String getBrutusAttackBrutusRsn() { return minigamePresentation.brutusAttack().getBrutusRsn(); }
-    public int getBrutusAttackNpcId() { return minigamePresentation.brutusAttack().getNpcId(); }
-    public int getBrutusAttackIdleAnimationId() { return minigamePresentation.brutusAttack().getIdleAnimationId(); }
-    public int getBrutusAttackWalkAnimationId() { return minigamePresentation.brutusAttack().getWalkAnimationId(); }
-    public int getBrutusAttackRoundNumber() { return minigamePresentation.brutusAttack().getRoundNumber(); }
+    
+    
+    
+    
     /** Lowercase rsns eliminated so far this mini-game -- see PlayerOverlay's own reuse of Hot
      * Potato's skull indicator, the only consumer. */
-    public Set<String> getBrutusAttackEliminatedRsns() { return minigamePresentation.brutusAttack().getEliminatedRsns(); }
+    
     /** When the current round's own 10-second dash window closes -- 0 if no round is active yet.
      * Drives AnnouncementOverlay's own dash countdown banner. */
-    public long getBrutusAttackDashEndsAt() { return minigamePresentation.brutusAttack().getDashEndsAt(); }
+    
     /** Whether the current round's own outcome (hit or miss) has already landed -- see that
      * method's own doc. AnnouncementOverlay's own dash countdown checks this so the numeral
      * disappears the instant the round resolves, rather than always counting down to 0. */
-    public boolean isBrutusAttackDashResolvedThisRound() { return minigamePresentation.brutusAttack().isDashResolvedThisRound(); }
+    
     /** Whether Brutus's own dash has landed for the current round, whether or not its outcome is
      * known yet -- see that method's own doc. AnnouncementOverlay's own dash countdown checks this
      * too, so the numeral disappears the instant Brutus physically enters the zone rather than
      * continuing to count down through the server's own brief post-dash grace period. */
-    public boolean isBrutusAttackDashLandedThisRound() { return minigamePresentation.brutusAttack().isDashLandedThisRound(); }
+    
     /** The exact tiles that would eliminate a target standing on them for the CURRENT round's own
-     * dash -- empty unless isBrutusAttackDashLandedThisRound() is true. Same row/plane as Brutus's
+     * dash -- empty unless minigamePresentation.brutusAttack().isDashLandedThisRound() is true. Same row/plane as Brutus's
      * own reported landing tile, within BRUTUS_HITBOX_RADIUS_TILES of it in x -- the identical span
      * isLocalPlayerHitByBrutusDash itself checks against, just enumerated here instead of tested
      * against a single point, so TileOverlay can highlight exactly which tiles counted as the
@@ -5015,16 +4886,16 @@ public class RunePartyPlugin extends Plugin
     }
     /** When the current "HIT!"/"MISS!" flash should disappear -- 0 if none is armed. Drives
      * AnnouncementOverlay's own renderBrutusAttackDashResult. */
-    public long getBrutusAttackDashResultBannerUntil() { return minigamePresentation.brutusAttack().getDashResultBannerUntil(); }
+    
     /** Whether the most recent dash resolved as a hit ("HIT!") or a miss ("MISS!") -- only
-     * meaningful while getBrutusAttackDashResultBannerUntil() hasn't passed yet. */
-    public boolean isBrutusAttackDashResultHit() { return minigamePresentation.brutusAttack().isDashResultHit(); }
+     * meaningful while minigamePresentation.brutusAttack().getDashResultBannerUntil() hasn't passed yet. */
+    
     /** Whether the local player is the one currently transformed into Brutus this round -- see
      * AnnouncementOverlay's own role-aware "head to your zone"/"head to the target zone" gather
      * message. */
     public boolean isLocalPlayerAssignedBrutus()
     {
-        String brutusRsn = getBrutusAttackBrutusRsn();
+        String brutusRsn = minigamePresentation.brutusAttack().getBrutusRsn();
         String self = getLocalRsn();
         return brutusRsn != null && self != null && brutusRsn.equalsIgnoreCase(self);
     }
@@ -5032,42 +4903,41 @@ public class RunePartyPlugin extends Plugin
     /** The rsn currently assigned as the Mage this round -- null before MAGE_ARENA_ROUND_STARTED
      * lands (which only happens once the arrival gate has already closed, see MAGE_ARENA_KEY's own
      * doc). */
-    public String getMageArenaMageRsn() { return minigamePresentation.mageArena().getMageRsn(); }
+    
     /** When the round's own clock runs out -- 0 if no round is active yet. See AnnouncementOverlay's
      * own Mage Arena round-timer rendering, the only reader. */
-    public long getMageArenaRoundEndsAt() { return minigamePresentation.mageArena().getRoundEndsAt(); }
     /** Lowercase rsns eliminated so far this round -- see PlayerOverlay's own reuse of Hot
      * Potato/Brutus Attack's own skull indicator, the only reader. */
-    public Set<String> getMageArenaEliminatedRsns() { return minigamePresentation.mageArena().getEliminatedRsns(); }
+    
     /** The most recently broadcast cast's own target tile -- null until the round's first cast
      * lands. See TileOverlay#renderMageArenaCastWarning, the only reader. */
-    public WorldPoint getMageArenaActiveCastPoint() { return minigamePresentation.mageArena().getActiveCastPoint(); }
-    public long getMageArenaActiveCastWarningAt() { return minigamePresentation.mageArena().getActiveCastWarningAt(); }
-    public long getMageArenaActiveCastDetonateAt() { return minigamePresentation.mageArena().getActiveCastDetonateAt(); }
-    public long getMageArenaActiveCastResolvedAt() { return minigamePresentation.mageArena().getActiveCastResolvedAt(); }
+    
+    
+    
+    
     /** When the local viewer's own "You were eliminated!" flash should disappear -- 0 if none is
-     * armed. Independent of getMageArenaOthersEliminationBannerUntil() so a bystander's own
+     * armed. Independent of minigamePresentation.mageArena().getOthersEliminationBannerUntil() so a bystander's own
      * elimination can never stomp this one -- see MageArenaPresentation#armEliminationBanner's own
      * doc. Drives AnnouncementOverlay's own renderMageArenaElimination. */
-    public long getMageArenaLocalEliminationBannerUntil() { return minigamePresentation.mageArena().getLocalEliminationBannerUntil(); }
+    
     /** Same idea, for the "&lt;rsn&gt; was eliminated!" flash shown for everyone ELSE'S eliminations. */
-    public long getMageArenaOthersEliminationBannerUntil() { return minigamePresentation.mageArena().getOthersEliminationBannerUntil(); }
-    public String getMageArenaOthersEliminationBannerRsn() { return minigamePresentation.mageArena().getOthersEliminationBannerRsn(); }
+    
+    
     /** Same split pair, for Flame Field's own "You were/&lt;rsn&gt; was eliminated!" flash -- see
      * ArenaPresentation#armEliminationBanner and AnnouncementOverlay#renderArenaElimination. */
-    public long getArenaLocalEliminationBannerUntil() { return minigamePresentation.arena().getLocalEliminationBannerUntil(); }
-    public long getArenaOthersEliminationBannerUntil() { return minigamePresentation.arena().getOthersEliminationBannerUntil(); }
-    public String getArenaOthersEliminationBannerRsn() { return minigamePresentation.arena().getOthersEliminationBannerRsn(); }
+    
+    
+    
     /** Lowercase rsns eliminated so far this round -- see PlayerOverlay's own persistent skull icon,
      * the only reader. Same "Hot Potato" treatment HotPotatoPresentation's own eliminatedRsns
      * already established. */
-    public Set<String> getArenaEliminatedRsns() { return minigamePresentation.arena().getEliminatedRsns(); }
+    
     /** Whether the local player is the one currently assigned as the Mage this round -- gates the
      * "Cast Spell" menu entry (see addMageArenaCastMenuEntry) and AnnouncementOverlay's own
      * role-aware gather/round messaging. */
     public boolean isLocalPlayerMageArenaMage()
     {
-        String mageRsn = getMageArenaMageRsn();
+        String mageRsn = minigamePresentation.mageArena().getMageRsn();
         String self = getLocalRsn();
         return mageRsn != null && self != null && mageRsn.equalsIgnoreCase(self);
     }
@@ -5075,18 +4945,16 @@ public class RunePartyPlugin extends Plugin
     /** Whether the local player has personally stood on the course tile at {@code pathIndex} yet
      * this round -- see TileOverlay#renderRainbowRushTile, the only consumer: outline-only until
      * this flips true, filled solid after. */
-    public boolean isRainbowRushTileVisited(int pathIndex) { return minigamePresentation.rainbowRush().isVisited(pathIndex); }
+    
     /** The local player's own running count of distinct course tiles visited this round. */
-    public int getRainbowRushVisitedCount() { return minigamePresentation.rainbowRush().getVisitedCount(); }
     /** When Rainbow Rush's own backup ceiling kicks in if nobody's finished by then -- 0 if no
      * round is active yet. Not a normal win condition, see RAINBOW_RUSH_KEY's own doc. */
-    public long getRainbowRushEndsAt() { return minigamePresentation.rainbowRush().getEndsAt(); }
     /** When MINIGAME_ROUND_BEGIN actually landed for this round -- 0 if the round hasn't begun yet.
      * See AnnouncementOverlay#renderRainbowRushTrafficLight, the only consumer: the traffic light
      * sequence is timed purely off this one client-local timestamp. */
-    public long getRainbowRushRoundStartAt() { return minigamePresentation.rainbowRush().getRoundStartAt(); }
+    
 
-    public boolean isTurfWarsActive() { return minigamePresentation.isKeyActive(TURF_WARS_KEY); }
+    
     /** This round's own live tile tally, keyed by whatever color hex each tile is currently
      * claimed in (2 keys for an even-count 2-team round, up to 8 for an odd-count free-for-all),
      * tallied fresh from TileReducer's own already-broadcast TURF_WARS_TILE snapshot -- see
@@ -5122,21 +4990,21 @@ public class RunePartyPlugin extends Plugin
      * right now (no Turf Wars round active, or the assignment hasn't landed yet this round) -- see
      * PlayerOverlay, which recolors every seated player's own outline/token this way, not just the
      * local player's own. */
-    public String getTurfWarsColorHex(String rsn) { return minigamePresentation.turfWars().getPlayerColor(rsn); }
-    /** {@link #getTurfWarsColorHex(String)} decoded to an AWT {@link Color}, or null under the
+    
+    /** {@link #minigamePresentation.turfWars().getPlayerColor(String)} decoded to an AWT {@link Color}, or null under the
      * same conditions that returns null. */
     public Color getPlayerTeamColor(String rsn)
     {
-        String hex = getTurfWarsColorHex(rsn);
+        String hex = minigamePresentation.turfWars().getPlayerColor(rsn);
         if (hex == null) return null;
         try { return Color.decode(hex); }
         catch (NumberFormatException e) { return null; }
     }
     /** When the round's own fixed-duration clock runs out -- 0 if no round is active yet or the
      * round hasn't actually become playable. */
-    public long getTurfWarsEndsAt() { return minigamePresentation.turfWars().getEndsAt(); }
+    
 
-    public boolean isJaddyActive() { return minigamePresentation.isKeyActive(JADDY_KEY); }
+    
     /** The color hex of whichever Who's Your Jaddy? zone tile {@code pos} currently sits on, or
      * null if {@code pos} isn't on either zone right now (no Jaddy round active, or the position is
      * off both zones) -- a live board lookup, same "the board's own current state already is the
@@ -5195,19 +5063,14 @@ public class RunePartyPlugin extends Plugin
         return pos.getY() == brutusY && pos.getPlane() == brutusPlane
             && Math.abs(pos.getX() - brutusX) <= BRUTUS_HITBOX_RADIUS_TILES;
     }
-
-    public String getItemPlacementKey() { return itemPlacementKey; }
-    public String getItemTargetKey() { return itemTargetKey; }
-    public Set<String> getMinigameReadyRsns() { return minigamePresentation.getMinigameReadyRsns(); }
-    public boolean isMinigameCountdownStarted() { return minigamePresentation.isCountdownStarted(); }
-    public boolean isMinigameCountdownSkippedForClient() { return minigamePresentation.isCountdownSkippedForClient(); }
-    public long getMinigameCountdownBannerUntil() { return minigamePresentation.getCountdownBannerUntil(); }
+    
+    
+    
+    
     /** Whether MINIGAME_ROUND_BEGIN has genuinely landed for the current mini-game -- unlike
      * isMinigamePlayable() (a fixed local timer off MINIGAME_COUNTDOWN_STARTED), this is a real
      * server signal, true for however long or short the round actually took to begin. See
      * AnnouncementOverlay#renderArenaGatherMessage, the only current reader. */
-    public boolean isMinigameRoundBegun() { return minigamePresentation.isRoundBegun(); }
-    public int getMaxRounds() { return maxRounds; }
     /** 1-indexed round currently in progress, capped at maxRounds so the round the final
      * MINIGAME_ENDED just completed doesn't briefly read as "one past the end" before GAME_ENDED
      * lands -- 0 before GAME_STARTED has set maxRounds at all. See StatsOverlay's "ROUND x/y" line,
@@ -5227,54 +5090,54 @@ public class RunePartyPlugin extends Plugin
     public String getTeleOtherUsedCasterRsn() { return teleOtherUsedAnnounce.payload != null ? teleOtherUsedAnnounce.payload.casterRsn : null; }
     public String getTeleOtherUsedTargetRsn() { return teleOtherUsedAnnounce.payload != null ? teleOtherUsedAnnounce.payload.targetRsn : null; }
     public long getTeleOtherUsedUntil() { return teleOtherUsedAnnounce.until; }
-    public long getWelcomeBannerUntil() { return sessionManager.getWelcomeBannerUntil(); }
-    public long getMinigameBannerUntil() { return minigamePresentation.getMinigameBannerUntil(); }
-    public long getMinigameOverBannerUntil() { return minigamePresentation.getMinigameOverBannerUntil(); }
-    public long getArrivalRoundBeginBannerUntil() { return minigamePresentation.getArrivalRoundBeginBannerUntil(); }
-    public long getMinigameScoreBannerUntil() { return minigamePresentation.getMinigameScoreBannerUntil(); }
-    public List<MinigameScore> getMinigameScores() { return minigamePresentation.getMinigameScores(); }
+    
+    
+    
+    
+    
+    
     public long getGameStartBannerUntil() { return gameStartBanner.until; }
-    public long getRoundCompleteBannerUntil() { return minigamePresentation.getRoundCompleteBannerUntil(); }
-    public int getRoundCompleteRoundNumber() { return minigamePresentation.getRoundCompleteRoundNumber(); }
-    public long getMinigameRewardsBannerUntil() { return minigamePresentation.getMinigameRewardsBannerUntil(); }
-    public List<MinigameReward> getMinigameRewards() { return minigamePresentation.getMinigameRewards(); }
-    public long getTeamAssignedBannerUntil() { return minigamePresentation.turfWars().getTeamAssignedBannerUntil(); }
-    public String getTeamAssignedBannerTeam() { return minigamePresentation.turfWars().getTeamAssignedBannerTeam(); }
-    public long getTurfWarsConfettiUntil() { return minigamePresentation.turfWars().getConfettiUntil(); }
-    public Color getTurfWarsConfettiColor() { return minigamePresentation.turfWars().getConfettiColor(); }
-    public long getJaddyResolvedBannerUntil() { return minigamePresentation.jaddy().getResolvedBannerUntil(); }
-    public String getJaddyResolvedWinningColor() { return minigamePresentation.jaddy().getResolvedWinningColor(); }
-    public String getJaddyResolvedLocalZoneColor() { return minigamePresentation.jaddy().getResolvedLocalZoneColor(); }
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     // Delegating facade -- CeremonyPresentation owns the actual state. Every name/signature below
     // is unchanged, so no external caller (AnnouncementOverlay, ConfettiOverlay) needs to change.
-    public boolean isCeremonyStarted() { return ceremonyPresentation.isCeremonyStarted(); }
-    public boolean isCeremonyIntroRevealed() { return ceremonyPresentation.isCeremonyIntroRevealed(); }
-    public boolean isCeremonyGatherMessageRevealed() { return ceremonyPresentation.isCeremonyGatherMessageRevealed(); }
-    public boolean isCeremonyFlankingGnomeVisible(int index) { return ceremonyPresentation.isFlankingGnomeVisible(index); }
-    public long getCeremonyTitleBannerUntil() { return ceremonyPresentation.getCeremonyTitleBannerUntil(); }
-    public long getGnomeLineUntil() { return ceremonyPresentation.getGnomeLineUntil(); }
-    public String getGnomeLine() { return ceremonyPresentation.getGnomeLine(); }
-    public long getBonusObjectiveBannerUntil() { return ceremonyPresentation.getBonusObjectiveBannerUntil(); }
-    public long getBonusSuspenseBannerUntil() { return ceremonyPresentation.getBonusSuspenseBannerUntil(); }
-    public int getBonusObjectiveRoundIndex() { return ceremonyPresentation.getBonusObjectiveRoundIndex(); }
-    public String getBonusObjectiveDisplayName() { return ceremonyPresentation.getBonusObjectiveDisplayName(); }
-    public String getBonusObjectiveDescription() { return ceremonyPresentation.getBonusObjectiveDescription(); }
-    public long getBonusWinnerBannerUntil() { return ceremonyPresentation.getBonusWinnerBannerUntil(); }
-    public List<String> getBonusWinners() { return ceremonyPresentation.getBonusWinners(); }
-    public List<RosterReducer.RosterEntry> getGameOverStandings() { return ceremonyPresentation.getGameOverStandings(); }
-    public long getGameOverBannerUntil() { return ceremonyPresentation.getGameOverBannerUntil(); }
-    public long getWinnerIntroBannerUntil() { return ceremonyPresentation.getWinnerIntroBannerUntil(); }
-    public long getPlaceRevealUntil() { return ceremonyPresentation.getPlaceRevealUntil(); }
-    public String getPlaceRevealRsn() { return ceremonyPresentation.getPlaceRevealRsn(); }
-    public int getPlaceRevealRank() { return ceremonyPresentation.getPlaceRevealRank(); }
-    public int getPlaceRevealCoins() { return ceremonyPresentation.getPlaceRevealCoins(); }
-    public int getPlaceRevealGoldenGnomes() { return ceremonyPresentation.getPlaceRevealGoldenGnomes(); }
-    public long getWinnerSuspenseUntil() { return ceremonyPresentation.getWinnerSuspenseUntil(); }
-    public long getWinnerRevealUntil() { return ceremonyPresentation.getWinnerRevealUntil(); }
-    public String getWinnerRsn() { return ceremonyPresentation.getWinnerRsn(); }
-    public long getConfettiUntil() { return ceremonyPresentation.getConfettiUntil(); }
-    public long getCeremonyCreditsStart() { return ceremonyPresentation.getCeremonyCreditsStart(); }
-    public long getCeremonyCreditsUntil() { return ceremonyPresentation.getCeremonyCreditsUntil(); }
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     /** {@code rsn}'s currently-showing coin popup, or null if none -- see PlayerOverlay#
      * drawCoinPopup, the only consumer. Drops expired entries off the front of this player's queue
      * first (see coinPopups's own doc for why it's a queue, not a single slot) so an old, already-
@@ -5294,64 +5157,55 @@ public class RunePartyPlugin extends Plugin
         }
         return head;
     }
-    public String getDiceRollRsn() { return diceRollRsn; }
-    public int getDiceRollValue() { return diceRollValue; }
-    public int getDiceRollBonus() { return diceRollBonus; }
-    public long getDiceRollStart() { return diceRollStart; }
-    public long getDiceRollUntil() { return diceRollUntil; }
     // Delegating facade -- GoldenGnomePresentation owns the actual state. Every name/signature
     // below is unchanged, so no external caller (AnnouncementOverlay, PlayerOverlay, TileOverlay)
     // needs to change.
-    public String getGoldenGnomeOfferRsn() { return goldenGnomePresentation.getOfferRsn(); }
-    public String getGoldenGnomeOutcome() { return goldenGnomePresentation.getOutcome(); }
-    public String getGoldenGnomeOutcomeRsn() { return goldenGnomePresentation.getOutcomeRsn(); }
-    public long getGoldenGnomeOutcomeBannerUntil() { return goldenGnomePresentation.getOutcomeBannerUntil(); }
-    public String getGoldenGnomePopupRsn() { return goldenGnomePresentation.getPopupRsn(); }
-    public int getGoldenGnomePopupNewTotal() { return goldenGnomePresentation.getPopupNewTotal(); }
-    public int getGoldenGnomePopupDelta() { return goldenGnomePresentation.getPopupDelta(); }
-    public long getGoldenGnomePopupStart() { return goldenGnomePresentation.getPopupStart(); }
-    public long getGoldenGnomePopupUntil() { return goldenGnomePresentation.getPopupUntil(); }
-    public WorldPoint getGoldenGnomeMoveOldPoint() { return goldenGnomePresentation.getMoveOldPoint(); }
-    public long getGoldenGnomeMoveHideOldAt() { return goldenGnomePresentation.getMoveHideOldAt(); }
-    public WorldPoint getGoldenGnomeMoveNewPoint() { return goldenGnomePresentation.getMoveNewPoint(); }
-    public long getGoldenGnomeMoveShowNewAt() { return goldenGnomePresentation.getMoveShowNewAt(); }
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
 
     /** Lets ChanceSpacePresentation's own deferred reveal show the Golden Gnome count popup at a
      * time of its own choosing -- see GoldenGnomePresentation#showCountPopup's own doc. */
-    public void showGoldenGnomeCountPopup(String rsn, int newTotal, int delta)
-    {
-        goldenGnomePresentation.showCountPopup(rsn, newTotal, delta);
-    }
+    
 
-    public long getChanceSpaceTitleUntil() { return chanceSpacePresentation.getTitleUntil(); }
-    public long getChanceSpaceIconsStart() { return chanceSpacePresentation.getIconsStart(); }
-    public long getChanceSpaceIconsUntil() { return chanceSpacePresentation.getIconsUntil(); }
-    public String getChanceSpaceIconsLeftRsn() { return chanceSpacePresentation.getIconsLeftRsn(); }
-    public String getChanceSpaceIconsRightRsn() { return chanceSpacePresentation.getIconsRightRsn(); }
-    public String getChanceSpaceIconsOutcomeType() { return chanceSpacePresentation.getIconsOutcomeType(); }
-    public String getChanceSpaceIconsArrowDirection() { return chanceSpacePresentation.getIconsArrowDirection(); }
-    public long[] getChanceSpaceIconsSlotDelayMs() { return chanceSpacePresentation.getIconsSlotDelayMs(); }
-    public String[] getChanceSpaceAnnouncementLines() { return chanceSpacePresentation.getAnnouncementLines(); }
+    
+    
+    
+    
+    
+    
+    
+    
+    
 
-    public String getJadEncounterRsn() { return jadPresentation.getEncounterRsn(); }
-    public long getJadAwakenedAt() { return jadPresentation.getAwakenedAt(); }
-    public long getJadRevealAt() { return jadPresentation.getRevealAt(); }
-    public boolean isJadSmashTriggered() { return jadPresentation.isSmashTriggered(); }
-    public String getJadOutcome() { return jadPresentation.getOutcome(); }
-    public String getJadOutcomeRsn() { return jadPresentation.getOutcomeRsn(); }
-    public long getJadOutcomeBannerUntil() { return jadPresentation.getOutcomeBannerUntil(); }
+    
+    
+    
+    
+    
+    
+    
 
     /** The rsn currently mid-Wise-Old-Man-encounter, or null -- see WiseOldManDialogueOverlay, the
      * only reader beyond the getters below: only shows its own dialogue box when this equals the
      * local player's own rsn. */
-    public String getWiseOldManEncounterRsn() { return wiseOldManPresentation.getEncounterRsn(); }
-    public long getWiseOldManAwakenedAt() { return wiseOldManPresentation.getAwakenedAt(); }
-    public long getWiseOldManRevealAt() { return wiseOldManPresentation.getRevealAt(); }
-    public String getWiseOldManStolenThief() { return wiseOldManPresentation.getStolenThief(); }
-    public String getWiseOldManStolenVictim() { return wiseOldManPresentation.getStolenVictim(); }
-    public String getWiseOldManStolenKind() { return wiseOldManPresentation.getStolenKind(); }
-    public Integer getWiseOldManStolenAmount() { return wiseOldManPresentation.getStolenAmount(); }
-    public long getWiseOldManStolenBannerUntil() { return wiseOldManPresentation.getStolenBannerUntil(); }
+    
+    
+    
+    
+    
+    
+    
 
     /** Submits the local player's own choice for their currently-open Wise Old Man encounter --
      * action is "steal_coins"/"steal_golden_gnome"/"decline", target is required for either steal
@@ -5362,26 +5216,22 @@ public class RunePartyPlugin extends Plugin
      * own return. */
     public void submitWiseOldManChoice(String action, String target)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
-        submitAction("Wise Old Man choice", () -> apiClient.wiseOldManChoose(gid, self, token, action, target),
+        submitAction("Wise Old Man choice", () -> apiClient.wiseOldManChoose(s.gid, s.self, s.token, action, target),
             e -> addChatMessage("Failed to submit your choice to the Wise Old Man: " + e.getMessage()));
     }
 
     /** The rsn currently mid-Item-Shop-encounter, or null -- see ItemShopDialogueOverlay, the only
      * reader beyond the getters below: only shows its own dialogue box when this equals the local
      * player's own rsn. */
-    public String getItemShopEncounterRsn() { return itemShopPresentation.getEncounterRsn(); }
-    public long getItemShopAwakenedAt() { return itemShopPresentation.getAwakenedAt(); }
-    public long getItemShopRevealAt() { return itemShopPresentation.getRevealAt(); }
-    public String getItemShopOutcome() { return itemShopPresentation.getOutcome(); }
-    public String getItemShopOutcomeRsn() { return itemShopPresentation.getOutcomeRsn(); }
-    public String getItemShopOutcomeItemDisplayName() { return itemShopPresentation.getOutcomeItemDisplayName(); }
-    public Integer getItemShopOutcomePrice() { return itemShopPresentation.getOutcomePrice(); }
-    public long getItemShopOutcomeBannerUntil() { return itemShopPresentation.getOutcomeBannerUntil(); }
+    
+    
+    
+    
+    
+    
 
     /** Submits the local player's own choice for their currently-open Item Shop encounter --
      * action is "buy_item"/"decline", itemKey is required for "buy_item" (see
@@ -5408,16 +5258,14 @@ public class RunePartyPlugin extends Plugin
      * anything itself. */
     public void submitItemShopChoice(String action, String itemKey, Runnable onComplete)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null)
+        LocalSession s = requireLocalSession();
+        if (s == null)
         {
             if (onComplete != null) onComplete.run();
             return;
         }
 
-        submitAction("Item Shop choice", () -> apiClient.itemShopChoose(gid, self, token, action, itemKey),
+        submitAction("Item Shop choice", () -> apiClient.itemShopChoose(s.gid, s.self, s.token, action, itemKey),
             e -> addChatMessage("Failed to respond to the Item Clerk: " + e.getMessage()), onComplete);
     }
 }

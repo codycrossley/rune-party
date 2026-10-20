@@ -113,7 +113,7 @@ public class PlayerOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        GamePhase phase = plugin.getPhase();
+        GamePhase phase = plugin.phase;
         if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE) return null;
 
         for (Player p : client.getPlayers())
@@ -134,7 +134,7 @@ public class PlayerOverlay extends Overlay
             // outlines on that signal alone spoiled the reveal (players' tokens visibly split into
             // team colors before anyone could see "Turf Wars"/"Who's Your Jaddy?" was even chosen).
             // Same reasoning the Brutus Attack branch below already got right.
-            if (plugin.isTurfWarsActive() && plugin.isMinigameSelectionRevealed())
+            if (plugin.minigamePresentation.isKeyActive(RunePartyPlugin.TURF_WARS_KEY) && plugin.isMinigameSelectionRevealed())
             {
                 // Recolors every seated player's own outline/token to their Turf Wars assigned
                 // color instead of their usual per-seat one, for the whole round. Falls back to
@@ -142,7 +142,7 @@ public class PlayerOverlay extends Overlay
                 Color teamColor = plugin.getPlayerTeamColor(rsn);
                 if (teamColor != null) c = teamColor;
             }
-            else if (plugin.isJaddyActive() && plugin.isMinigameSelectionRevealed())
+            else if (plugin.minigamePresentation.isKeyActive(RunePartyPlugin.JADDY_KEY) && plugin.isMinigameSelectionRevealed())
             {
                 // Same idea as Turf Wars above, but there's no assignment event at all here --
                 // whichever JADDY_TILE zone this player's own real WorldLocation currently sits on
@@ -153,7 +153,7 @@ public class PlayerOverlay extends Overlay
                 Color zoneColor = plugin.getJaddyZoneColor(p.getWorldLocation());
                 if (zoneColor != null) c = zoneColor;
             }
-            else if (plugin.isBrutusAttackActive() && plugin.isMinigamePlayable())
+            else if (plugin.minigamePresentation.isKeyActive(RunePartyPlugin.BRUTUS_ATTACK_KEY) && plugin.isMinigamePlayable())
             {
                 // A 1vX hunt, not a 2-team split, but the same fixed TEAM_A_COLOR/TEAM_B_COLOR
                 // pairing Turf Wars/Who's Your Jaddy already use reads "who's hunting whom" at a
@@ -165,9 +165,9 @@ public class PlayerOverlay extends Overlay
                 // isBrutusAttackTarget's own doc gives: isBrutusAttackActive() alone would recolor
                 // every outline the instant MINIGAME_STARTED lands, before the wheel's even
                 // revealed which mini-game was picked.
-                c = rsn.equalsIgnoreCase(plugin.getBrutusAttackBrutusRsn()) ? RunePartyPlugin.TEAM_A_COLOR : RunePartyPlugin.TEAM_B_COLOR;
+                c = oneVsAllColor(rsn, plugin.minigamePresentation.brutusAttack().getBrutusRsn());
             }
-            else if (plugin.isMageArenaActive() && plugin.isMinigamePlayable())
+            else if (plugin.minigamePresentation.isKeyActive(RunePartyPlugin.MAGE_ARENA_KEY) && plugin.isMinigamePlayable())
             {
                 // Same 1vX fixed-pairing idea as Brutus Attack just above: the Mage in
                 // TEAM_A_COLOR (magenta), every dodger in TEAM_B_COLOR (cyan), for the whole round
@@ -176,19 +176,19 @@ public class PlayerOverlay extends Overlay
                 // etc.) yet -- just the team-color outline/token for now, see MAGE_ARENA_KEY's own
                 // doc for that follow-up. Also requires isMinigamePlayable(), same "don't spoil the
                 // wheel's own reveal" reasoning the Brutus Attack branch's own doc gives.
-                c = rsn.equalsIgnoreCase(plugin.getMageArenaMageRsn()) ? RunePartyPlugin.TEAM_A_COLOR : RunePartyPlugin.TEAM_B_COLOR;
+                c = oneVsAllColor(rsn, plugin.minigamePresentation.mageArena().getMageRsn());
             }
             modelOutlineRenderer.drawOutline(p, OUTLINE_WIDTH,
                 new Color(c.getRed(), c.getGreen(), c.getBlue(), OUTLINE_ALPHA), OUTLINE_FEATHER);
 
             // A mini-game isn't anyone's "turn" -- everyone submits independently -- so the glow/
             // thick border is suppressed then too, matching StatsOverlay's same carve-out.
-            boolean onTurn = phase == GamePhase.ACTIVE && !plugin.isMinigameActive()
-                && rsn.equalsIgnoreCase(plugin.getCurrentTurnRsn());
+            boolean onTurn = phase == GamePhase.ACTIVE && !plugin.minigamePresentation.isActive()
+                && rsn.equalsIgnoreCase(plugin.currentTurnRsn);
             // Mutually exclusive with onTurn by construction -- isHotPotatoActive() implies a
             // mini-game is active, which onTurn's own check above already rules out.
-            boolean holdingHotPotato = phase == GamePhase.ACTIVE && plugin.isHotPotatoActive() && plugin.isMinigamePlayable()
-                && rsn.equalsIgnoreCase(plugin.getHotPotatoHolder());
+            boolean holdingHotPotato = phase == GamePhase.ACTIVE && plugin.minigamePresentation.isKeyActive(RunePartyPlugin.HOT_POTATO_KEY) && plugin.isMinigamePlayable()
+                && rsn.equalsIgnoreCase(plugin.minigamePresentation.hotPotato().getHolder());
 
             // Every still-surviving target (not Brutus himself, not someone already eliminated)
             // gets the bullseye marker instead of the plain token for as long as the mini-game's
@@ -198,9 +198,9 @@ public class PlayerOverlay extends Overlay
             // MINIGAME_STARTED lands, well before the selection wheel has even revealed which
             // mini-game was picked, so gating on that alone spoiled the reveal by marking every
             // target with a bullseye before anyone could see "Brutus Attack" was even chosen.
-            boolean isBrutusAttackTarget = phase == GamePhase.ACTIVE && plugin.isBrutusAttackActive() && plugin.isMinigamePlayable()
-                && !rsn.equalsIgnoreCase(plugin.getBrutusAttackBrutusRsn())
-                && !plugin.getBrutusAttackEliminatedRsns().contains(rsn.toLowerCase(Locale.ROOT));
+            boolean isBrutusAttackTarget = phase == GamePhase.ACTIVE && plugin.minigamePresentation.isKeyActive(RunePartyPlugin.BRUTUS_ATTACK_KEY) && plugin.isMinigamePlayable()
+                && !rsn.equalsIgnoreCase(plugin.minigamePresentation.brutusAttack().getBrutusRsn())
+                && !plugin.minigamePresentation.brutusAttack().getEliminatedRsns().contains(rsn.toLowerCase(Locale.ROOT));
             if (isBrutusAttackTarget)
             {
                 drawBrutusAttackTargetToken(g, p, c);
@@ -213,8 +213,8 @@ public class PlayerOverlay extends Overlay
             // Mutually exclusive with holdingHotPotato by construction -- once eliminated, a
             // player can never hold the potato again (see app.py's hot_potato_pass/hot_potato.py's
             // own random-explosion reassignment, both of which exclude the eliminated set).
-            if (phase == GamePhase.ACTIVE && plugin.isHotPotatoActive()
-                && plugin.getHotPotatoEliminatedRsns().contains(rsn.toLowerCase(Locale.ROOT)))
+            if (phase == GamePhase.ACTIVE && plugin.minigamePresentation.isKeyActive(RunePartyPlugin.HOT_POTATO_KEY)
+                && plugin.minigamePresentation.hotPotato().getEliminatedRsns().contains(rsn.toLowerCase(Locale.ROOT)))
             {
                 drawEliminatedSkullIcon(g, p);
             }
@@ -223,16 +223,16 @@ public class PlayerOverlay extends Overlay
             // NOT just a transient flash (see AnnouncementOverlay#renderArenaElimination): a skull
             // that stays above an eliminated player's head for the rest of the round means missing
             // the flash's own short window is never the only way to notice someone's out.
-            if (phase == GamePhase.ACTIVE && plugin.isArenaActive()
-                && plugin.getArenaEliminatedRsns().contains(rsn.toLowerCase(Locale.ROOT)))
+            if (phase == GamePhase.ACTIVE && plugin.minigamePresentation.isKeyActive(RunePartyPlugin.ARENA_KEY)
+                && plugin.minigamePresentation.arena().getEliminatedRsns().contains(rsn.toLowerCase(Locale.ROOT)))
             {
                 drawEliminatedSkullIcon(g, p);
             }
 
             // Same again for Mage Arena -- a dodger caught in a cast's own "X" blast gets the same
             // durable marker, not just the transient flash.
-            if (phase == GamePhase.ACTIVE && plugin.isMageArenaActive()
-                && plugin.getMageArenaEliminatedRsns().contains(rsn.toLowerCase(Locale.ROOT)))
+            if (phase == GamePhase.ACTIVE && plugin.minigamePresentation.isKeyActive(RunePartyPlugin.MAGE_ARENA_KEY)
+                && plugin.minigamePresentation.mageArena().getEliminatedRsns().contains(rsn.toLowerCase(Locale.ROOT)))
             {
                 drawEliminatedSkullIcon(g, p);
             }
@@ -243,13 +243,22 @@ public class PlayerOverlay extends Overlay
                 drawCoinPopup(g, p, coinPopup);
             }
 
-            if (phase == GamePhase.ACTIVE && rsn.equalsIgnoreCase(plugin.getGoldenGnomePopupRsn()))
+            if (phase == GamePhase.ACTIVE && rsn.equalsIgnoreCase(plugin.goldenGnomePresentation.getPopupRsn()))
             {
                 drawGoldenGnomePopup(g, p);
             }
         }
 
         return null;
+    }
+
+    /** The shared fixed TEAM_A_COLOR/TEAM_B_COLOR split every 1-vs-everyone mini-game (Brutus
+     * Attack, Mage Arena) uses: {@code specialRsn} (Brutus/the Mage) gets TEAM_A_COLOR, every
+     * other seated player gets TEAM_B_COLOR -- a future 1-vs-everyone mini-game can reuse this
+     * directly instead of adding its own copy of the same ternary. */
+    private static Color oneVsAllColor(String rsn, String specialRsn)
+    {
+        return rsn.equalsIgnoreCase(specialRsn) ? RunePartyPlugin.TEAM_A_COLOR : RunePartyPlugin.TEAM_B_COLOR;
     }
 
     /** holdingHotPotato overrides the token's own fill color and radius while true: a fast pulse
@@ -267,7 +276,7 @@ public class PlayerOverlay extends Overlay
         Color fillColor = color;
         if (holdingHotPotato)
         {
-            long endsAt = plugin.getHotPotatoEndsAt();
+            long endsAt = plugin.minigamePresentation.hotPotato().getEndsAt();
             long remainingMs = endsAt != 0 ? Math.max(0, endsAt - System.currentTimeMillis()) : RunePartyPlugin.HOT_POTATO_DURATION_MS;
             float remainingFraction = Math.min(1f, remainingMs / (float) RunePartyPlugin.HOT_POTATO_DURATION_MS);
             fillColor = lerpColor(HOT_POTATO_URGENT_COLOR, HOT_POTATO_SAFE_COLOR, remainingFraction);
@@ -380,13 +389,13 @@ public class PlayerOverlay extends Overlay
     private void drawGoldenGnomePopup(Graphics2D g, Player p)
     {
         long now = System.currentTimeMillis();
-        Float alpha = BannerAnim.fadeAlpha(plugin.getGoldenGnomePopupUntil(), RunePartyPlugin.COIN_POPUP_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.goldenGnomePresentation.getPopupUntil(), RunePartyPlugin.COIN_POPUP_FADE_MS);
         if (alpha == null) return;
 
-        long elapsed = now - plugin.getGoldenGnomePopupStart();
+        long elapsed = now - plugin.goldenGnomePresentation.getPopupStart();
         boolean showTotal = elapsed >= RunePartyPlugin.COIN_POPUP_DELTA_PHASE_MS;
-        int total = plugin.getGoldenGnomePopupNewTotal();
-        int delta = plugin.getGoldenGnomePopupDelta();
+        int total = plugin.goldenGnomePresentation.getPopupNewTotal();
+        int delta = plugin.goldenGnomePresentation.getPopupDelta();
         String text = showTotal ? (total + " Golden " + (total == 1 ? "Gnome" : "Gnomes"))
             : ((delta >= 0 ? "+" : "") + delta + " Golden " + (Math.abs(delta) == 1 ? "Gnome" : "Gnomes"));
 

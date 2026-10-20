@@ -1,13 +1,9 @@
 package gay.runescape.runeparty.items;
 
-import java.awt.AlphaComposite;
-import java.awt.Composite;
+import gay.runescape.runeparty.WheelEntry;
+
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
-import java.io.IOException;
-import java.io.InputStream;
-import javax.imageio.ImageIO;
-import lombok.extern.slf4j.Slf4j;
 
 /** Instantly relocates the holder's tracked board position to the course tile immediately before
  * wherever the Golden Gnome currently sits -- so that any roll of 1+ afterward puts the gnome
@@ -15,10 +11,9 @@ import lombok.extern.slf4j.Slf4j;
  * to pay out and so no confirm-arrival round trip: this is a single instant effect, done the
  * moment it's used. The "go stand on the tile" nudge is still covered for free by TileOverlay's
  * existing return-arrow, which renders off PLAYER_MOVED generically regardless of what caused it. */
-@Slf4j
 public class GnomeGliderItem implements Item
 {
-    private static final BufferedImage ICON = loadIcon();
+    private static final BufferedImage ICON = WheelEntry.loadIcon(GnomeGliderItem.class, "/gay/runescape/runeparty/item_icons/gnome-glider-icon.png", "Gnome Glider icon");
 
     private final String key;
     private final String displayName;
@@ -67,19 +62,5 @@ public class GnomeGliderItem implements Item
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
         drawIconImage(g, ICON, x, y, size, alpha);
-    }
-
-    private static BufferedImage loadIcon()
-    {
-        try (InputStream is = GnomeGliderItem.class.getResourceAsStream("/gay/runescape/runeparty/item_icons/gnome-glider-icon.png"))
-        {
-            if (is == null) throw new IOException("gnome-glider-icon.png resource not found");
-            return ImageIO.read(is);
-        }
-        catch (IOException e)
-        {
-            log.warn("Failed to load the Gnome Glider icon", e);
-            return null;
-        }
     }
 }

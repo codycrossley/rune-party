@@ -159,7 +159,7 @@ public final class SessionManager
      * enforce this cap itself, so it's a UI guard rather than a real limit. */
     public boolean isGameFull()
     {
-        return plugin.getRosterReducer().countRole(RunePartyRole.PLAYER) >= RunePartyPlugin.MAX_PLAYERS;
+        return plugin.rosterReducer.countRole(RunePartyRole.PLAYER) >= RunePartyPlugin.MAX_PLAYERS;
     }
 
     /** Host-only: promotes a spectator into the turn order (or, symmetrically, could demote a
@@ -368,7 +368,7 @@ public final class SessionManager
             try
             {
                 ApiClient.RosterSnapshot snapshot = plugin.apiClient.fetchRoster(gid);
-                plugin.getRosterReducer().syncFromRoster(snapshot.players);
+                plugin.rosterReducer.syncFromRoster(snapshot.players);
                 if (reconcileGameState)
                 {
                     try { plugin.phase = GamePhase.valueOf(snapshot.status); }

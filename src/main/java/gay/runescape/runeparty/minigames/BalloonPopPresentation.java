@@ -106,7 +106,7 @@ public final class BalloonPopPresentation implements MinigamePresentationFeature
     public void onStarted(boolean catchingUp)
     {
         reset();
-        for (RosterReducer.RosterEntry entry : plugin.getRosterReducer().seatedPlayers())
+        for (RosterReducer.RosterEntry entry : plugin.rosterReducer.seatedPlayers())
         {
             growthLevelByPlayer.put(entry.rsn, 0);
         }

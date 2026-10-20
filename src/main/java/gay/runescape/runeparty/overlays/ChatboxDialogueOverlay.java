@@ -275,7 +275,7 @@ public abstract class ChatboxDialogueOverlay extends Overlay
             resetForNextEncounter();
         }
 
-        boolean shouldBeOpen = plugin.getPhase() == GamePhase.ACTIVE
+        boolean shouldBeOpen = plugin.phase == GamePhase.ACTIVE
             && self != null && self.equalsIgnoreCase(encounterRsn)
             && !submitted
             && System.currentTimeMillis() >= getRevealAt();
@@ -371,8 +371,8 @@ public abstract class ChatboxDialogueOverlay extends Overlay
 
     /** This NPC's own chathead portrait model, ready to light/render -- default just loads
      * getNpcId()'s own natural-colored chathead resource. Override when the in-world NPC standing
-     * on the tile is recolored by hand (see ItemShopDialogueOverlay's own override, and
-     * ItemShopNpcOverlay's RECOLOR_FIND/RECOLOR_REPLACE doc for why) -- without this, the portrait
+     * on the tile is recolored by hand (see ItemShopDialogueOverlay/WiseOldManDialogueOverlay's own
+     * overrides, and InteriorNpcOverlay#applyRecolor's doc for why) -- without this, the portrait
      * and the NPC actually standing there would show two different palettes for what's meant to be
      * the same character. */
     protected Model loadChatheadModel()

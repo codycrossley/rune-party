@@ -52,7 +52,7 @@ public final class HardcodedCourseLauncherOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (plugin.getGameId() != null)
+        if (plugin.gameId != null)
         {
             objects.clear();
             return null;
@@ -73,7 +73,7 @@ public final class HardcodedCourseLauncherOverlay extends Overlay
      * object's own getZ() -- that field is never populated by setLocation. */
     public HardcodedCourse hoveredCourse(Point canvasPoint)
     {
-        if (canvasPoint == null || plugin.getGameId() != null) return null;
+        if (canvasPoint == null || plugin.gameId != null) return null;
 
         for (HardcodedCourse course : HardcodedCourse.ALL)
         {

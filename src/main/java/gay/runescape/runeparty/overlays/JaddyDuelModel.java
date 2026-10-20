@@ -132,7 +132,7 @@ public class JaddyDuelModel extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (plugin.getPhase() != GamePhase.ACTIVE)
+        if (plugin.phase != GamePhase.ACTIVE)
         {
             clear();
             return null;
@@ -290,7 +290,7 @@ public class JaddyDuelModel extends Overlay
      * distinct plane seen, since a plane mismatch is the other standing suspicion. */
     private void logZoneDiagnosticIfNeeded(List<TileReducer.TileEntry> entries, int jaddyTileCount)
     {
-        if (!plugin.isJaddyActive()) return;
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.JADDY_KEY)) return;
         long now = System.currentTimeMillis();
         if (now - lastZoneDiagnosticLogAt < 2000) return;
         lastZoneDiagnosticLogAt = now;

@@ -67,7 +67,7 @@ public class TurfWarsScoreOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (!plugin.isTurfWarsActive() || !plugin.isMinigamePlayable()) return null;
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.TURF_WARS_KEY) || !plugin.isMinigamePlayable()) return null;
 
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
@@ -196,7 +196,7 @@ public class TurfWarsScoreOverlay extends Overlay
      * "0s") if getTurfWarsEndsAt() hasn't been stamped yet. */
     private String countdownText()
     {
-        long endsAt = plugin.getTurfWarsEndsAt();
+        long endsAt = plugin.minigamePresentation.turfWars().getEndsAt();
         if (endsAt == 0) return "";
         long remainingMs = endsAt - System.currentTimeMillis();
         long remainingSec = Math.max(0, (remainingMs + 999) / 1000);

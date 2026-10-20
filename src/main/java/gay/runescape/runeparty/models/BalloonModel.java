@@ -95,7 +95,7 @@ public final class BalloonModel
      * getBalloonPopGrowthLevelByPlayer, then hovers each one above its own real, live player. */
     public void update()
     {
-        Map<String, Integer> growthLevelByPlayer = plugin.getBalloonPopGrowthLevelByPlayer();
+        Map<String, Integer> growthLevelByPlayer = plugin.minigamePresentation.balloonPop().getGrowthLevelByPlayer();
 
         Map<String, Player> liveByRsn = new HashMap<>();
         for (Player p : client.getPlayers())
@@ -182,7 +182,7 @@ public final class BalloonModel
      * already document for this exact RuneLite API. */
     private Model buildModel(String rsn, int level)
     {
-        String colorNumber = plugin.getRosterReducer().getColorNumber(rsn);
+        String colorNumber = plugin.rosterReducer.getColorNumber(rsn);
         RunePartyColor seatColor = RunePartyColor.forNumber(colorNumber);
         Color targetColor = seatColor != null ? seatColor.awt : Color.WHITE;
 

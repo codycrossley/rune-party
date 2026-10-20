@@ -4,6 +4,8 @@ import gay.runescape.runeparty.RosterReducer;
 import gay.runescape.runeparty.RunePartyPlugin;
 
 import net.runelite.api.Client;
+import net.runelite.api.Model;
+import net.runelite.api.ModelData;
 import net.runelite.client.game.SpriteManager;
 import net.runelite.client.input.MouseManager;
 
@@ -62,16 +64,29 @@ public final class WiseOldManDialogueOverlay extends ChatboxDialogueOverlay
     }
 
     @Override
-    protected String getEncounterRsn() { return plugin.getWiseOldManEncounterRsn(); }
+    protected String getEncounterRsn() { return plugin.wiseOldManPresentation.getEncounterRsn(); }
 
     @Override
-    protected long getRevealAt() { return plugin.getWiseOldManRevealAt(); }
+    protected long getRevealAt() { return plugin.wiseOldManPresentation.getRevealAt(); }
 
     @Override
     protected int getNpcId() { return RunePartyPlugin.WISE_OLD_MAN_NPC_ID; }
 
     @Override
     protected String getSpeakerName() { return "Wise Old Man"; }
+
+    /** The Wise Old Man's own in-world model is recolored by hand (see RunePartyPlugin's own
+     * WISE_OLD_MAN_RECOLOR_FIND/RECOLOR_REPLACE doc) -- his chathead portrait needs the exact
+     * same recolor applied via InteriorNpcOverlay's shared applyRecolor helper, or the dialogue
+     * box would show him in his stock colors while the model standing on the tile shows the
+     * recolored ones (see ItemShopDialogueOverlay's own identical override). */
+    @Override
+    protected Model loadChatheadModel()
+    {
+        ModelData raw = RunePartyRender.loadNpcChatheadModelData(client, getNpcId());
+        if (raw == null) return null;
+        return InteriorNpcOverlay.applyRecolor(raw, RunePartyPlugin.WISE_OLD_MAN_RECOLOR_FIND, RunePartyPlugin.WISE_OLD_MAN_RECOLOR_REPLACE).light();
+    }
 
     @Override
     protected void resetForNextEncounter()

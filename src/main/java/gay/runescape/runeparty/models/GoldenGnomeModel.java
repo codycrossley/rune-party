@@ -55,13 +55,13 @@ public final class GoldenGnomeModel
         }
 
         long now = System.currentTimeMillis();
-        WorldPoint moveOld = plugin.getGoldenGnomeMoveOldPoint();
-        if (moveOld != null && now < plugin.getGoldenGnomeMoveHideOldAt())
+        WorldPoint moveOld = plugin.goldenGnomePresentation.getMoveOldPoint();
+        if (moveOld != null && now < plugin.goldenGnomePresentation.getMoveHideOldAt())
         {
             current.add(moveOld);
         }
-        WorldPoint moveNew = plugin.getGoldenGnomeMoveNewPoint();
-        if (moveNew != null && now < plugin.getGoldenGnomeMoveShowNewAt())
+        WorldPoint moveNew = plugin.goldenGnomePresentation.getMoveNewPoint();
+        if (moveNew != null && now < plugin.goldenGnomePresentation.getMoveShowNewAt())
         {
             current.remove(moveNew);
         }

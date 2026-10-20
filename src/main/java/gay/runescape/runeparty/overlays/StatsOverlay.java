@@ -64,28 +64,28 @@ public class StatsOverlay extends Overlay
     public Dimension render(Graphics2D g)
     {
         if (!config.showStatsOverlay()) return null;
-        GamePhase phase = plugin.getPhase();
+        GamePhase phase = plugin.phase;
         if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE && phase != GamePhase.ENDED) return null;
 
         // Hidden outright while the full-screen board map is up -- same reasoning
         // AnnouncementOverlay's own isMapShowing() gate gives: the map already dims/covers the
         // whole game view, and this HUD's own info (coins/GG counts) has no business competing
         // with it for attention while the player's looking at the board instead.
-        if (plugin.isMapShowing()) return null;
+        if (plugin.mapShowing) return null;
 
         // Hidden outright for as long as any mini-game is active -- see this class's own doc for
         // why (a mini-game's own dedicated overlay shows whatever it needs to instead).
-        if (plugin.isMinigameActive()) return null;
+        if (plugin.minigamePresentation.isActive()) return null;
 
         // Hidden outright for the whole end-game ceremony -- the ceremony's own bonus/final
         // standings are meant to be revealed one beat at a time (see CeremonyPresentation's own
         // doc); this HUD's own always-current coin/Golden Gnome totals would spoil that reveal by
         // just sitting there showing the real numbers the whole time.
-        if (plugin.isCeremonyStarted()) return null;
+        if (plugin.ceremonyPresentation.isCeremonyStarted()) return null;
 
         // seatedPlayers() excludes both spectators and a host-added PLAYER who hasn't run the join
         // flow themselves yet, keeping this HUD to players actually in the game right now.
-        List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
+        List<RosterReducer.RosterEntry> players = plugin.rosterReducer.seatedPlayers();
         if (players.isEmpty()) return null;
 
         // Turn order, not ranked -- a ranked view lives in AnnouncementOverlay's post-round
@@ -101,7 +101,7 @@ public class StatsOverlay extends Overlay
 
         // 0 until GAME_STARTED actually lands -- LOBBY has no round to show yet, so this line
         // doesn't appear until there's something real to say.
-        int maxRounds = plugin.getMaxRounds();
+        int maxRounds = plugin.maxRounds;
         if (maxRounds > 0)
         {
             panelComponent.getChildren().add(LineComponent.builder()
@@ -110,7 +110,7 @@ public class StatsOverlay extends Overlay
                 .build());
         }
 
-        String currentTurn = plugin.getCurrentTurnRsn();
+        String currentTurn = plugin.currentTurnRsn;
         for (RosterReducer.RosterEntry entry : players)
         {
             // isMinigameActive() is already ruled out above, so onTurn only ever needs the plain

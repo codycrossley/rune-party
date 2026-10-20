@@ -59,13 +59,13 @@ public class ClickClickClickOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (!plugin.isClickClickClickActive() || !plugin.isMinigamePlayable()) return null;
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.CLICK_CLICK_CLICK_KEY) || !plugin.isMinigamePlayable()) return null;
 
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
         String numberText = String.valueOf(plugin.getClickClickClickUniqueTileCount());
-        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.getRosterReducer().getColorNumber(plugin.getLocalRsn()));
+        RunePartyColor seatColor = RunePartyColor.forNumber(plugin.rosterReducer.getColorNumber(plugin.getLocalRsn()));
         Color numberColor = seatColor != null ? seatColor.awt : NUMBER_COLOR_FALLBACK;
 
         return RunePartyRender.drawTitledStatPanel(g, PADDING_X, PADDING_Y, LABEL_GAP, CORNER_RADIUS,

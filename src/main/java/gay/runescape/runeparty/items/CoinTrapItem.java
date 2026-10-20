@@ -1,21 +1,16 @@
 package gay.runescape.runeparty.items;
 
-import java.awt.AlphaComposite;
-import java.awt.Composite;
+import gay.runescape.runeparty.WheelEntry;
+
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
-import java.io.IOException;
-import java.io.InputStream;
-import javax.imageio.ImageIO;
-import lombok.extern.slf4j.Slf4j;
 
 /** Placed on a tile rather than resolved instantly (see requiresPlacement). The in-world model
  * once placed is rendered separately by TileOverlay -- drawIcon below is only the wheel/inventory
  * glyph. */
-@Slf4j
 public class CoinTrapItem implements Item
 {
-    private static final BufferedImage ICON = loadIcon();
+    private static final BufferedImage ICON = WheelEntry.loadIcon(CoinTrapItem.class, "/gay/runescape/runeparty/item_icons/coin-trap-icon.png", "Coin Trap icon");
 
     private final String key;
     private final String displayName;
@@ -72,19 +67,5 @@ public class CoinTrapItem implements Item
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
         drawIconImage(g, ICON, x, y, size, alpha);
-    }
-
-    private static BufferedImage loadIcon()
-    {
-        try (InputStream is = CoinTrapItem.class.getResourceAsStream("/gay/runescape/runeparty/item_icons/coin-trap-icon.png"))
-        {
-            if (is == null) throw new IOException("coin-trap-icon.png resource not found");
-            return ImageIO.read(is);
-        }
-        catch (IOException e)
-        {
-            log.warn("Failed to load the Coin Trap icon", e);
-            return null;
-        }
     }
 }

@@ -1,21 +1,16 @@
 package gay.runescape.runeparty.items;
 
-import java.awt.AlphaComposite;
-import java.awt.Composite;
+import gay.runescape.runeparty.WheelEntry;
+
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
-import java.io.IOException;
-import java.io.InputStream;
-import javax.imageio.ImageIO;
-import lombok.extern.slf4j.Slf4j;
 
 /** Spent on another player rather than the user themselves (see requiresTarget). Stacks: a second
  * Tele Block on an already-blocked player queues a second skipped turn rather than overwriting the
  * first. */
-@Slf4j
 public class TeleBlockItem implements Item
 {
-    private static final BufferedImage ICON = loadIcon();
+    private static final BufferedImage ICON = WheelEntry.loadIcon(TeleBlockItem.class, "/gay/runescape/runeparty/item_icons/ice-barrage-icon.png", "Ice Barrage icon");
 
     private final String key;
     private final String displayName;
@@ -54,19 +49,5 @@ public class TeleBlockItem implements Item
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
         drawIconImage(g, ICON, x, y, size, alpha);
-    }
-
-    private static BufferedImage loadIcon()
-    {
-        try (InputStream is = TeleBlockItem.class.getResourceAsStream("/gay/runescape/runeparty/item_icons/ice-barrage-icon.png"))
-        {
-            if (is == null) throw new IOException("ice-barrage-icon.png resource not found");
-            return ImageIO.read(is);
-        }
-        catch (IOException e)
-        {
-            log.warn("Failed to load the Ice Barrage icon", e);
-            return null;
-        }
     }
 }

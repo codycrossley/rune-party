@@ -1,19 +1,14 @@
 package gay.runescape.runeparty.items;
 
-import java.awt.AlphaComposite;
-import java.awt.Composite;
+import gay.runescape.runeparty.WheelEntry;
+
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
-import java.io.IOException;
-import java.io.InputStream;
-import javax.imageio.ImageIO;
-import lombok.extern.slf4j.Slf4j;
 
 /** Spent on another player rather than the user themselves (see requiresTarget). Sends the target
  * backward BACKWARD_OFFSET tiles along the course path -- see the server's own items/tele_other.py
  * for the exact mechanic and why it fires a bare PLAYER_MOVED rather than routing through a real
  * tile landing. */
-@Slf4j
 public class TeleOtherItem implements Item
 {
     /** Matches the server's own items/tele_other.py#BACKWARD_OFFSET -- purely cosmetic here (the
@@ -21,7 +16,7 @@ public class TeleOtherItem implements Item
      * true number rather than a guess. */
     private static final int BACKWARD_OFFSET = 5;
 
-    private static final BufferedImage ICON = loadIcon();
+    private static final BufferedImage ICON = WheelEntry.loadIcon(TeleOtherItem.class, "/gay/runescape/runeparty/item_icons/tele-other-icon.png", "Tele Other icon");
 
     private final String key;
     private final String displayName;
@@ -60,19 +55,5 @@ public class TeleOtherItem implements Item
     public void drawIcon(Graphics2D g, int x, int y, int size, float alpha)
     {
         drawIconImage(g, ICON, x, y, size, alpha);
-    }
-
-    private static BufferedImage loadIcon()
-    {
-        try (InputStream is = TeleOtherItem.class.getResourceAsStream("/gay/runescape/runeparty/item_icons/tele-other-icon.png"))
-        {
-            if (is == null) throw new IOException("tele-other-icon.png resource not found");
-            return ImageIO.read(is);
-        }
-        catch (IOException e)
-        {
-            log.warn("Failed to load the Tele Other icon", e);
-            return null;
-        }
     }
 }
