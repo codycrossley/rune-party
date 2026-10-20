@@ -292,7 +292,7 @@ public class TileOverlay extends Overlay
             balloonModel.update();
         }
 
-        if (plugin.isCoursePlacementMode())
+        if (plugin.courseBuilder.isCoursePlacementMode())
         {
             renderPresetPreview(g);
         }
@@ -983,7 +983,7 @@ public class TileOverlay extends Overlay
 
     private void renderPresetPreview(Graphics2D g)
     {
-        CoursePreset preset = plugin.getSelectedPreset();
+        CoursePreset preset = plugin.courseBuilder.getSelectedPreset();
         if (preset == null) return;
 
         Tile hovered = client.getTopLevelWorldView().getSelectedSceneTile();
@@ -991,7 +991,7 @@ public class TileOverlay extends Overlay
         WorldPoint center = hovered.getWorldLocation();
         if (center == null) return;
 
-        List<CoursePreset.PlacedTile> placed = preset.layout(center, plugin.getPresetRotationSteps());
+        List<CoursePreset.PlacedTile> placed = preset.layout(center, plugin.courseBuilder.getPresetRotationSteps());
 
         for (CoursePreset.PlacedTile pt : placed)
         {

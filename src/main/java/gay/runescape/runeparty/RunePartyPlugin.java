@@ -1161,7 +1161,7 @@ public class RunePartyPlugin extends Plugin
     // RuneLite menu entries, issuing mark/unmark-tiles requests; making create/join/session API
     // calls) rather than cosmetic banner/timing state. Same constructed-once-in-startUp/
     // reset()-via-resetState() convention as the presenters above.
-    private CourseBuilder courseBuilder;
+    public CourseBuilder courseBuilder;
     private SessionManager sessionManager;
     private RunePartyPanel panel;
     private NavigationButton navButton;
@@ -2130,13 +2130,13 @@ public class RunePartyPlugin extends Plugin
     // need to change.
     // -------------------------------------------------------------------------
 
-    public void selectPreset(CoursePreset preset) { courseBuilder.selectPreset(preset); }
-    public void enterCoursePlacementMode() { courseBuilder.enterCoursePlacementMode(); }
+    
+    
     /** Unmarks every currently-committed course tile -- the host's "start over" button. */
-    public void clearCourse() { courseBuilder.clearCourse(); }
+    
     /** Built-in presets -- see CourseBuilder#getAvailablePresets, the only reader besides
      * RunePartyPanel's own presetDropdown. */
-    public List<CoursePreset> getAvailablePresets() { return courseBuilder.getAvailablePresets(); }
+    
 
     // -------------------------------------------------------------------------
     // Board interaction helpers -- Golden Gnome purchase, Click Click Click tile clicks, Fishing
@@ -3606,7 +3606,6 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
-
     /** Pushes turnEffectGateUntil forward to at least {@code untilTimestamp} -- called by whatever
      * just started a turn-effect visual with its own on-screen duration (currently only the
      * COINS_CHANGED handler, passing coinPopupUntil). A future tile effect with its own timed
@@ -4698,9 +4697,9 @@ public class RunePartyPlugin extends Plugin
      * standardCourseKey's own field doc. Course-building tools (RunePartyPanel's own
      * courseToolsPanel) stay hidden for the rest of this game's life once this flips true. */
     public boolean isStandardCourseLocked() { return standardCourseKey != null; }
-    public boolean isCoursePlacementMode() { return courseBuilder.isCoursePlacementMode(); }
-    public CoursePreset getSelectedPreset() { return courseBuilder.getSelectedPreset(); }
-    public int getPresetRotationSteps() { return courseBuilder.getPresetRotationSteps(); }
+    
+    
+    
     public String getCurrentTurnRsn() { return currentTurnRsn; }
     public Integer getLastDiceRoll() { return lastDiceRoll; }
     public boolean isPendingRoll() { return pendingRoll; }
