@@ -133,8 +133,8 @@ public final class ChanceSpacePresentation
         }
         else if (Boolean.TRUE.equals(gnomeTransferred))
         {
-            plugin.showGoldenGnomeCountPopup(giver, plugin.getRosterReducer().getGoldenGnomeCount(giver), -1);
-            plugin.showGoldenGnomeCountPopup(receiver, plugin.getRosterReducer().getGoldenGnomeCount(receiver), 1);
+            plugin.goldenGnomePresentation.showCountPopup(giver, plugin.getRosterReducer().getGoldenGnomeCount(giver), -1);
+            plugin.goldenGnomePresentation.showCountPopup(receiver, plugin.getRosterReducer().getGoldenGnomeCount(receiver), 1);
         }
     }
 

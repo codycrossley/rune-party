@@ -323,7 +323,7 @@ public final class CeremonyPresentation
             if (generation != ceremonyGeneration) return;
             for (String rsn : winners)
             {
-                plugin.showGoldenGnomeCountPopup(rsn, plugin.getRosterReducer().getGoldenGnomeCount(rsn), 1);
+                plugin.goldenGnomePresentation.showCountPopup(rsn, plugin.getRosterReducer().getGoldenGnomeCount(rsn), 1);
             }
         }, RunePartyPlugin.GOLDEN_GNOME_MOVE_VANISH_DELAY_MS, TimeUnit.MILLISECONDS);
     }

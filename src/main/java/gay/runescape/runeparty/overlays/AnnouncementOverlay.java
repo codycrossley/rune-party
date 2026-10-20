@@ -557,7 +557,7 @@ public class AnnouncementOverlay extends Overlay
      * renderGoldenGnomeOutcome. */
     private void renderGoldenGnomeOffer(Graphics2D g)
     {
-        String offerRsn = plugin.getGoldenGnomeOfferRsn();
+        String offerRsn = plugin.goldenGnomePresentation.getOfferRsn();
         if (offerRsn == null) return;
 
         float alpha = GOLDEN_GNOME_OFFER_MIN_ALPHA + (1f - GOLDEN_GNOME_OFFER_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS);
@@ -597,11 +597,11 @@ public class AnnouncementOverlay extends Overlay
      * whoever the outcome belongs to. */
     private void renderGoldenGnomeOutcome(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getGoldenGnomeOutcomeBannerUntil(), GOLDEN_GNOME_OUTCOME_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.goldenGnomePresentation.getOutcomeBannerUntil(), GOLDEN_GNOME_OUTCOME_FADE_MS);
         if (alpha == null) return;
 
-        String outcome = plugin.getGoldenGnomeOutcome();
-        String rsn = plugin.getGoldenGnomeOutcomeRsn();
+        String outcome = plugin.goldenGnomePresentation.getOutcome();
+        String rsn = plugin.goldenGnomePresentation.getOutcomeRsn();
         boolean isLocal = isLocal(rsn);
 
         String text;
@@ -2169,7 +2169,7 @@ public class AnnouncementOverlay extends Overlay
      * creating or joining a game. Local-player-only. */
     private void renderWelcomeBanner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getWelcomeBannerUntil(), WELCOME_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.sessionManager.getWelcomeBannerUntil(), WELCOME_FADE_MS);
         if (alpha == null) return;
 
         int centerX = drawableWidth() / 2;

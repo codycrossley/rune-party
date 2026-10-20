@@ -908,7 +908,7 @@ public class TileOverlay extends Overlay
     private void renderGoldenGnomePurchaseArrow(Graphics2D g)
     {
         if (!plugin.isPendingRoll()) return;
-        if (plugin.getGoldenGnomeOfferRsn() != null) return;
+        if (plugin.goldenGnomePresentation.getOfferRsn() != null) return;
         String moverRsn = plugin.getCurrentTurnRsn();
         if (moverRsn == null || !isLocalPlayer(moverRsn)) return;
 
