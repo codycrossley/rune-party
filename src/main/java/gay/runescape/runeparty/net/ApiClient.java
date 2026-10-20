@@ -72,11 +72,7 @@ public class ApiClient
         JsonObject body = new JsonObject();
         body.addProperty("maxRounds", maxRounds);
 
-        try (Response resp = post("/v1/games/" + gameId + "/start", body, writeKey))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Start game failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/start", body, writeKey, "Start game");
     }
 
     /** Reports the local player standing on the START tile after GAME_STARTED but before turn
@@ -90,20 +86,12 @@ public class ApiClient
         body.addProperty("y", y);
         body.addProperty("plane", plane);
 
-        try (Response resp = post("/v1/games/" + gameId + "/confirm-start", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Confirm start failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/confirm-start", body, playerToken, "Confirm start");
     }
 
     public void endGame(String gameId, String writeKey) throws IOException
     {
-        try (Response resp = post("/v1/games/" + gameId + "/end", new JsonObject(), writeKey))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "End game failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/end", new JsonObject(), writeKey, "End game");
     }
 
     public void leaveGame(String gameId, String playerRsn, String playerToken) throws IOException
@@ -118,11 +106,7 @@ public class ApiClient
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
 
-        try (Response resp = post("/v1/games/" + gameId + "/remove-player", body, writeKey))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Remove player failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/remove-player", body, writeKey, "Remove player");
     }
 
     /** Host-only: promotes/demotes a roster member between PLAYER and SPECTATOR. Joining a game
@@ -136,11 +120,7 @@ public class ApiClient
         body.addProperty("role", role.name());
         if (colorNumber != null) body.addProperty("colorNumber", colorNumber);
 
-        try (Response resp = post("/v1/games/" + gameId + "/assign-role", body, writeKey))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Assign role failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/assign-role", body, writeKey, "Assign role");
     }
 
     // -------------------------------------------------------------------------
@@ -280,11 +260,7 @@ public class ApiClient
         body.addProperty("anchovies", anchovies);
         body.addProperty("shrimp", shrimp);
 
-        try (Response resp = post("/v1/games/" + gameId + "/submit-fishing-catch", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Submit fishing catch failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/submit-fishing-catch", body, playerToken, "Submit fishing catch");
     }
 
     /** Submits the local player's final Click, Click, Click unique-tile-click tally. Fired once
@@ -296,11 +272,7 @@ public class ApiClient
         body.addProperty("player", playerRsn);
         body.addProperty("uniqueTiles", uniqueTiles);
 
-        try (Response resp = post("/v1/games/" + gameId + "/submit-click-click-click-result", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Submit Click, Click, Click result failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/submit-click-click-click-result", body, playerToken, "Submit Click, Click, Click result");
     }
 
     /** Submits the local player's final Crab Rave Dance-emote tally. Fired once per round, when
@@ -311,11 +283,7 @@ public class ApiClient
         body.addProperty("player", playerRsn);
         body.addProperty("danceCount", danceCount);
 
-        try (Response resp = post("/v1/games/" + gameId + "/submit-crab-rave-result", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Submit Crab Rave result failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/submit-crab-rave-result", body, playerToken, "Submit Crab Rave result");
     }
 
     /** Reports the local player's final Dance, Dance, RuneScape tally -- called exactly once per
@@ -327,11 +295,7 @@ public class ApiClient
         body.addProperty("player", playerRsn);
         body.addProperty("score", score);
 
-        try (Response resp = post("/v1/games/" + gameId + "/submit-ddr-result", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Submit Dance, Dance, RuneScape result failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/submit-ddr-result", body, playerToken, "Submit Dance, Dance, RuneScape result");
     }
 
     /** A player's own one-shot self-report that it just reached the Dance, Dance, RuneScape arena
@@ -355,11 +319,7 @@ public class ApiClient
         body.addProperty("player", playerRsn);
         body.addProperty("durationMs", durationMs);
 
-        try (Response resp = post("/v1/games/" + gameId + "/report-ddr-round-duration", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Report Dance, Dance, RuneScape round duration failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/report-ddr-round-duration", body, playerToken, "Report Dance, Dance, RuneScape round duration");
     }
 
     /** Reports the local player's own one-shot, unconditional result for the current Repeat After
@@ -374,11 +334,7 @@ public class ApiClient
         body.addProperty("roundNumber", roundNumber);
         body.addProperty("completed", completed);
 
-        try (Response resp = post("/v1/games/" + gameId + "/submit-repeat-after-me-result", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Submit Repeat After Me result failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/submit-repeat-after-me-result", body, playerToken, "Submit Repeat After Me result");
     }
 
     /** A player's own one-shot self-report that it just reached the current Repeat After Me round's
@@ -434,11 +390,7 @@ public class ApiClient
         body.addProperty("player", playerRsn);
         body.addProperty("level", level);
 
-        try (Response resp = post("/v1/games/" + gameId + "/report-balloon-pop-growth", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Report Balloon Pop growth failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/report-balloon-pop-growth", body, playerToken, "Report Balloon Pop growth");
     }
 
     /** Reports that this client's own local Balloon Pop click count just reached 100 and its own
@@ -460,11 +412,7 @@ public class ApiClient
         body.addProperty("player", playerRsn);
         body.addProperty("accept", accept);
 
-        try (Response resp = post("/v1/games/" + gameId + "/respond-golden-gnome-offer", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Respond to Golden Gnome offer failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/respond-golden-gnome-offer", body, playerToken, "Respond to Golden Gnome offer");
     }
 
     /** Reports the local player's BOW emote during a pending Jad encounter. 409s if the encounter
@@ -486,11 +434,7 @@ public class ApiClient
         body.addProperty("action", action);
         if (target != null) body.addProperty("target", target);
 
-        try (Response resp = post("/v1/games/" + gameId + "/wise-old-man-choose", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Wise Old Man choice failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/wise-old-man-choose", body, playerToken, "Wise Old Man choice");
     }
 
     public void itemShopChoose(String gameId, String playerRsn, String playerToken, String action, String itemKey) throws IOException
@@ -500,11 +444,7 @@ public class ApiClient
         body.addProperty("action", action);
         if (itemKey != null) body.addProperty("itemKey", itemKey);
 
-        try (Response resp = post("/v1/games/" + gameId + "/item-shop-choose", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Item Shop choice failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/item-shop-choose", body, playerToken, "Item Shop choice");
     }
 
     /** Spends one of the local player's held items on their own turn. 409s if they don't hold it or
@@ -515,11 +455,7 @@ public class ApiClient
         body.addProperty("player", playerRsn);
         body.addProperty("itemKey", itemKey);
 
-        try (Response resp = post("/v1/games/" + gameId + "/use-item", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Use item failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/use-item", body, playerToken, "Use item");
     }
 
     /** Spends one of the local player's held target-requiring items (currently only Tele Block) on
@@ -532,11 +468,7 @@ public class ApiClient
         body.addProperty("itemKey", itemKey);
         body.addProperty("target", targetRsn);
 
-        try (Response resp = post("/v1/games/" + gameId + "/use-item-on-player", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Use item on player failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/use-item-on-player", body, playerToken, "Use item on player");
     }
 
     /** Spends a held Coin Trap by placing it at (x, y, plane) -- consumes the item and marks the
@@ -563,11 +495,7 @@ public class ApiClient
         body.addProperty("player", playerRsn);
         body.addProperty("score", score);
 
-        try (Response resp = post("/v1/games/" + gameId + "/submit-minigame-result", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Submit minigame result failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/submit-minigame-result", body, playerToken, "Submit minigame result");
     }
 
     /** Reports the local player reaching a still-live Coin Rush spawn tile, keyed by
@@ -642,11 +570,7 @@ public class ApiClient
         body.addProperty("player", playerRsn);
         body.addProperty("colorHex", colorHex);
 
-        try (Response resp = post("/v1/games/" + gameId + "/report-jaddy-zone", body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Report Jaddy zone failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/report-jaddy-zone", body, playerToken, "Report Jaddy zone");
     }
 
     // -------------------------------------------------------------------------
@@ -678,11 +602,7 @@ public class ApiClient
         JsonObject body = new JsonObject();
         body.add("tiles", arr);
 
-        try (Response resp = post("/v1/games/" + gameId + "/mark-tiles", body, writeKey))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Mark tiles failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/mark-tiles", body, writeKey, "Mark tiles");
     }
 
     public void unmarkTiles(String gameId, String writeKey, List<PointSpec> points) throws IOException
@@ -700,11 +620,7 @@ public class ApiClient
         JsonObject body = new JsonObject();
         body.add("tiles", arr);
 
-        try (Response resp = post("/v1/games/" + gameId + "/unmark-tiles", body, writeKey))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Unmark tiles failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/unmark-tiles", body, writeKey, "Unmark tiles");
     }
 
     /** Locks this game to a Standard Course (see HardcodedCourse.java) -- called once, right after
@@ -715,11 +631,7 @@ public class ApiClient
         JsonObject body = new JsonObject();
         body.addProperty("courseKey", courseKey);
 
-        try (Response resp = post("/v1/games/" + gameId + "/lock-standard-course", body, writeKey))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), "Lock standard course failed (" + resp.code() + "): " + raw);
-        }
+        postChecked("/v1/games/" + gameId + "/lock-standard-course", body, writeKey, "Lock standard course");
     }
 
     // -------------------------------------------------------------------------
@@ -825,6 +737,18 @@ public class ApiClient
         return http.newCall(builder.build()).execute();
     }
 
+    /** Shared "fire this POST and throw if the server didn't accept it" tail every call above ends
+     * with -- the request bodies differ, the failure handling never does. {@code errorLabel} names
+     * the action for the thrown message ("Start game" -> "Start game failed (409): ..."). */
+    private void postChecked(String path, JsonObject body, String authToken, String errorLabel) throws IOException
+    {
+        try (Response resp = post(path, body, authToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), errorLabel + " failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     /** Shared body for the ~17 one-shot "here's who I am" reports below (arrival/elimination
      * confirmations, ready-checks, and similar) -- each one used to hand-roll the identical
      * {@code {"player": playerRsn}} POST + throw-on-failure shape (see
@@ -838,11 +762,7 @@ public class ApiClient
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
 
-        try (Response resp = post(path, body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), errorLabel + " failed (" + resp.code() + "): " + raw);
-        }
+        postChecked(path, body, playerToken, errorLabel);
     }
 
     /** Shared body for the 6 one-shot "here's who I am, and where" reports above (arrival/dash/cast
@@ -856,11 +776,7 @@ public class ApiClient
         body.addProperty("y", y);
         body.addProperty("plane", plane);
 
-        try (Response resp = post(path, body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), errorLabel + " failed (" + resp.code() + "): " + raw);
-        }
+        postChecked(path, body, playerToken, errorLabel);
     }
 
     /** Same shape as postPlayerPosition above, plus the spawnId both live-pickup collectors
@@ -874,11 +790,7 @@ public class ApiClient
         body.addProperty("y", y);
         body.addProperty("plane", plane);
 
-        try (Response resp = post(path, body, playerToken))
-        {
-            String raw = bodyString(resp);
-            if (!resp.isSuccessful()) throw new ApiHttpException(resp.code(), errorLabel + " failed (" + resp.code() + "): " + raw);
-        }
+        postChecked(path, body, playerToken, errorLabel);
     }
 
     private static String bodyString(Response resp) throws IOException
