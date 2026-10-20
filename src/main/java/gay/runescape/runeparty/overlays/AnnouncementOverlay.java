@@ -504,10 +504,10 @@ public class AnnouncementOverlay extends Overlay
      * rendering once the bow window closes, handing off to renderJadOutcome. */
     private void renderJadEncounter(Graphics2D g)
     {
-        String encounterRsn = plugin.getJadEncounterRsn();
+        String encounterRsn = plugin.jadPresentation.getEncounterRsn();
         if (encounterRsn == null) return;
-        if (plugin.isJadSmashTriggered()) return;
-        if (System.currentTimeMillis() < plugin.getJadRevealAt()) return;
+        if (plugin.jadPresentation.isSmashTriggered()) return;
+        if (System.currentTimeMillis() < plugin.jadPresentation.getRevealAt()) return;
 
         float alpha = GOLDEN_GNOME_OFFER_MIN_ALPHA + (1f - GOLDEN_GNOME_OFFER_MIN_ALPHA) * BannerAnim.pulse(System.currentTimeMillis(), GOLDEN_GNOME_OFFER_PULSE_PERIOD_MS);
 
@@ -524,7 +524,7 @@ public class AnnouncementOverlay extends Overlay
             centerX, y + 32, safeTextWidth(), alpha);
 
         // Skipped (shows nothing) for a client that only caught up on an already-open encounter.
-        long awakenedAt = plugin.getJadAwakenedAt();
+        long awakenedAt = plugin.jadPresentation.getAwakenedAt();
         if (awakenedAt != 0)
         {
             long remainingMs = RunePartyPlugin.JAD_BOW_WINDOW_MS - (System.currentTimeMillis() - awakenedAt);
@@ -637,7 +637,7 @@ public class AnnouncementOverlay extends Overlay
      * ChanceSpacePresentation's own scheduleAfterTurnEffects chain). */
     private void renderChanceSpaceTitle(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getChanceSpaceTitleUntil(), MINIGAME_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.chanceSpacePresentation.getTitleUntil(), MINIGAME_FADE_MS);
         if (alpha == null) return;
 
         int centerX = drawableWidth() / 2;
@@ -656,18 +656,18 @@ public class AnnouncementOverlay extends Overlay
      * move. */
     private void renderChanceSpaceIcons(Graphics2D g)
     {
-        Float stageAlpha = BannerAnim.fadeAlpha(plugin.getChanceSpaceIconsUntil(), CHANCE_SPACE_ICON_STAGE_FADE_MS);
+        Float stageAlpha = BannerAnim.fadeAlpha(plugin.chanceSpacePresentation.getIconsUntil(), CHANCE_SPACE_ICON_STAGE_FADE_MS);
         if (stageAlpha == null) return;
 
-        String leftRsn = plugin.getChanceSpaceIconsLeftRsn();
-        String rightRsn = plugin.getChanceSpaceIconsRightRsn();
-        String outcomeType = plugin.getChanceSpaceIconsOutcomeType();
-        String direction = plugin.getChanceSpaceIconsArrowDirection();
-        long[] slotDelayMs = plugin.getChanceSpaceIconsSlotDelayMs();
-        String[] announcementLines = plugin.getChanceSpaceAnnouncementLines();
+        String leftRsn = plugin.chanceSpacePresentation.getIconsLeftRsn();
+        String rightRsn = plugin.chanceSpacePresentation.getIconsRightRsn();
+        String outcomeType = plugin.chanceSpacePresentation.getIconsOutcomeType();
+        String direction = plugin.chanceSpacePresentation.getIconsArrowDirection();
+        long[] slotDelayMs = plugin.chanceSpacePresentation.getIconsSlotDelayMs();
+        String[] announcementLines = plugin.chanceSpacePresentation.getAnnouncementLines();
         if (leftRsn == null || rightRsn == null || outcomeType == null || direction == null || slotDelayMs == null) return;
 
-        long elapsed = System.currentTimeMillis() - plugin.getChanceSpaceIconsStart();
+        long elapsed = System.currentTimeMillis() - plugin.chanceSpacePresentation.getIconsStart();
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 2;
 
@@ -836,11 +836,11 @@ public class AnnouncementOverlay extends Overlay
      * bow" outcome. */
     private void renderJadOutcome(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getJadOutcomeBannerUntil(), GOLDEN_GNOME_OUTCOME_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.jadPresentation.getOutcomeBannerUntil(), GOLDEN_GNOME_OUTCOME_FADE_MS);
         if (alpha == null) return;
 
-        String outcome = plugin.getJadOutcome();
-        String rsn = plugin.getJadOutcomeRsn();
+        String outcome = plugin.jadPresentation.getOutcome();
+        String rsn = plugin.jadPresentation.getOutcomeRsn();
         boolean isLocal = isLocal(rsn);
 
         String text;
@@ -1146,11 +1146,11 @@ public class AnnouncementOverlay extends Overlay
      * banner at all for a decline/timeout -- only a real steal is announced. */
     private void renderWiseOldManStolen(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getWiseOldManStolenBannerUntil(), DEFAULT_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.wiseOldManPresentation.getStolenBannerUntil(), DEFAULT_FADE_MS);
         if (alpha == null) return;
-        String thief = plugin.getWiseOldManStolenThief();
-        String victim = plugin.getWiseOldManStolenVictim();
-        String kind = plugin.getWiseOldManStolenKind();
+        String thief = plugin.wiseOldManPresentation.getStolenThief();
+        String victim = plugin.wiseOldManPresentation.getStolenVictim();
+        String kind = plugin.wiseOldManPresentation.getStolenKind();
         if (thief == null || victim == null || kind == null) return;
 
         int centerX = drawableWidth() / 2;
@@ -1158,7 +1158,7 @@ public class AnnouncementOverlay extends Overlay
 
         String thiefLabel = isLocal(thief) ? "You" : thief;
         String victimLabel = isLocal(victim) ? "you" : victim;
-        String what = "golden_gnome".equals(kind) ? "a Golden Gnome" : (plugin.getWiseOldManStolenAmount() + " coins");
+        String what = "golden_gnome".equals(kind) ? "a Golden Gnome" : (plugin.wiseOldManPresentation.getStolenAmount() + " coins");
         String title = thiefLabel + " stole " + what + " from " + victimLabel + "!";
 
         Node message = Text.of(title).font(FontManager.getRunescapeBoldFont().deriveFont(WISE_OLD_MAN_STOLEN_TITLE_SIZE)).color(Color.WHITE);
@@ -1174,12 +1174,12 @@ public class AnnouncementOverlay extends Overlay
      * affordable, is announced. */
     private void renderItemShopOutcome(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getItemShopOutcomeBannerUntil(), ITEM_SHOP_OUTCOME_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.itemShopPresentation.getOutcomeBannerUntil(), ITEM_SHOP_OUTCOME_FADE_MS);
         if (alpha == null) return;
 
-        String outcome = plugin.getItemShopOutcome();
-        String rsn = plugin.getItemShopOutcomeRsn();
-        String itemDisplayName = plugin.getItemShopOutcomeItemDisplayName();
+        String outcome = plugin.itemShopPresentation.getOutcome();
+        String rsn = plugin.itemShopPresentation.getOutcomeRsn();
+        String itemDisplayName = plugin.itemShopPresentation.getOutcomeItemDisplayName();
         boolean isLocal = isLocal(rsn);
 
         String text;

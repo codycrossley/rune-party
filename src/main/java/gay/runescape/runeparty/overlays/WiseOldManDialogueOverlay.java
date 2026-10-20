@@ -64,10 +64,10 @@ public final class WiseOldManDialogueOverlay extends ChatboxDialogueOverlay
     }
 
     @Override
-    protected String getEncounterRsn() { return plugin.getWiseOldManEncounterRsn(); }
+    protected String getEncounterRsn() { return plugin.wiseOldManPresentation.getEncounterRsn(); }
 
     @Override
-    protected long getRevealAt() { return plugin.getWiseOldManRevealAt(); }
+    protected long getRevealAt() { return plugin.wiseOldManPresentation.getRevealAt(); }
 
     @Override
     protected int getNpcId() { return RunePartyPlugin.WISE_OLD_MAN_NPC_ID; }

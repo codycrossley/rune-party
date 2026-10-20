@@ -1153,10 +1153,10 @@ public class RunePartyPlugin extends Plugin
     private CeremonyPresentation ceremonyPresentation;
     private ItemPresentation itemPresentation;
     private MinigamePresentation minigamePresentation;
-    private JadPresentation jadPresentation;
-    private WiseOldManPresentation wiseOldManPresentation;
-    private ItemShopPresentation itemShopPresentation;
-    private ChanceSpacePresentation chanceSpacePresentation;
+    public JadPresentation jadPresentation;
+    public WiseOldManPresentation wiseOldManPresentation;
+    public ItemShopPresentation itemShopPresentation;
+    public ChanceSpacePresentation chanceSpacePresentation;
     // Neither of these two is a "Presentation" -- both own real interactive behavior (building
     // RuneLite menu entries, issuing mark/unmark-tiles requests; making create/join/session API
     // calls) rather than cosmetic banner/timing state. Same constructed-once-in-startUp/
@@ -5245,35 +5245,34 @@ public class RunePartyPlugin extends Plugin
         goldenGnomePresentation.showCountPopup(rsn, newTotal, delta);
     }
 
-    public long getChanceSpaceTitleUntil() { return chanceSpacePresentation.getTitleUntil(); }
-    public long getChanceSpaceIconsStart() { return chanceSpacePresentation.getIconsStart(); }
-    public long getChanceSpaceIconsUntil() { return chanceSpacePresentation.getIconsUntil(); }
-    public String getChanceSpaceIconsLeftRsn() { return chanceSpacePresentation.getIconsLeftRsn(); }
-    public String getChanceSpaceIconsRightRsn() { return chanceSpacePresentation.getIconsRightRsn(); }
-    public String getChanceSpaceIconsOutcomeType() { return chanceSpacePresentation.getIconsOutcomeType(); }
-    public String getChanceSpaceIconsArrowDirection() { return chanceSpacePresentation.getIconsArrowDirection(); }
-    public long[] getChanceSpaceIconsSlotDelayMs() { return chanceSpacePresentation.getIconsSlotDelayMs(); }
-    public String[] getChanceSpaceAnnouncementLines() { return chanceSpacePresentation.getAnnouncementLines(); }
+    
+    
+    
+    
+    
+    
+    
+    
+    
 
-    public String getJadEncounterRsn() { return jadPresentation.getEncounterRsn(); }
-    public long getJadAwakenedAt() { return jadPresentation.getAwakenedAt(); }
-    public long getJadRevealAt() { return jadPresentation.getRevealAt(); }
-    public boolean isJadSmashTriggered() { return jadPresentation.isSmashTriggered(); }
-    public String getJadOutcome() { return jadPresentation.getOutcome(); }
-    public String getJadOutcomeRsn() { return jadPresentation.getOutcomeRsn(); }
-    public long getJadOutcomeBannerUntil() { return jadPresentation.getOutcomeBannerUntil(); }
+    
+    
+    
+    
+    
+    
+    
 
     /** The rsn currently mid-Wise-Old-Man-encounter, or null -- see WiseOldManDialogueOverlay, the
      * only reader beyond the getters below: only shows its own dialogue box when this equals the
      * local player's own rsn. */
-    public String getWiseOldManEncounterRsn() { return wiseOldManPresentation.getEncounterRsn(); }
-    public long getWiseOldManAwakenedAt() { return wiseOldManPresentation.getAwakenedAt(); }
-    public long getWiseOldManRevealAt() { return wiseOldManPresentation.getRevealAt(); }
-    public String getWiseOldManStolenThief() { return wiseOldManPresentation.getStolenThief(); }
-    public String getWiseOldManStolenVictim() { return wiseOldManPresentation.getStolenVictim(); }
-    public String getWiseOldManStolenKind() { return wiseOldManPresentation.getStolenKind(); }
-    public Integer getWiseOldManStolenAmount() { return wiseOldManPresentation.getStolenAmount(); }
-    public long getWiseOldManStolenBannerUntil() { return wiseOldManPresentation.getStolenBannerUntil(); }
+    
+    
+    
+    
+    
+    
+    
 
     /** Submits the local player's own choice for their currently-open Wise Old Man encounter --
      * action is "steal_coins"/"steal_golden_gnome"/"decline", target is required for either steal
@@ -5296,14 +5295,12 @@ public class RunePartyPlugin extends Plugin
     /** The rsn currently mid-Item-Shop-encounter, or null -- see ItemShopDialogueOverlay, the only
      * reader beyond the getters below: only shows its own dialogue box when this equals the local
      * player's own rsn. */
-    public String getItemShopEncounterRsn() { return itemShopPresentation.getEncounterRsn(); }
-    public long getItemShopAwakenedAt() { return itemShopPresentation.getAwakenedAt(); }
-    public long getItemShopRevealAt() { return itemShopPresentation.getRevealAt(); }
-    public String getItemShopOutcome() { return itemShopPresentation.getOutcome(); }
-    public String getItemShopOutcomeRsn() { return itemShopPresentation.getOutcomeRsn(); }
-    public String getItemShopOutcomeItemDisplayName() { return itemShopPresentation.getOutcomeItemDisplayName(); }
-    public Integer getItemShopOutcomePrice() { return itemShopPresentation.getOutcomePrice(); }
-    public long getItemShopOutcomeBannerUntil() { return itemShopPresentation.getOutcomeBannerUntil(); }
+    
+    
+    
+    
+    
+    
 
     /** Submits the local player's own choice for their currently-open Item Shop encounter --
      * action is "buy_item"/"decline", itemKey is required for "buy_item" (see
