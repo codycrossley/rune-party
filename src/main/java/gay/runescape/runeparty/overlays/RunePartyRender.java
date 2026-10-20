@@ -51,22 +51,8 @@ public final class RunePartyRender
      * NPCComposition -- callers should treat both identically. */
     static Model loadNpcChatheadModel(Client client, int npcId)
     {
-        NPCComposition comp = client.getNpcDefinition(npcId);
-        if (comp == null) return null;
-
-        int[] modelIds = comp.getChatheadModels();
-        if (modelIds == null || modelIds.length == 0) return null;
-
-        ModelData[] parts = new ModelData[modelIds.length];
-        for (int i = 0; i < modelIds.length; i++)
-        {
-            ModelData part = client.loadModelData(modelIds[i]);
-            if (part == null) return null; // not cached yet -- caller retries next frame
-            parts[i] = part;
-        }
-
-        ModelData merged = parts.length == 1 ? parts[0] : client.mergeModels(parts);
-        return merged.light();
+        ModelData merged = loadNpcChatheadModelData(client, npcId);
+        return merged != null ? merged.light() : null;
     }
 
     /** Same merge as {@link #loadNpcChatheadModel}, but returns the raw, pre-lit {@link ModelData}
@@ -79,20 +65,7 @@ public final class RunePartyRender
     static ModelData loadNpcChatheadModelData(Client client, int npcId)
     {
         NPCComposition comp = client.getNpcDefinition(npcId);
-        if (comp == null) return null;
-
-        int[] modelIds = comp.getChatheadModels();
-        if (modelIds == null || modelIds.length == 0) return null;
-
-        ModelData[] parts = new ModelData[modelIds.length];
-        for (int i = 0; i < modelIds.length; i++)
-        {
-            ModelData part = client.loadModelData(modelIds[i]);
-            if (part == null) return null; // not cached yet -- caller retries next frame
-            parts[i] = part;
-        }
-
-        return parts.length == 1 ? parts[0] : client.mergeModels(parts);
+        return comp != null ? mergeModelParts(client, comp.getChatheadModels()) : null;
     }
 
     /** Same merge as {@link #loadNpcModel}, but returns the raw, pre-lit {@link ModelData} instead
@@ -103,16 +76,21 @@ public final class RunePartyRender
     static ModelData loadNpcModelData(Client client, int npcId)
     {
         NPCComposition comp = client.getNpcDefinition(npcId);
-        if (comp == null) return null;
+        return comp != null ? mergeModelParts(client, comp.getModels()) : null;
+    }
 
-        int[] modelIds = comp.getModels();
+    /** Shared merge loop both loadNpc*ModelData variants reduce to -- null modelIds (absent or
+     * empty) or any one part not cached yet both mean "nothing to return yet, caller retries next
+     * frame," same contract every caller above already documents. */
+    private static ModelData mergeModelParts(Client client, int[] modelIds)
+    {
         if (modelIds == null || modelIds.length == 0) return null;
 
         ModelData[] parts = new ModelData[modelIds.length];
         for (int i = 0; i < modelIds.length; i++)
         {
             ModelData part = client.loadModelData(modelIds[i]);
-            if (part == null) return null; // not cached yet -- caller retries next frame
+            if (part == null) return null;
             parts[i] = part;
         }
 
