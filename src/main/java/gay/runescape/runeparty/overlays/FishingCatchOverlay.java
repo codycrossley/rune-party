@@ -127,10 +127,7 @@ public class FishingCatchOverlay extends Overlay
         int textX = x + ICON_SIZE + ICON_TEXT_GAP;
         int textY = rowTop + rowHeight / 2 + fm.getAscent() / 2 - 2;
         g.setFont(font);
-        g.setColor(Color.BLACK);
-        g.drawString(text, textX + 1, textY + 1);
-        g.setColor(TEXT_COLOR);
-        g.drawString(text, textX, textY);
+        RunePartyRender.drawShadowed(g, text, textX, textY, TEXT_COLOR, 255);
 
         return textX + fm.stringWidth(text);
     }

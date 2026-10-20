@@ -183,10 +183,7 @@ public class TurfWarsScoreOverlay extends Overlay
         int textX = x + SWATCH_SIZE + SWATCH_TEXT_GAP;
         int textY = rowTop + rowHeight / 2 + fm.getAscent() / 2 - 2;
         g.setFont(font);
-        g.setColor(Color.BLACK);
-        g.drawString(text, textX + 1, textY + 1);
-        g.setColor(color);
-        g.drawString(text, textX, textY);
+        RunePartyRender.drawShadowed(g, text, textX, textY, color, 255);
 
         return textX + fm.stringWidth(text);
     }

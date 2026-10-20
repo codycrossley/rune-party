@@ -130,10 +130,7 @@ public class SandwichRushHudOverlay extends Overlay
         int textX = x + ICON_SIZE + 6;
         int textY = rowTop + rowHeight / 2 + countFm.getAscent() / 2 - 2;
         g.setFont(countFont);
-        g.setColor(Color.BLACK);
-        g.drawString(countText, textX + 1, textY + 1);
-        g.setColor(TEXT_COLOR);
-        g.drawString(countText, textX, textY);
+        RunePartyRender.drawShadowed(g, countText, textX, textY, TEXT_COLOR, 255);
 
         return new Dimension(width, height);
     }

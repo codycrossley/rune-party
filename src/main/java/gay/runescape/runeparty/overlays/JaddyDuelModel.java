@@ -436,10 +436,7 @@ public class JaddyDuelModel extends Overlay
         int textX = anchor.getX() - fm.stringWidth(text) / 2;
         int textY = barY - HITSPLAT_EXTRA_SCREEN_PX;
 
-        g.setColor(new Color(0, 0, 0, alpha));
-        g.drawString(text, textX + 1, textY + 1);
-        g.setColor(new Color(HITSPLAT_COLOR.getRed(), HITSPLAT_COLOR.getGreen(), HITSPLAT_COLOR.getBlue(), alpha));
-        g.drawString(text, textX, textY);
+        RunePartyRender.drawShadowed(g, text, textX, textY, HITSPLAT_COLOR, alpha);
     }
 
     /** Builds slot.targetColor's own recolored model the first time it's needed -- a no-op once
