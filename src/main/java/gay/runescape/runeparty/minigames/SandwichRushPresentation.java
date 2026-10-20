@@ -105,13 +105,8 @@ public final class SandwichRushPresentation implements MinigamePresentationFeatu
     {
         // Same reasoning as CoinRushPresentation's own onStarted -- held/count reset too: a fresh
         // round means nobody's holding anything and nobody's made a sandwich yet, regardless of
-        // catch-up.
-        spawns.clear();
-        held.clear();
-        count = 0;
-        collectSubmitted.clear();
-        roundStartAt = 0;
-        arrivalGate.reset();
+        // catch-up. Same end state as reset(), so just delegates.
+        reset();
     }
 
     @Override
