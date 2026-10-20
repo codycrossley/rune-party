@@ -2450,11 +2450,8 @@ public class RunePartyPlugin extends Plugin
      * the Pond, Dance, Dance, RuneScape's own anchor). */
     public WorldPoint findFirstTileByType(String tileType)
     {
-        for (TileReducer.TileEntry entry : tileReducer.snapshot())
-        {
-            if (tileType.equals(entry.tileType)) return entry.point;
-        }
-        return null;
+        List<WorldPoint> points = findTilesByType(tileType);
+        return points.isEmpty() ? null : points.get(0);
     }
 
     /** The full tile entry (type, point, color, ...) currently marked at exactly {@code pos} with
@@ -2741,14 +2738,8 @@ public class RunePartyPlugin extends Plugin
      * which tiles are actually lethal). */
     public boolean isArenaTileDead(WorldPoint pos)
     {
-        for (TileReducer.TileEntry entry : tileReducer.snapshot())
-        {
-            if ("ARENA_TILE".equals(entry.tileType) && entry.point.equals(pos))
-            {
-                return ArenaFireModel.isDead(entry.color);
-            }
-        }
-        return false;
+        TileReducer.TileEntry entry = findTileEntryAt(pos, "ARENA_TILE");
+        return entry != null && ArenaFireModel.isDead(entry.color);
     }
 
     /** Rolls one Fishing Contest catch -- called from onAnimationChanged the moment the local
@@ -5002,14 +4993,8 @@ public class RunePartyPlugin extends Plugin
     public String getJaddyZoneColorHex(WorldPoint pos)
     {
         if (pos == null) return null;
-        for (TileReducer.TileEntry entry : tileReducer.snapshot())
-        {
-            if ("JADDY_TILE".equals(entry.tileType) && entry.color != null && pos.equals(entry.point))
-            {
-                return entry.color;
-            }
-        }
-        return null;
+        TileReducer.TileEntry entry = findTileEntryAt(pos, "JADDY_TILE");
+        return entry != null ? entry.color : null;
     }
     /** {@link #getJaddyZoneColorHex(WorldPoint)} decoded to an AWT {@link Color}, or null under the
      * same conditions that returns null. */
