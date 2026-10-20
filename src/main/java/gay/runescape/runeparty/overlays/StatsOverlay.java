@@ -75,7 +75,7 @@ public class StatsOverlay extends Overlay
 
         // Hidden outright for as long as any mini-game is active -- see this class's own doc for
         // why (a mini-game's own dedicated overlay shows whatever it needs to instead).
-        if (plugin.isMinigameActive()) return null;
+        if (plugin.minigamePresentation.isActive()) return null;
 
         // Hidden outright for the whole end-game ceremony -- the ceremony's own bonus/final
         // standings are meant to be revealed one beat at a time (see CeremonyPresentation's own

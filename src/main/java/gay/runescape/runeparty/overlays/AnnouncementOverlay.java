@@ -315,7 +315,7 @@ public class AnnouncementOverlay extends Overlay
         renderMinigameReadyCheck(g);
         renderTeamAssignedBanner(g);
         renderJaddyResolvedBanner(g);
-        if (RunePartyPlugin.BRUTUS_ATTACK_KEY.equals(plugin.getMinigameKey()))
+        if (RunePartyPlugin.BRUTUS_ATTACK_KEY.equals(plugin.minigamePresentation.getKey()))
         {
             // Bespoke, not folded into the generic arrival-gather list below: Brutus Attack needs
             // a fresh gather message before EACH of its own 3 rounds (players have to walk back
@@ -324,7 +324,7 @@ public class AnnouncementOverlay extends Overlay
             // one-shot latch (every other arena mini-game's own hide condition) doesn't fit here.
             renderBrutusAttackGatherMessage(g);
         }
-        else if (RunePartyPlugin.GATHER_MESSAGE_KEYS.contains(plugin.getMinigameKey()))
+        else if (RunePartyPlugin.GATHER_MESSAGE_KEYS.contains(plugin.minigamePresentation.getKey()))
         {
             renderArrivalGatherMessage(g);
         }
@@ -867,7 +867,7 @@ public class AnnouncementOverlay extends Overlay
      * ready-check screen instead. */
     private void renderMinigameBanner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getMinigameBannerUntil(), MINIGAME_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.minigamePresentation.getMinigameBannerUntil(), MINIGAME_FADE_MS);
         if (alpha == null) return;
 
         int centerX = drawableWidth() / 2;
@@ -880,7 +880,7 @@ public class AnnouncementOverlay extends Overlay
     /** The closing bookend to renderMinigameBanner's "MINIGAME!". */
     private void renderMinigameOverBanner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getMinigameOverBannerUntil(), MINIGAME_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.minigamePresentation.getMinigameOverBannerUntil(), MINIGAME_FADE_MS);
         if (alpha == null) return;
 
         int centerX = drawableWidth() / 2;
@@ -897,7 +897,7 @@ public class AnnouncementOverlay extends Overlay
      * genuinely starting reads the same way regardless of which path got it there. */
     private void renderArrivalRoundBeginBanner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getArrivalRoundBeginBannerUntil(), MINIGAME_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.minigamePresentation.getArrivalRoundBeginBannerUntil(), MINIGAME_FADE_MS);
         if (alpha == null) return;
 
         int centerX = drawableWidth() / 2;
@@ -912,10 +912,10 @@ public class AnnouncementOverlay extends Overlay
      * shared team colors and an odd round's solo seat colors. */
     private void renderTeamAssignedBanner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getTeamAssignedBannerUntil(), MINIGAME_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.minigamePresentation.turfWars().getTeamAssignedBannerUntil(), MINIGAME_FADE_MS);
         if (alpha == null) return;
 
-        String colorHex = plugin.getTeamAssignedBannerTeam();
+        String colorHex = plugin.minigamePresentation.turfWars().getTeamAssignedBannerTeam();
         if (colorHex == null) return;
         Color color;
         try { color = Color.decode(colorHex); }
@@ -933,18 +933,18 @@ public class AnnouncementOverlay extends Overlay
      * landing on the correct segment. Shared wheel-drawing with renderItemSpinner via drawWheel. */
     private void renderMinigameSpinner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getMinigameSpinnerUntil(), WHEEL_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.minigamePresentation.getMinigameSpinnerUntil(), WHEEL_FADE_MS);
         if (alpha == null) return;
         long now = System.currentTimeMillis();
 
         List<Minigame> all = Minigames.all();
         if (all.isEmpty()) return;
 
-        Minigame selected = Minigames.get(plugin.getMinigameKey());
-        List<Minigame> wheelEntries = selectWheelEntries(all, selected, plugin.getMinigameSpinnerStart());
+        Minigame selected = Minigames.get(plugin.minigamePresentation.getKey());
+        List<Minigame> wheelEntries = selectWheelEntries(all, selected, plugin.minigamePresentation.getMinigameSpinnerStart());
         int targetIndex = Math.max(0, wheelEntries.indexOf(selected));
 
-        long elapsed = now - plugin.getMinigameSpinnerStart();
+        long elapsed = now - plugin.minigamePresentation.getMinigameSpinnerStart();
         boolean spinning = elapsed < RunePartyPlugin.MINIGAME_SPINNER_SPIN_PHASE_MS;
         float rotationDeg = wheelRotationDeg(wheelEntries.size(), targetIndex, elapsed, RunePartyPlugin.MINIGAME_SPINNER_SPIN_PHASE_MS, spinning);
         float scale = wheelSettleScale(elapsed, RunePartyPlugin.MINIGAME_SPINNER_SPIN_PHASE_MS, spinning);
@@ -1351,15 +1351,15 @@ public class AnnouncementOverlay extends Overlay
      * countdown replaces it. */
     private void renderMinigameReadyCheck(Graphics2D g)
     {
-        if (!plugin.isMinigameActive()) return;
+        if (!plugin.minigamePresentation.isActive()) return;
 
-        boolean countdownRevealed = plugin.isMinigameCountdownStarted()
-            && (plugin.isMinigameCountdownSkippedForClient() || plugin.getMinigameCountdownBannerUntil() != 0);
+        boolean countdownRevealed = plugin.minigamePresentation.isCountdownStarted()
+            && (plugin.minigamePresentation.isCountdownSkippedForClient() || plugin.minigamePresentation.getCountdownBannerUntil() != 0);
         if (countdownRevealed) return;
 
         long now = System.currentTimeMillis();
-        long spinnerUntil = plugin.getMinigameSpinnerUntil();
-        boolean spinnerDone = plugin.isMinigameSpinnerSkippedForClient() || (spinnerUntil != 0 && now >= spinnerUntil);
+        long spinnerUntil = plugin.minigamePresentation.getMinigameSpinnerUntil();
+        boolean spinnerDone = plugin.minigamePresentation.isMinigameSpinnerSkippedForClient() || (spinnerUntil != 0 && now >= spinnerUntil);
         if (!spinnerDone) return;
 
         float alpha = MINIGAME_READY_CHECK_MIN_ALPHA + (1f - MINIGAME_READY_CHECK_MIN_ALPHA) * BannerAnim.pulse(now, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
@@ -1369,7 +1369,7 @@ public class AnnouncementOverlay extends Overlay
 
         int maxWidth = safeTextWidth();
 
-        String displayName = plugin.getMinigameDisplayName();
+        String displayName = plugin.minigamePresentation.getDisplayName();
         if (displayName != null)
         {
             Node title = Text.of(displayName).font(MARIO_PARTY_FONT.deriveFont(GOLDEN_GNOME_OFFER_TITLE_SIZE)).color(WELCOME_TITLE_COLOR);
@@ -1379,7 +1379,7 @@ public class AnnouncementOverlay extends Overlay
         // Wrapped since a mini-game's instructions can run long; everything below is laid out
         // relative to afterInstructionsY so it shifts down instead of overlapping.
         int afterInstructionsY = y + 30;
-        String instructions = plugin.getMinigameInstructions();
+        String instructions = plugin.minigamePresentation.getInstructions();
         if (instructions != null)
         {
             Text instructionsText = Text.of(instructions)
@@ -1399,7 +1399,7 @@ public class AnnouncementOverlay extends Overlay
             Segment.plain("' emote when you're ready!", emoteFont, Color.LIGHT_GRAY));
         Layout.renderCentered(g, emoteLine, centerX, afterInstructionsY + 36, maxWidth, alpha);
 
-        Set<String> ready = plugin.getMinigameReadyRsns();
+        Set<String> ready = plugin.minigamePresentation.getMinigameReadyRsns();
         List<RosterReducer.RosterEntry> players = plugin.getRosterReducer().seatedPlayers();
         players.sort(Comparator.comparing((RosterReducer.RosterEntry e) -> e.number));
 
@@ -1424,7 +1424,7 @@ public class AnnouncementOverlay extends Overlay
      * live sees it -- a reconnecting client skips straight to playable. */
     private void renderMinigameCountdown(Graphics2D g)
     {
-        long until = plugin.getMinigameCountdownBannerUntil();
+        long until = plugin.minigamePresentation.getCountdownBannerUntil();
         if (until == 0) return;
         long remaining = until - System.currentTimeMillis();
         if (remaining <= 0) return;
@@ -1452,10 +1452,10 @@ public class AnnouncementOverlay extends Overlay
      * instead of a countdown that could tick down before everyone's actually in position. */
     private void renderArrivalGatherMessage(Graphics2D g)
     {
-        boolean countdownRevealed = plugin.isMinigameCountdownStarted()
-            && (plugin.isMinigameCountdownSkippedForClient() || plugin.getMinigameCountdownBannerUntil() != 0);
+        boolean countdownRevealed = plugin.minigamePresentation.isCountdownStarted()
+            && (plugin.minigamePresentation.isCountdownSkippedForClient() || plugin.minigamePresentation.getCountdownBannerUntil() != 0);
         if (!countdownRevealed) return;
-        if (plugin.isMinigameRoundBegun()) return;
+        if (plugin.minigamePresentation.isRoundBegun()) return;
 
         long now = System.currentTimeMillis();
         float alpha = MINIGAME_READY_CHECK_MIN_ALPHA + (1f - MINIGAME_READY_CHECK_MIN_ALPHA) * BannerAnim.pulse(now, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
@@ -1464,15 +1464,15 @@ public class AnnouncementOverlay extends Overlay
         int y = drawableHeight() / 2;
 
         String text;
-        if (RunePartyPlugin.JADDY_KEY.equals(plugin.getMinigameKey()))
+        if (RunePartyPlugin.JADDY_KEY.equals(plugin.minigamePresentation.getKey()))
         {
             text = "Choose a side -- stand in the pink or teal zone!";
         }
-        else if (RunePartyPlugin.DANCE_DANCE_RUNESCAPE_KEY.equals(plugin.getMinigameKey()))
+        else if (RunePartyPlugin.DANCE_DANCE_RUNESCAPE_KEY.equals(plugin.minigamePresentation.getKey()))
         {
             text = "Everyone must stand on the dance floor!";
         }
-        else if (RunePartyPlugin.RAINBOW_RUSH_KEY.equals(plugin.getMinigameKey()))
+        else if (RunePartyPlugin.RAINBOW_RUSH_KEY.equals(plugin.minigamePresentation.getKey()))
         {
             text = "Everyone must stand on the Start tile!";
         }
@@ -1496,8 +1496,8 @@ public class AnnouncementOverlay extends Overlay
      * play is already live underneath by the time this vanishes. */
     private void renderRainbowRushTrafficLight(Graphics2D g)
     {
-        if (!plugin.isRainbowRushActive() || !plugin.isMinigameRoundBegun()) return;
-        long startAt = plugin.getRainbowRushRoundStartAt();
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.RAINBOW_RUSH_KEY) || !plugin.minigamePresentation.isRoundBegun()) return;
+        long startAt = plugin.minigamePresentation.rainbowRush().getRoundStartAt();
         if (startAt == 0) return;
         long elapsed = System.currentTimeMillis() - startAt;
         if (elapsed >= RunePartyPlugin.RAINBOW_RUSH_TRAFFIC_LIGHT_MS) return;
@@ -1572,16 +1572,16 @@ public class AnnouncementOverlay extends Overlay
      * mini-game -- this banner is just the "who won" announcement. */
     private void renderJaddyResolvedBanner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getJaddyResolvedBannerUntil(), MINIGAME_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.minigamePresentation.jaddy().getResolvedBannerUntil(), MINIGAME_FADE_MS);
         if (alpha == null) return;
 
-        String colorHex = plugin.getJaddyResolvedWinningColor();
+        String colorHex = plugin.minigamePresentation.jaddy().getResolvedWinningColor();
         if (colorHex == null) return;
         Color color;
         try { color = Color.decode(colorHex); }
         catch (NumberFormatException e) { return; }
 
-        String localZoneHex = plugin.getJaddyResolvedLocalZoneColor();
+        String localZoneHex = plugin.minigamePresentation.jaddy().getResolvedLocalZoneColor();
         String text;
         if (localZoneHex == null)
         {
@@ -1615,8 +1615,8 @@ public class AnnouncementOverlay extends Overlay
      * out rather than lingering into the reveal. */
     private void renderCrabRaveCountdown(Graphics2D g)
     {
-        if (!plugin.isCrabRaveActive()) return;
-        long endsAt = plugin.getCrabRaveEndsAt();
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.CRAB_RAVE_KEY)) return;
+        long endsAt = plugin.minigamePresentation.crabRave().getEndsAt();
         if (endsAt == 0) return;
 
         long now = System.currentTimeMillis();
@@ -1643,12 +1643,12 @@ public class AnnouncementOverlay extends Overlay
      * server signal just for this banner's own timing. */
     private void renderBrutusAttackGatherMessage(Graphics2D g)
     {
-        boolean countdownRevealed = plugin.isMinigameCountdownStarted()
-            && (plugin.isMinigameCountdownSkippedForClient() || plugin.getMinigameCountdownBannerUntil() != 0);
+        boolean countdownRevealed = plugin.minigamePresentation.isCountdownStarted()
+            && (plugin.minigamePresentation.isCountdownSkippedForClient() || plugin.minigamePresentation.getCountdownBannerUntil() != 0);
         if (!countdownRevealed) return;
 
         long now = System.currentTimeMillis();
-        long dashEndsAt = plugin.getBrutusAttackDashEndsAt();
+        long dashEndsAt = plugin.minigamePresentation.brutusAttack().getDashEndsAt();
         if (dashEndsAt != 0 && now < dashEndsAt) return;
 
         float alpha = MINIGAME_READY_CHECK_MIN_ALPHA + (1f - MINIGAME_READY_CHECK_MIN_ALPHA) * BannerAnim.pulse(now, MINIGAME_READY_CHECK_PULSE_PERIOD_MS);
@@ -1674,9 +1674,9 @@ public class AnnouncementOverlay extends Overlay
      * once the next round's own arrival gate re-stamps getBrutusAttackDashEndsAt. */
     private void renderBrutusAttackDashCountdown(Graphics2D g)
     {
-        if (!plugin.isBrutusAttackActive()) return;
-        if (plugin.isBrutusAttackDashLandedThisRound() || plugin.isBrutusAttackDashResolvedThisRound()) return;
-        long endsAt = plugin.getBrutusAttackDashEndsAt();
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.BRUTUS_ATTACK_KEY)) return;
+        if (plugin.minigamePresentation.brutusAttack().isDashLandedThisRound() || plugin.minigamePresentation.brutusAttack().isDashResolvedThisRound()) return;
+        long endsAt = plugin.minigamePresentation.brutusAttack().getDashEndsAt();
         if (endsAt == 0) return;
 
         long now = System.currentTimeMillis();
@@ -1697,14 +1697,14 @@ public class AnnouncementOverlay extends Overlay
      * right when this one arms. */
     private void renderBrutusAttackDashResult(Graphics2D g)
     {
-        if (!plugin.isBrutusAttackActive()) return;
-        Float alpha = BannerAnim.fadeAlpha(plugin.getBrutusAttackDashResultBannerUntil(), DEFAULT_FADE_MS);
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.BRUTUS_ATTACK_KEY)) return;
+        Float alpha = BannerAnim.fadeAlpha(plugin.minigamePresentation.brutusAttack().getDashResultBannerUntil(), DEFAULT_FADE_MS);
         if (alpha == null) return;
 
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 3;
 
-        String text = plugin.isBrutusAttackDashResultHit() ? "HIT!" : "MISS!";
+        String text = plugin.minigamePresentation.brutusAttack().isDashResultHit() ? "HIT!" : "MISS!";
         Node message = Text.rainbow(text, RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(MINIGAME_TITLE_SIZE));
         Layout.renderCentered(g, message, centerX, y, safeTextWidth(), alpha);
     }
@@ -1725,9 +1725,9 @@ public class AnnouncementOverlay extends Overlay
      * rather than ever picking just one to display. */
     private void renderMageArenaElimination(Graphics2D g)
     {
-        if (!plugin.isMageArenaActive()) return;
-        renderEliminationLines(g, plugin.getMageArenaLocalEliminationBannerUntil(),
-            plugin.getMageArenaOthersEliminationBannerUntil(), plugin.getMageArenaOthersEliminationBannerRsn());
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.MAGE_ARENA_KEY)) return;
+        renderEliminationLines(g, plugin.minigamePresentation.mageArena().getLocalEliminationBannerUntil(),
+            plugin.minigamePresentation.mageArena().getOthersEliminationBannerUntil(), plugin.minigamePresentation.mageArena().getOthersEliminationBannerRsn());
     }
 
     /** Flame Field's own elimination flash -- same shape/pacing/local-vs-others split as
@@ -1736,9 +1736,9 @@ public class AnnouncementOverlay extends Overlay
      * player's own elimination landing moments later must never silently steal that message). */
     private void renderArenaElimination(Graphics2D g)
     {
-        if (!plugin.isArenaActive()) return;
-        renderEliminationLines(g, plugin.getArenaLocalEliminationBannerUntil(),
-            plugin.getArenaOthersEliminationBannerUntil(), plugin.getArenaOthersEliminationBannerRsn());
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.ARENA_KEY)) return;
+        renderEliminationLines(g, plugin.minigamePresentation.arena().getLocalEliminationBannerUntil(),
+            plugin.minigamePresentation.arena().getOthersEliminationBannerUntil(), plugin.minigamePresentation.arena().getOthersEliminationBannerRsn());
     }
 
     /** Shared by renderMageArenaElimination/renderArenaElimination: draws the local viewer's own
@@ -1780,7 +1780,7 @@ public class AnnouncementOverlay extends Overlay
      * so players see how they did before finding out what (if anything) that earned them. */
     private void renderMinigameScoreBanner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getMinigameScoreBannerUntil(), MINIGAME_REWARDS_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.minigamePresentation.getMinigameScoreBannerUntil(), MINIGAME_REWARDS_FADE_MS);
         if (alpha == null) return;
 
         int centerX = drawableWidth() / 2;
@@ -1791,7 +1791,7 @@ public class AnnouncementOverlay extends Overlay
         Layout.renderCentered(g, title, centerX, y, maxWidth, alpha);
 
         Map<String, Integer> scoreByRsn = new HashMap<>();
-        for (MinigameScore score : plugin.getMinigameScores())
+        for (MinigameScore score : plugin.minigamePresentation.getMinigameScores())
         {
             scoreByRsn.put(score.rsn.toLowerCase(), score.score);
         }
@@ -1822,7 +1822,7 @@ public class AnnouncementOverlay extends Overlay
      * renderRoundCompleteBanner. */
     private void renderMinigameRewardsBanner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getMinigameRewardsBannerUntil(), MINIGAME_REWARDS_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.minigamePresentation.getMinigameRewardsBannerUntil(), MINIGAME_REWARDS_FADE_MS);
         if (alpha == null) return;
 
         int centerX = drawableWidth() / 2;
@@ -1833,7 +1833,7 @@ public class AnnouncementOverlay extends Overlay
         Layout.renderCentered(g, title, centerX, y, maxWidth, alpha);
 
         Map<String, Integer> rewardByRsn = new HashMap<>();
-        for (MinigameReward reward : plugin.getMinigameRewards())
+        for (MinigameReward reward : plugin.minigamePresentation.getMinigameRewards())
         {
             rewardByRsn.put(reward.rsn.toLowerCase(), reward.coins);
         }
@@ -1865,14 +1865,14 @@ public class AnnouncementOverlay extends Overlay
      * seated player ranked by Golden Gnomes (coins as tiebreak), each in their own seat color. */
     private void renderRoundCompleteBanner(Graphics2D g)
     {
-        Float alpha = BannerAnim.fadeAlpha(plugin.getRoundCompleteBannerUntil(), ROUND_COMPLETE_FADE_MS);
+        Float alpha = BannerAnim.fadeAlpha(plugin.minigamePresentation.getRoundCompleteBannerUntil(), ROUND_COMPLETE_FADE_MS);
         if (alpha == null) return;
 
         int centerX = drawableWidth() / 2;
         int y = drawableHeight() / 3;
         int maxWidth = safeTextWidth();
 
-        Node title = Text.rainbow("ROUND " + plugin.getRoundCompleteRoundNumber(), RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(ROUND_COMPLETE_TITLE_SIZE));
+        Node title = Text.rainbow("ROUND " + plugin.minigamePresentation.getRoundCompleteRoundNumber(), RAINBOW_LETTER_COLORS).font(MARIO_PARTY_FONT.deriveFont(ROUND_COMPLETE_TITLE_SIZE));
         Layout.renderCentered(g, title, centerX, y, maxWidth, alpha);
 
         // No "Current Standings" label here per user feedback -- the ranked list right below

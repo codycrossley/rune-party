@@ -75,7 +75,7 @@ public class SandwichRushHudOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (!plugin.isSandwichRushActive() || !plugin.isMinigamePlayable()) return null;
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.SANDWICH_RUSH_KEY) || !plugin.isMinigamePlayable()) return null;
         if (!isLocalPlayerSeated()) return null;
 
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
@@ -85,7 +85,7 @@ public class SandwichRushHudOverlay extends Overlay
         Font countFont = FontManager.getRunescapeBoldFont().deriveFont(COUNT_SIZE);
 
         Set<String> held = plugin.getSandwichHeld();
-        String countText = String.valueOf(plugin.getSandwichCount());
+        String countText = String.valueOf(plugin.minigamePresentation.sandwichRush().getCount());
 
         g.setFont(countFont);
         FontMetrics countFm = g.getFontMetrics();

@@ -288,7 +288,7 @@ public class TileOverlay extends Overlay
         {
             coinRushModel.update();
             sandwichItemModel.update(plugin.getSandwichRushSpawns());
-            runeMatchRuneModel.update(plugin.isRuneMatchActive() ? plugin.getRuneMatchRevealedSpawns() : Collections.emptyMap());
+            runeMatchRuneModel.update(plugin.minigamePresentation.isKeyActive(RunePartyPlugin.RUNE_MATCH_KEY) ? plugin.minigamePresentation.runeMatch().getRevealedSpawns() : Collections.emptyMap());
             balloonModel.update();
         }
 
@@ -324,7 +324,7 @@ public class TileOverlay extends Overlay
      * true -- see render()'s own model-update calls and renderCommittedCourse's own tile filter. */
     private boolean isMinigameSelectionPending()
     {
-        return plugin.getMinigameKey() != null && !plugin.isMinigameSelectionRevealed();
+        return plugin.minigamePresentation.getKey() != null && !plugin.isMinigameSelectionRevealed();
     }
 
     private void renderCommittedCourse(Graphics2D g)
@@ -343,21 +343,21 @@ public class TileOverlay extends Overlay
 
         // Computed once per frame, not per-tile -- see renderRepeatAfterMeTile, the only reader,
         // which would otherwise re-scan the whole tile snapshot 16 times a frame (once per cell).
-        List<WorldPoint> repeatAfterMeTiles = plugin.isRepeatAfterMeActive()
+        List<WorldPoint> repeatAfterMeTiles = plugin.minigamePresentation.isKeyActive(RunePartyPlugin.REPEAT_AFTER_ME_KEY)
             ? plugin.findRepeatAfterMeTilePoints() : Collections.emptyList();
         // Same "compute once per frame" reasoning as repeatAfterMeTiles above -- see
         // renderCrabRaveTile, the only reader. Empty (and thus never fills anything) unless the
         // arena's actually swapped in.
-        List<WorldPoint> crabRaveTiles = plugin.isCrabRaveActive()
+        List<WorldPoint> crabRaveTiles = plugin.minigamePresentation.isKeyActive(RunePartyPlugin.CRAB_RAVE_KEY)
             ? plugin.findCrabRaveTilePoints() : Collections.emptyList();
         Map<Integer, Color> crabRaveLitColors = crabRaveTiles.isEmpty()
             ? Collections.emptyMap() : computeCrabRaveLitColors();
         // Same "compute once per frame" reasoning as repeatAfterMeTiles/crabRaveTiles above -- see
         // renderRuneMatchTile, the only reader. Empty unless the arena's actually swapped in.
-        List<WorldPoint> runeMatchHiddenCardTiles = plugin.isRuneMatchActive()
-            ? plugin.getRuneMatchHiddenCardTiles() : Collections.emptyList();
-        List<WorldPoint> runeMatchSolvedCardTiles = plugin.isRuneMatchActive()
-            ? plugin.getRuneMatchSolvedCardTiles() : Collections.emptyList();
+        List<WorldPoint> runeMatchHiddenCardTiles = plugin.minigamePresentation.isKeyActive(RunePartyPlugin.RUNE_MATCH_KEY)
+            ? plugin.minigamePresentation.runeMatch().getHiddenCardTiles() : Collections.emptyList();
+        List<WorldPoint> runeMatchSolvedCardTiles = plugin.minigamePresentation.isKeyActive(RunePartyPlugin.RUNE_MATCH_KEY)
+            ? plugin.minigamePresentation.runeMatch().getSolvedCardTiles() : Collections.emptyList();
 
         for (TileReducer.TileEntry entry : entries)
         {
@@ -383,7 +383,7 @@ public class TileOverlay extends Overlay
             // spoil which mini-game got picked ahead of the wheel's own reveal (same "don't spoil
             // it early" reasoning the reveal-timed chat line already gets, see that method's own
             // doc).
-            if (plugin.isRainbowRushActive() && plugin.isMinigameSelectionRevealed() && entry.pathIndex != null) { renderRainbowRushTile(g, entry); continue; } // recolors the live course itself in place, see renderRainbowRushTile
+            if (plugin.minigamePresentation.isKeyActive(RunePartyPlugin.RAINBOW_RUSH_KEY) && plugin.isMinigameSelectionRevealed() && entry.pathIndex != null) { renderRainbowRushTile(g, entry); continue; } // recolors the live course itself in place, see renderRainbowRushTile
             Color base = resolveColor(entry.color, entry.tileType);
             renderOutlinedTile(g, entry.point, base, SOLID_STROKE);
         }
@@ -397,15 +397,15 @@ public class TileOverlay extends Overlay
         // other mini-game here (see minigames/fishing_contest.py's own prepare()) -- it was just
         // missed in an earlier pass since it's its own bespoke scan rather than a call through
         // renderArenaOutline/renderColorGroupedOutlines like the rest of these.
-        if (plugin.isFishingContestActive()) renderFishingZoneOutline(g, entries);
-        if (plugin.isTurfWarsActive()) renderArenaOutline(g, entries, "TURF_WARS_TILE", TURF_WARS_ARENA_OUTLINE_COLOR);
-        if (plugin.isSandwichRushActive()) renderArenaOutline(g, entries, "SANDWICH_RUSH_TILE", SANDWICH_RUSH_ARENA_OUTLINE_COLOR);
-        if (plugin.isHotPotatoActive()) renderArenaOutline(g, entries, "HOT_POTATO_TILE", HOT_POTATO_ARENA_OUTLINE_COLOR);
-        if (plugin.isRepeatAfterMeActive()) renderArenaOutline(g, entries, "REPEAT_AFTER_ME_TILE", REPEAT_AFTER_ME_ARENA_OUTLINE_COLOR);
-        if (plugin.isCrabRaveActive()) renderArenaOutline(g, entries, "CRAB_RAVE_TILE", CRAB_RAVE_ARENA_OUTLINE_COLOR);
-        if (plugin.isRuneMatchActive()) renderArenaOutline(g, entries, "RUNE_MATCH_TILE", RUNE_MATCH_ARENA_OUTLINE_COLOR);
-        if (plugin.isBalloonPopActive()) renderArenaOutline(g, entries, "BALLOON_POP_TILE", BALLOON_POP_ARENA_OUTLINE_COLOR);
-        if (plugin.isMageArenaActive()) renderArenaOutline(g, entries, "MAGE_ARENA_TILE", MAGE_ARENA_ARENA_OUTLINE_COLOR);
+        if (plugin.minigamePresentation.isKeyActive(RunePartyPlugin.FISHING_CONTEST_KEY)) renderFishingZoneOutline(g, entries);
+        if (plugin.minigamePresentation.isKeyActive(RunePartyPlugin.TURF_WARS_KEY)) renderArenaOutline(g, entries, "TURF_WARS_TILE", TURF_WARS_ARENA_OUTLINE_COLOR);
+        if (plugin.minigamePresentation.isKeyActive(RunePartyPlugin.SANDWICH_RUSH_KEY)) renderArenaOutline(g, entries, "SANDWICH_RUSH_TILE", SANDWICH_RUSH_ARENA_OUTLINE_COLOR);
+        if (plugin.minigamePresentation.isKeyActive(RunePartyPlugin.HOT_POTATO_KEY)) renderArenaOutline(g, entries, "HOT_POTATO_TILE", HOT_POTATO_ARENA_OUTLINE_COLOR);
+        if (plugin.minigamePresentation.isKeyActive(RunePartyPlugin.REPEAT_AFTER_ME_KEY)) renderArenaOutline(g, entries, "REPEAT_AFTER_ME_TILE", REPEAT_AFTER_ME_ARENA_OUTLINE_COLOR);
+        if (plugin.minigamePresentation.isKeyActive(RunePartyPlugin.CRAB_RAVE_KEY)) renderArenaOutline(g, entries, "CRAB_RAVE_TILE", CRAB_RAVE_ARENA_OUTLINE_COLOR);
+        if (plugin.minigamePresentation.isKeyActive(RunePartyPlugin.RUNE_MATCH_KEY)) renderArenaOutline(g, entries, "RUNE_MATCH_TILE", RUNE_MATCH_ARENA_OUTLINE_COLOR);
+        if (plugin.minigamePresentation.isKeyActive(RunePartyPlugin.BALLOON_POP_KEY)) renderArenaOutline(g, entries, "BALLOON_POP_TILE", BALLOON_POP_ARENA_OUTLINE_COLOR);
+        if (plugin.minigamePresentation.isKeyActive(RunePartyPlugin.MAGE_ARENA_KEY)) renderArenaOutline(g, entries, "MAGE_ARENA_TILE", MAGE_ARENA_ARENA_OUTLINE_COLOR);
         // Gated on isCeremonyIntroRevealed() (not just phase/tile-presence like every other arena
         // outline above) -- the real board swap can land while the final mini-game's own rewards/
         // round-complete recap is still playing (see CeremonyPresentation's own doc), so without
@@ -414,8 +414,8 @@ public class TileOverlay extends Overlay
         {
             renderArenaOutline(g, entries, "CEREMONY_TILE", CEREMONY_ARENA_OUTLINE_COLOR);
         }
-        if (plugin.isJaddyActive()) renderColorGroupedOutlines(g, entries, "JADDY_TILE");
-        if (plugin.isBrutusAttackActive()) renderColorGroupedOutlines(g, entries, "BRUTUS_ATTACK_TILE");
+        if (plugin.minigamePresentation.isKeyActive(RunePartyPlugin.JADDY_KEY)) renderColorGroupedOutlines(g, entries, "JADDY_TILE");
+        if (plugin.minigamePresentation.isKeyActive(RunePartyPlugin.BRUTUS_ATTACK_KEY)) renderColorGroupedOutlines(g, entries, "BRUTUS_ATTACK_TILE");
         renderBrutusAttackCrashZone(g);
         renderMageArenaCastWarning(g);
 
@@ -564,7 +564,7 @@ public class TileOverlay extends Overlay
      * (see BrutusAttackPresentation's own dashLandedPosition doc). */
     private void renderBrutusAttackCrashZone(Graphics2D g)
     {
-        if (!plugin.isBrutusAttackActive()) return;
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.BRUTUS_ATTACK_KEY)) return;
         List<WorldPoint> tiles = plugin.getBrutusAttackCrashZoneTiles();
         if (tiles.isEmpty()) return;
 
@@ -595,7 +595,7 @@ public class TileOverlay extends Overlay
      * computeMageArenaCastTiles, shared with MageArenaPresentation's own elimination self-check so
      * what's drawn and what's actually dangerous can never drift apart) -- each an orange outline (no
      * fill) that ramps up in opacity from the moment the cast is broadcast
-     * (plugin.getMageArenaActiveCastWarningAt()) to the moment it detonates (...DetonateAt()), then
+     * (plugin.minigamePresentation.mageArena().getActiveCastWarningAt()) to the moment it detonates (...DetonateAt()), then
      * stays at full opacity through the actual danger window up to ...ResolvedAt() -- gone entirely
      * once that passes. Deliberately stays orange throughout rather than switching to red at
      * detonation: the real Flames of Zamorak spotanim (see MageArenaPresentation#apply, fired at the
@@ -606,14 +606,14 @@ public class TileOverlay extends Overlay
      * from a single plugin-supplied point, not anything in the reducer's own tile snapshot. */
     private void renderMageArenaCastWarning(Graphics2D g)
     {
-        if (!plugin.isMageArenaActive()) return;
-        WorldPoint wp = plugin.getMageArenaActiveCastPoint();
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.MAGE_ARENA_KEY)) return;
+        WorldPoint wp = plugin.minigamePresentation.mageArena().getActiveCastPoint();
         if (wp == null) return;
 
         long now = System.currentTimeMillis();
-        long warningAt = plugin.getMageArenaActiveCastWarningAt();
-        long detonateAt = plugin.getMageArenaActiveCastDetonateAt();
-        long resolvedAt = plugin.getMageArenaActiveCastResolvedAt();
+        long warningAt = plugin.minigamePresentation.mageArena().getActiveCastWarningAt();
+        long detonateAt = plugin.minigamePresentation.mageArena().getActiveCastDetonateAt();
+        long resolvedAt = plugin.minigamePresentation.mageArena().getActiveCastResolvedAt();
         if (now >= resolvedAt) return;
 
         float progress = now < detonateAt && detonateAt > warningAt
@@ -749,7 +749,7 @@ public class TileOverlay extends Overlay
      * during the mini-game would make this arrow reappear telling them to go back. */
     private void renderTargetArrow(Graphics2D g)
     {
-        if (!plugin.isPendingRoll() || plugin.isMinigameActive()) return;
+        if (!plugin.isPendingRoll() || plugin.minigamePresentation.isActive()) return;
         long revealDelay = RunePartyPlugin.DICE_ROLL_SPIN_PHASE_MS
             + (plugin.getDiceRollBonus() != 0 ? RunePartyPlugin.DICE_ROLL_BONUS_REVEAL_MS : 0);
         if (System.currentTimeMillis() - plugin.getDiceRollStart() < revealDelay) return;
@@ -794,7 +794,7 @@ public class TileOverlay extends Overlay
      * see. */
     private void renderReturnToPositionArrow(Graphics2D g)
     {
-        if (plugin.isPendingRoll() || plugin.isMinigameActive()) return;
+        if (plugin.isPendingRoll() || plugin.minigamePresentation.isActive()) return;
         String moverRsn = plugin.getCurrentTurnRsn();
         if (moverRsn == null || !isLocalPlayer(moverRsn)) return;
 
@@ -868,9 +868,9 @@ public class TileOverlay extends Overlay
      * instead of one fixed color, so it reads as "rainbow" rather than reusing START's plain green. */
     private void renderRainbowRushStartArrow(Graphics2D g)
     {
-        if (!plugin.isRainbowRushActive() || plugin.isMinigameRoundBegun()) return;
-        boolean countdownRevealed = plugin.isMinigameCountdownStarted()
-            && (plugin.isMinigameCountdownSkippedForClient() || plugin.getMinigameCountdownBannerUntil() != 0);
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.RAINBOW_RUSH_KEY) || plugin.minigamePresentation.isRoundBegun()) return;
+        boolean countdownRevealed = plugin.minigamePresentation.isCountdownStarted()
+            && (plugin.minigamePresentation.isCountdownSkippedForClient() || plugin.minigamePresentation.getCountdownBannerUntil() != 0);
         if (!countdownRevealed) return;
 
         TileReducer.TileEntry start = tileReducer.tileAtIndex(0);
@@ -1130,20 +1130,20 @@ public class TileOverlay extends Overlay
         Integer index = RepeatAfterMePresentation.indexForPoint(repeatAfterMeTiles, entry.point);
         if (index == null) return;
 
-        if (plugin.isRepeatAfterMePeekActive())
+        if (plugin.minigamePresentation.repeatAfterMe().isPeekActive())
         {
-            if (plugin.getRepeatAfterMeTargetIndices().contains(index))
+            if (plugin.minigamePresentation.repeatAfterMe().getTargetIndices().contains(index))
             {
                 fillArenaCell(g, entry.point, REPEAT_AFTER_ME_PEEK_FILL_COLOR);
             }
             return;
         }
 
-        boolean attempted = plugin.getRepeatAfterMeAttemptedIndices().contains(index);
+        boolean attempted = plugin.minigamePresentation.repeatAfterMe().getAttemptedIndices().contains(index);
 
-        if (plugin.isRepeatAfterMeRevealActive())
+        if (plugin.minigamePresentation.repeatAfterMe().isRevealActive())
         {
-            boolean isTarget = plugin.getRepeatAfterMeTargetIndices().contains(index);
+            boolean isTarget = plugin.minigamePresentation.repeatAfterMe().getTargetIndices().contains(index);
             // The answer key reappears -- same yellow fill the sneak peek used, shown again for
             // every real target regardless of whether the local player actually picked it.
             if (isTarget)
@@ -1261,7 +1261,7 @@ public class TileOverlay extends Overlay
      * an axis-aligned rectangle. */
     private void renderRainbowRushTile(Graphics2D g, TileReducer.TileEntry entry)
     {
-        boolean visited = plugin.isRainbowRushTileVisited(entry.pathIndex);
+        boolean visited = plugin.minigamePresentation.rainbowRush().isVisited(entry.pathIndex);
 
         // See renderBrutusAttackCrashZone's own doc for why this is LocalPoint.fromWorld directly,
         // not WorldPoint.toLocalInstance.

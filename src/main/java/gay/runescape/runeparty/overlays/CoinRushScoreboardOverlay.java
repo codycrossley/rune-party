@@ -47,12 +47,12 @@ public class CoinRushScoreboardOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (!plugin.isCoinRushActive() || !plugin.isMinigamePlayable()) return null;
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.COIN_RUSH_KEY) || !plugin.isMinigamePlayable()) return null;
 
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
-        long remainingMs = plugin.getCoinRushEndsAt() - System.currentTimeMillis();
+        long remainingMs = plugin.minigamePresentation.coinRush().getEndsAt() - System.currentTimeMillis();
         long remainingSec = Math.max(0, (remainingMs + 999) / 1000);
         String timerText = String.valueOf(remainingSec);
         Color timerColor = remainingMs <= URGENT_THRESHOLD_MS ? TIMER_URGENT_COLOR : TIMER_SAFE_COLOR;

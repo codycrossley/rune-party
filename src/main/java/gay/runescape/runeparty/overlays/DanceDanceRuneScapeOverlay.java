@@ -63,15 +63,15 @@ public class DanceDanceRuneScapeOverlay extends Overlay
         // this reads directly off findDanceDanceRuneScapeTilePoint() rather than through
         // TileOverlay's own tile snapshot (see this class's own doc), so TileOverlay's own
         // isMinigameSelectionPending() filter never covered it.
-        if (!plugin.isDanceDanceRuneScapeActive() || !plugin.isMinigameSelectionRevealed()) return null;
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.DANCE_DANCE_RUNESCAPE_KEY) || !plugin.isMinigameSelectionRevealed()) return null;
 
         WorldPoint anchor = plugin.findDanceDanceRuneScapeTilePoint();
         if (anchor == null) return null;
 
         fillTile(g, anchor, CENTER_COLOR, FILL_ALPHA);
 
-        Set<Direction> highlighted = plugin.getDanceDanceRuneScapeHighlightedDirections();
-        Map<Direction, Long> flashStarts = plugin.getDanceDanceRuneScapeFlashStartTimes();
+        Set<Direction> highlighted = plugin.minigamePresentation.danceDanceRuneScape().getHighlightedDirections();
+        Map<Direction, Long> flashStarts = plugin.minigamePresentation.danceDanceRuneScape().getFlashStartTimes();
         long now = System.currentTimeMillis();
         for (Direction direction : Direction.values())
         {

@@ -95,7 +95,7 @@ public final class BalloonModel
      * getBalloonPopGrowthLevelByPlayer, then hovers each one above its own real, live player. */
     public void update()
     {
-        Map<String, Integer> growthLevelByPlayer = plugin.getBalloonPopGrowthLevelByPlayer();
+        Map<String, Integer> growthLevelByPlayer = plugin.minigamePresentation.balloonPop().getGrowthLevelByPlayer();
 
         Map<String, Player> liveByRsn = new HashMap<>();
         for (Player p : client.getPlayers())

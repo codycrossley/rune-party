@@ -79,10 +79,10 @@ public class ConfettiOverlay extends Overlay
             spawnedForWindow = until;
         }
 
-        long turfWarsUntil = plugin.getTurfWarsConfettiUntil();
+        long turfWarsUntil = plugin.minigamePresentation.turfWars().getConfettiUntil();
         if (turfWarsUntil != spawnedForTurfWarsWindow && turfWarsUntil > System.currentTimeMillis())
         {
-            Color winnerColor = plugin.getTurfWarsConfettiColor();
+            Color winnerColor = plugin.minigamePresentation.turfWars().getConfettiColor();
             spawnBurst(client.getCanvasWidth(), winnerColor != null ? paletteFor(winnerColor) : FALLBACK_PALETTE);
             spawnedForTurfWarsWindow = turfWarsUntil;
         }

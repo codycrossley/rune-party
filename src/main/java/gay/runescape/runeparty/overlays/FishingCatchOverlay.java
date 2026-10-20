@@ -68,7 +68,7 @@ public class FishingCatchOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (!plugin.isFishingContestActive() || !plugin.isMinigamePlayable()) return null;
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.FISHING_CONTEST_KEY) || !plugin.isMinigamePlayable()) return null;
 
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);

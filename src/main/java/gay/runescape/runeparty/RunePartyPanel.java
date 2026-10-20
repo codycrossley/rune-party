@@ -749,7 +749,7 @@ public class RunePartyPanel extends PluginPanel
                 return "Waiting in lobby...";
             case ACTIVE:
                 String turn = plugin.getCurrentTurnRsn();
-                if (plugin.isMinigameActive()) return "Mini-game in progress!";
+                if (plugin.minigamePresentation.isActive()) return "Mini-game in progress!";
                 if (turn == null) return "Everyone gather at the start tile!";
                 Integer roll = plugin.getLastDiceRoll();
                 return turn + "'s turn" + (roll != null && plugin.isPendingRoll() ? " (rolled " + roll + ")" : "");

@@ -46,13 +46,13 @@ public class DanceDanceRuneScapeHudOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (!plugin.isDanceDanceRuneScapeActive() || !plugin.isMinigamePlayable()) return null;
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.DANCE_DANCE_RUNESCAPE_KEY) || !plugin.isMinigamePlayable()) return null;
 
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
         return RunePartyRender.drawTitledStatPanel(g, PADDING_X, PADDING_Y, TITLE_ROW_GAP, CORNER_RADIUS,
             BACKGROUND, BORDER, FontManager.getRunescapeSmallFont().deriveFont(TITLE_SIZE), TITLE, TITLE_COLOR,
-            FontManager.getRunescapeBoldFont().deriveFont(SCORE_SIZE), String.valueOf(plugin.getDanceDanceRuneScapeScore()), TEXT_COLOR);
+            FontManager.getRunescapeBoldFont().deriveFont(SCORE_SIZE), String.valueOf(plugin.minigamePresentation.danceDanceRuneScape().getScore()), TEXT_COLOR);
     }
 }
