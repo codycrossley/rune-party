@@ -50,13 +50,13 @@ public class CrabRaveHudOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (!plugin.isCrabRaveActive() || !plugin.isMinigamePlayable()) return null;
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.CRAB_RAVE_KEY) || !plugin.isMinigamePlayable()) return null;
 
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
         return RunePartyRender.drawTitledStatPanel(g, PADDING_X, PADDING_Y, TITLE_ROW_GAP, CORNER_RADIUS,
             BACKGROUND, BORDER, FontManager.getRunescapeSmallFont().deriveFont(TITLE_SIZE), TITLE, TITLE_COLOR,
-            FontManager.getRunescapeBoldFont().deriveFont(COUNT_SIZE), String.valueOf(plugin.getCrabRaveDanceCount()), TEXT_COLOR);
+            FontManager.getRunescapeBoldFont().deriveFont(COUNT_SIZE), String.valueOf(plugin.minigamePresentation.crabRave().getDanceCount()), TEXT_COLOR);
     }
 }

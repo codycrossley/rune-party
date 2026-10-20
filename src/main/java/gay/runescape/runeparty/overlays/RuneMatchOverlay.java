@@ -53,12 +53,12 @@ public class RuneMatchOverlay extends Overlay
     @Override
     public Dimension render(Graphics2D g)
     {
-        if (!plugin.isRuneMatchActive() || !plugin.isMinigamePlayable()) return null;
+        if (!plugin.minigamePresentation.isKeyActive(RunePartyPlugin.RUNE_MATCH_KEY) || !plugin.isMinigamePlayable()) return null;
 
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
-        String countText = plugin.getRuneMatchSolvedPairCount() + " / " + PAIR_COUNT;
+        String countText = plugin.minigamePresentation.runeMatch().getSolvedPairCount() + " / " + PAIR_COUNT;
         return RunePartyRender.drawTitledStatPanel(g, PADDING_X, PADDING_Y, TITLE_ROW_GAP, CORNER_RADIUS,
             BACKGROUND, BORDER, FontManager.getRunescapeSmallFont().deriveFont(TITLE_SIZE), TITLE, TITLE_COLOR,
             FontManager.getRunescapeBoldFont().deriveFont(COUNT_SIZE), countText, TEXT_COLOR);

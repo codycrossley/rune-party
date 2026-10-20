@@ -91,13 +91,13 @@ public final class PlayerTransformOverlay extends Overlay
         // gives: isBrutusAttackActive() alone flips true the instant MINIGAME_STARTED lands, well
         // before the client's own selection wheel has actually spun to a stop, so Brutus's target
         // could otherwise transform into his giant model ahead of the "MINIGAME!" reveal.
-        if (plugin.getPhase() != GamePhase.ACTIVE || !plugin.isBrutusAttackActive() || !plugin.isMinigameSelectionRevealed())
+        if (plugin.getPhase() != GamePhase.ACTIVE || !plugin.minigamePresentation.isKeyActive(RunePartyPlugin.BRUTUS_ATTACK_KEY) || !plugin.isMinigameSelectionRevealed())
         {
             clear();
             return null;
         }
 
-        String targetRsn = plugin.getBrutusAttackBrutusRsn();
+        String targetRsn = plugin.minigamePresentation.brutusAttack().getBrutusRsn();
         if (targetRsn == null)
         {
             clear();
@@ -117,9 +117,9 @@ public final class PlayerTransformOverlay extends Overlay
             Player target = findPlayerByName(targetRsn);
             if (target == null) return null; // not in view yet -- retry next frame, same "keep trying" idiom every other spawn here uses
 
-            int npcId = plugin.getBrutusAttackNpcId();
-            int idleAnimationId = plugin.getBrutusAttackIdleAnimationId();
-            int walkAnimationId = plugin.getBrutusAttackWalkAnimationId();
+            int npcId = plugin.minigamePresentation.brutusAttack().getNpcId();
+            int idleAnimationId = plugin.minigamePresentation.brutusAttack().getIdleAnimationId();
+            int walkAnimationId = plugin.minigamePresentation.brutusAttack().getWalkAnimationId();
 
             apply(target, npcId, idleAnimationId, walkAnimationId);
             appliedToRsn = targetRsn;
