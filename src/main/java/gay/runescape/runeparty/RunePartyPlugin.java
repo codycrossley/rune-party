@@ -1799,24 +1799,40 @@ public class RunePartyPlugin extends Plugin
         });
     }
 
-    // Delegating facade -- SessionManager owns the actual state/logic. Every name/signature below
-    // is unchanged, so RunePartyPanel doesn't need to change.
-    
-    
-    
-    
-    /** Host-only: ends the game for everyone, distinct from sessionManager.leaveGame() which only removes the
-     * caller. The resulting GAME_ENDED event (see handleEvent) is what actually flips phase to
-     * ENDED for every connected client, this call and sessionManager.leaveGame() both just request it. */
-    
+    /** The three values nearly every player-action method below needs before it can submit
+     * anything -- see requireLocalSession, the only way to get one. Plain final fields, not a
+     * record: every call site reads s.self/s.gid/s.token directly. */
+    private static final class LocalSession
+    {
+        final String self;
+        final String gid;
+        final String token;
+
+        LocalSession(String self, String gid, String token)
+        {
+            this.self = self;
+            this.gid = gid;
+            this.token = token;
+        }
+    }
+
+    /** Resolves the local player's rsn plus the current game id/session token, or null if any one
+     * of the three isn't available yet (not actually in a live game). Was 4 hand-copied lines at
+     * 18 call sites below; now one call plus a null check. */
+    private LocalSession requireLocalSession()
+    {
+        String self = localRsn();
+        String gid = gameId;
+        String token = playerToken;
+        if (self == null || gid == null || token == null) return null;
+        return new LocalSession(self, gid, token);
+    }
 
     public void rollDice()
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
-        if (!self.equalsIgnoreCase(currentTurnRsn) || pendingRoll || rollRequestSubmitted) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
+        if (!s.self.equalsIgnoreCase(currentTurnRsn) || pendingRoll || rollRequestSubmitted) return;
 
         // Rolling abandons any still-armed item placement/targeting (see beginItemPlacement/
         // cancelItemPlacement and beginItemTargeting/cancelItemTargeting) -- the player chose to
@@ -1832,7 +1848,7 @@ public class RunePartyPlugin extends Plugin
         }
 
         rollRequestSubmitted = true;
-        submitAction("Roll dice", () -> apiClient.rollDice(gid, self, token), e ->
+        submitAction("Roll dice", () -> apiClient.rollDice(s.gid, s.self, s.token), e ->
         {
             rollRequestSubmitted = false; // let a retry (another Spin) through
             addChatMessage("Failed to roll dice: " + e.getMessage());
@@ -1843,12 +1859,10 @@ public class RunePartyPlugin extends Plugin
      * the local player's position matches the pending destination -- see checkPendingArrival(). */
     private void confirmArrival(WorldPoint pos)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
-        submitAction("Confirm arrival", () -> apiClient.confirmArrival(gid, self, token, pos.getX(), pos.getY(), pos.getPlane()), e ->
+        submitAction("Confirm arrival", () -> apiClient.confirmArrival(s.gid, s.self, s.token, pos.getX(), pos.getY(), pos.getPlane()), e ->
         {
             addChatMessage("Failed to confirm arrival: " + e.getMessage());
             // A definitive 4xx (e.g. 409 "No roll is pending") means the server has already
@@ -1874,15 +1888,13 @@ public class RunePartyPlugin extends Plugin
      * a hung round. */
     private void submitFishingCatch()
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
+        LocalSession s = requireLocalSession();
         final int shrimp = shrimpCount;
         final int anchovies = anchovyCount;
-        if (self == null || gid == null || token == null) return;
+        if (s == null) return;
 
         submitAction("Submit fishing catch",
-            () -> apiClient.submitFishingCatch(gid, self, token, anchovies, shrimp),
+            () -> apiClient.submitFishingCatch(s.gid, s.self, s.token, anchovies, shrimp),
             e -> addChatMessage("Failed to submit your fishing catch: " + e.getMessage()));
     }
 
@@ -1894,13 +1906,11 @@ public class RunePartyPlugin extends Plugin
      * staying true blocks a tick-every-retry spam; only a genuine transient failure resets it. */
     private void confirmHomeTeleportArrival(WorldPoint pos)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
         submitAction("Confirm Home Teleport arrival",
-            () -> apiClient.confirmHomeTeleportArrival(gid, self, token, pos.getX(), pos.getY(), pos.getPlane()), e ->
+            () -> apiClient.confirmHomeTeleportArrival(s.gid, s.self, s.token, pos.getX(), pos.getY(), pos.getPlane()), e ->
         {
             addChatMessage("Failed to confirm Home Teleport arrival: " + e.getMessage());
             if (!(e instanceof ApiClient.ApiHttpException) || ((ApiClient.ApiHttpException) e).code >= 500)
@@ -1919,12 +1929,10 @@ public class RunePartyPlugin extends Plugin
      * the first TURN_STARTED itself. */
     private void confirmStart(WorldPoint pos)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
-        submitAction("Confirm start", () -> apiClient.confirmStart(gid, self, token, pos.getX(), pos.getY(), pos.getPlane()), e ->
+        submitAction("Confirm start", () -> apiClient.confirmStart(s.gid, s.self, s.token, pos.getX(), pos.getY(), pos.getPlane()), e ->
         {
             addChatMessage("Failed to confirm ready: " + e.getMessage());
             startConfirmSubmitted = false; // let the next tick retry
@@ -1940,12 +1948,10 @@ public class RunePartyPlugin extends Plugin
      * regardless. */
     private void bowToJad()
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
-        submitAction("Bow to Jad", () -> apiClient.bowToJad(gid, self, token),
+        submitAction("Bow to Jad", () -> apiClient.bowToJad(s.gid, s.self, s.token),
             e -> addChatMessage("Failed to bow to Jad: " + e.getMessage()));
     }
 
@@ -1955,12 +1961,10 @@ public class RunePartyPlugin extends Plugin
      * PLAYER's made this same call. */
     private void confirmMinigameReady()
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
-        submitAction("Confirm mini-game ready", () -> apiClient.confirmMinigameReady(gid, self, token),
+        submitAction("Confirm mini-game ready", () -> apiClient.confirmMinigameReady(s.gid, s.self, s.token),
             e -> addChatMessage("Failed to confirm mini-game ready: " + e.getMessage()));
     }
 
@@ -1971,22 +1975,18 @@ public class RunePartyPlugin extends Plugin
      * network hiccup. */
     private void passHotPotato()
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
-        submitAction("Pass Hot Potato", () -> apiClient.passHotPotato(gid, self, token));
+        submitAction("Pass Hot Potato", () -> apiClient.passHotPotato(s.gid, s.self, s.token));
     }
 
     public void submitMinigameResult(int score)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
-        submitAction("Submit minigame result", () -> apiClient.submitMinigameResult(gid, self, token, score),
+        submitAction("Submit minigame result", () -> apiClient.submitMinigameResult(s.gid, s.self, s.token, score),
             e -> addChatMessage("Failed to submit mini-game result: " + e.getMessage()));
     }
 
@@ -1995,12 +1995,10 @@ public class RunePartyPlugin extends Plugin
      * use-item endpoint, so the player can still SPIN normally afterward. */
     public void useItem(String itemKey)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null || itemKey == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null || itemKey == null) return;
 
-        submitAction("Use item", () -> apiClient.useItem(gid, self, token, itemKey),
+        submitAction("Use item", () -> apiClient.useItem(s.gid, s.self, s.token, itemKey),
             e -> addChatMessage("Failed to use item: " + e.getMessage()));
     }
 
@@ -2055,14 +2053,12 @@ public class RunePartyPlugin extends Plugin
      * player can start over via the panel if they want to retry). */
     private void placeCoinTrapAt(WorldPoint point)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
+        LocalSession s = requireLocalSession();
         itemPlacementKey = null;
         refreshPanel();
-        if (self == null || gid == null || token == null) return;
+        if (s == null) return;
 
-        submitAction("Place Coin Trap", () -> apiClient.placeCoinTrap(gid, self, token, point.getX(), point.getY(), point.getPlane()),
+        submitAction("Place Coin Trap", () -> apiClient.placeCoinTrap(s.gid, s.self, s.token, point.getX(), point.getY(), point.getPlane()),
             e -> addChatMessage("Failed to place Coin Trap: " + e.getMessage()));
     }
 
@@ -2095,15 +2091,13 @@ public class RunePartyPlugin extends Plugin
      * fire-and-forget action method here already takes (see placeCoinTrapAt's own doc). */
     private void confirmItemTargetOn(String targetRsn)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
+        LocalSession s = requireLocalSession();
         final String itemKey = itemTargetKey;
         itemTargetKey = null;
         refreshPanel();
-        if (self == null || gid == null || token == null || itemKey == null) return;
+        if (s == null || itemKey == null) return;
 
-        submitAction("Use item on player", () -> apiClient.useItemOnPlayer(gid, self, token, itemKey, targetRsn),
+        submitAction("Use item on player", () -> apiClient.useItemOnPlayer(s.gid, s.self, s.token, itemKey, targetRsn),
             e -> addChatMessage("Failed to use " + Items.get(itemKey).getDisplayName() + " on " + targetRsn + ": " + e.getMessage()));
     }
 
@@ -2266,14 +2260,12 @@ public class RunePartyPlugin extends Plugin
      * uses. */
     private void submitClickClickClickResult()
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
+        LocalSession s = requireLocalSession();
         final int uniqueTiles = clickClickClickTiles.size();
-        if (self == null || gid == null || token == null) return;
+        if (s == null) return;
 
         submitAction("Submit Click, Click, Click result",
-            () -> apiClient.submitClickClickClickResult(gid, self, token, uniqueTiles),
+            () -> apiClient.submitClickClickClickResult(s.gid, s.self, s.token, uniqueTiles),
             e -> addChatMessage("Failed to submit your Click, Click, Click result: " + e.getMessage()));
     }
 
@@ -2351,13 +2343,11 @@ public class RunePartyPlugin extends Plugin
      * clients until the next one lands, not a hang. */
     private void submitBalloonPopGrowth(int level)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
         submitAction("Report Balloon Pop growth",
-            () -> apiClient.reportBalloonPopGrowth(gid, self, token, level),
+            () -> apiClient.reportBalloonPopGrowth(s.gid, s.self, s.token, level),
             e -> addChatMessage("Failed to report your Hot Click Balloon growth: " + e.getMessage()));
     }
 
@@ -2365,13 +2355,11 @@ public class RunePartyPlugin extends Plugin
      * per round, the instant registerBalloonPopClick's own local count reaches 100. */
     private void submitBalloonPopPop()
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
         submitAction("Report Balloon Pop pop",
-            () -> apiClient.reportBalloonPopPop(gid, self, token),
+            () -> apiClient.reportBalloonPopPop(s.gid, s.self, s.token),
             e -> addChatMessage("Failed to report your balloon popping: " + e.getMessage()));
     }
 
@@ -2792,12 +2780,10 @@ public class RunePartyPlugin extends Plugin
      * auto-declines on the finder's behalf regardless. */
     private void respondGoldenGnomeOffer(boolean accept)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
-        submitAction("Respond to Golden Gnome offer", () -> apiClient.respondGoldenGnomeOffer(gid, self, token, accept),
+        submitAction("Respond to Golden Gnome offer", () -> apiClient.respondGoldenGnomeOffer(s.gid, s.self, s.token, accept),
             e -> addChatMessage("Failed to respond to Golden Gnome offer: " + e.getMessage()));
     }
 
@@ -5229,12 +5215,10 @@ public class RunePartyPlugin extends Plugin
      * own return. */
     public void submitWiseOldManChoice(String action, String target)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null) return;
+        LocalSession s = requireLocalSession();
+        if (s == null) return;
 
-        submitAction("Wise Old Man choice", () -> apiClient.wiseOldManChoose(gid, self, token, action, target),
+        submitAction("Wise Old Man choice", () -> apiClient.wiseOldManChoose(s.gid, s.self, s.token, action, target),
             e -> addChatMessage("Failed to submit your choice to the Wise Old Man: " + e.getMessage()));
     }
 
@@ -5273,16 +5257,14 @@ public class RunePartyPlugin extends Plugin
      * anything itself. */
     public void submitItemShopChoice(String action, String itemKey, Runnable onComplete)
     {
-        String self = localRsn();
-        final String gid = gameId;
-        final String token = playerToken;
-        if (self == null || gid == null || token == null)
+        LocalSession s = requireLocalSession();
+        if (s == null)
         {
             if (onComplete != null) onComplete.run();
             return;
         }
 
-        submitAction("Item Shop choice", () -> apiClient.itemShopChoose(gid, self, token, action, itemKey),
+        submitAction("Item Shop choice", () -> apiClient.itemShopChoose(s.gid, s.self, s.token, action, itemKey),
             e -> addChatMessage("Failed to respond to the Item Clerk: " + e.getMessage()), onComplete);
     }
 }
