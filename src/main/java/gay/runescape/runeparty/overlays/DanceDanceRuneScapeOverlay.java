@@ -136,7 +136,7 @@ public class DanceDanceRuneScapeOverlay extends Overlay
         Polygon poly = canvasTilePoly(wp);
         if (poly == null) return;
 
-        g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), alpha));
+        g.setColor(RunePartyRender.withAlpha(color, alpha));
         g.fill(poly);
         g.setColor(color);
         g.draw(poly);
