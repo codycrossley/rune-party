@@ -392,7 +392,7 @@ public class AnnouncementOverlay extends Overlay
         Color color = seatColorOr(rsn, Color.WHITE);
 
         Node title = Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(36f)).color(color);
-        Layout.renderCentered(g, title, centerX(), drawableHeight() / 4, safeTextWidth(), alpha);
+        renderCentered(g, title, drawableHeight() / 4, alpha);
     }
 
     /** Stands in for renderTurnAnnouncement when a player's turn was skipped by a Tele Block. */
@@ -412,7 +412,7 @@ public class AnnouncementOverlay extends Overlay
                 Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(36f)).color(color),
                 Text.of("Ice Barraged").font(FontManager.getRunescapeBoldFont().deriveFont(16f)).color(color))
             .gap(10);
-        Layout.renderCentered(g, banner, centerX(), drawableHeight() / 4, safeTextWidth(), alpha);
+        renderCentered(g, banner, drawableHeight() / 4, alpha);
     }
 
     /** Dispatches to whichever half of the Spin hint applies to the local viewer: the "it's your
@@ -645,7 +645,7 @@ public class AnnouncementOverlay extends Overlay
         if (text == null) return;
 
         Node message = Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OUTCOME_SIZE)).color(color);
-        Layout.renderCentered(g, message, centerX(), drawableHeight() / 3, safeTextWidth(), alpha);
+        renderCentered(g, message, drawableHeight() / 3, alpha);
     }
 
     /** Draws the "CHANCE TILE!" title card -- same rainbow single-line treatment as "ITEM SPACE!"
@@ -875,7 +875,7 @@ public class AnnouncementOverlay extends Overlay
         if (text == null) return;
 
         Node message = Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(GOLDEN_GNOME_OUTCOME_SIZE)).color(Color.WHITE);
-        Layout.renderCentered(g, message, centerX(), drawableHeight() / 3, safeTextWidth(), alpha);
+        renderCentered(g, message, drawableHeight() / 3, alpha);
     }
 
     /** Draws the "MINIGAME!" title card. A pure title card -- instructions are shown by the
@@ -1242,7 +1242,7 @@ public class AnnouncementOverlay extends Overlay
         if (text == null) return;
 
         Node message = Text.of(text).font(FontManager.getRunescapeBoldFont().deriveFont(ITEM_SHOP_OUTCOME_SIZE)).color(color);
-        Layout.renderCentered(g, message, centerX(), drawableHeight() / 3, safeTextWidth(), alpha);
+        renderCentered(g, message, drawableHeight() / 3, alpha);
     }
 
     /** How far the wheel has rotated at {@code elapsed} into its spin -- eased to a stop, then held
