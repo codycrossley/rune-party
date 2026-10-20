@@ -152,16 +152,14 @@ public class RunePartyPanel extends PluginPanel
         joinCodeField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
         joinCodeField.setAlignmentX(LEFT_ALIGNMENT);
 
-        joinBtn.setAlignmentX(LEFT_ALIGNMENT);
-        joinBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        fullWidthStyle(joinBtn, 28);
         joinBtn.addActionListener(e -> plugin.sessionManager.joinGame(joinCodeField.getText().trim()));
 
         JSeparator sep = new JSeparator();
         sep.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
         sep.setAlignmentX(LEFT_ALIGNMENT);
 
-        createBtn.setAlignmentX(LEFT_ALIGNMENT);
-        createBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        fullWidthStyle(createBtn, 28);
         createBtn.addActionListener(e -> plugin.sessionManager.createGame());
 
         card.add(joinLabel);
@@ -206,12 +204,10 @@ public class RunePartyPanel extends PluginPanel
         statusLabel.setForeground(COLOR_TURN);
         statusLabel.setFont(FontManager.getRunescapeSmallFont());
 
-        showMapBtn.setAlignmentX(LEFT_ALIGNMENT);
-        showMapBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        fullWidthStyle(showMapBtn, 28);
         showMapBtn.addActionListener(e -> plugin.toggleMap());
 
-        viewBoardBtn.setAlignmentX(LEFT_ALIGNMENT);
-        viewBoardBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        fullWidthStyle(viewBoardBtn, 28);
         viewBoardBtn.addActionListener(e -> plugin.toggleBoardView());
 
         buildItemsCard();
@@ -224,19 +220,16 @@ public class RunePartyPanel extends PluginPanel
         buildCourseToolsPanel();
         courseToolsPanel.setAlignmentX(LEFT_ALIGNMENT);
 
-        startGameBtn.setAlignmentX(LEFT_ALIGNMENT);
-        startGameBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        fullWidthStyle(startGameBtn, 28);
         startGameBtn.addActionListener(e -> plugin.sessionManager.startGame((Integer) maxRoundsSpinner.getValue()));
 
-        endGameBtn.setAlignmentX(LEFT_ALIGNMENT);
-        endGameBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        fullWidthStyle(endGameBtn, 28);
         endGameBtn.addActionListener(e -> plugin.sessionManager.endGame());
 
         buildHostControlsCard();
         hostControlsCard.setAlignmentX(LEFT_ALIGNMENT);
 
-        leaveGameBtn.setAlignmentX(LEFT_ALIGNMENT);
-        leaveGameBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        fullWidthStyle(leaveGameBtn, 28);
         leaveGameBtn.addActionListener(e -> plugin.sessionManager.leaveGame());
 
         buildLegendCard();
@@ -297,8 +290,7 @@ public class RunePartyPanel extends PluginPanel
     private JPanel buildGameSettingsRow()
     {
         gameSettingsRow.setBackground(new Color(34, 30, 26));
-        gameSettingsRow.setAlignmentX(LEFT_ALIGNMENT);
-        gameSettingsRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        fullWidthStyle(gameSettingsRow, 24);
 
         JLabel label = new JLabel("Turns per player");
         label.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
@@ -454,12 +446,10 @@ public class RunePartyPanel extends PluginPanel
         presetDropdown.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
         presetDropdown.setAlignmentX(LEFT_ALIGNMENT);
 
-        placeBtn.setAlignmentX(LEFT_ALIGNMENT);
-        placeBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        fullWidthStyle(placeBtn, 26);
         placeBtn.addActionListener(e -> plugin.courseBuilder.enterCoursePlacementMode());
 
-        clearCourseBtn.setAlignmentX(LEFT_ALIGNMENT);
-        clearCourseBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        fullWidthStyle(clearCourseBtn, 26);
         clearCourseBtn.addActionListener(e -> plugin.courseBuilder.clearCourse());
 
         courseToolsPanel.add(caption);
@@ -503,6 +493,21 @@ public class RunePartyPanel extends PluginPanel
         Timer resetLabel = new Timer(1200, e -> copyJoinCodeBtn.setText("Copy"));
         resetLabel.setRepeats(false);
         resetLabel.start();
+    }
+
+    /** Left-aligns c within its BoxLayout parent and caps its height at `height` while letting it
+     * stretch to the panel's full width -- the standard shape every full-width row control here
+     * uses. */
+    private static void fullWidthStyle(JComponent c, int height)
+    {
+        c.setAlignmentX(LEFT_ALIGNMENT);
+        c.setMaximumSize(new Dimension(Integer.MAX_VALUE, height));
+    }
+
+    private void refreshItemUsePanel()
+    {
+        itemUsePanel.revalidate();
+        itemUsePanel.repaint();
     }
 
     private static JLabel sectionLabel(String text)
@@ -587,12 +592,10 @@ public class RunePartyPanel extends PluginPanel
             itemUsePanel.add(hint);
             itemUsePanel.add(Box.createVerticalStrut(6));
             JButton cancelBtn = new JButton("Cancel");
-            cancelBtn.setAlignmentX(LEFT_ALIGNMENT);
-            cancelBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+            fullWidthStyle(cancelBtn, 28);
             cancelBtn.addActionListener(e -> plugin.cancelItemPlacement());
             itemUsePanel.add(cancelBtn);
-            itemUsePanel.revalidate();
-            itemUsePanel.repaint();
+            refreshItemUsePanel();
             return;
         }
 
@@ -615,12 +618,10 @@ public class RunePartyPanel extends PluginPanel
             itemUsePanel.add(hint);
             itemUsePanel.add(Box.createVerticalStrut(6));
             JButton cancelBtn = new JButton("Cancel");
-            cancelBtn.setAlignmentX(LEFT_ALIGNMENT);
-            cancelBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+            fullWidthStyle(cancelBtn, 28);
             cancelBtn.addActionListener(e -> plugin.cancelItemTargeting());
             itemUsePanel.add(cancelBtn);
-            itemUsePanel.revalidate();
-            itemUsePanel.repaint();
+            refreshItemUsePanel();
             return;
         }
 
@@ -667,8 +668,7 @@ public class RunePartyPanel extends PluginPanel
             none.setFont(FontManager.getRunescapeSmallFont());
             none.setAlignmentX(LEFT_ALIGNMENT);
             itemUsePanel.add(none);
-            itemUsePanel.revalidate();
-            itemUsePanel.repaint();
+            refreshItemUsePanel();
             return;
         }
 
@@ -696,8 +696,7 @@ public class RunePartyPanel extends PluginPanel
             Item item = Items.get(itemKey);
             String verb = item.requiresPlacement() ? "Place " : "Use ";
             JButton useBtn = new JButton(verb + item.getDisplayName() + " (x" + held.getValue() + ")");
-            useBtn.setAlignmentX(LEFT_ALIGNMENT);
-            useBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+            fullWidthStyle(useBtn, 28);
             useBtn.setEnabled(canUseNow);
             // Same effect text AnnouncementOverlay#renderItemGrantDescription already shows right
             // after a grant -- surfacing it here too means a player doesn't have to remember what an
@@ -711,8 +710,7 @@ public class RunePartyPanel extends PluginPanel
             itemUsePanel.add(useBtn);
             itemUsePanel.add(Box.createVerticalStrut(4));
         }
-        itemUsePanel.revalidate();
-        itemUsePanel.repaint();
+        refreshItemUsePanel();
     }
 
     /** {@code items}, minus one copy of whatever item RunePartyPlugin#isItemSelectionRevealed says
@@ -787,8 +785,7 @@ public class RunePartyPanel extends PluginPanel
             JPanel row = new JPanel();
             row.setLayout(new BoxLayout(row, BoxLayout.Y_AXIS));
             row.setBackground(i % 2 == 0 ? ROW_EVEN : ROW_ODD);
-            row.setAlignmentX(LEFT_ALIGNMENT);
-            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
+            fullWidthStyle(row, 40);
 
             boolean onTurn = entry.rsn.equalsIgnoreCase(plugin.currentTurnRsn);
             Color nameColor = entry.joined ? Color.WHITE : ColorScheme.MEDIUM_GRAY_COLOR;
@@ -805,8 +802,7 @@ public class RunePartyPanel extends PluginPanel
 
             JPanel nameRow = new JPanel(new BorderLayout(6, 0));
             nameRow.setOpaque(false);
-            nameRow.setAlignmentX(LEFT_ALIGNMENT);
-            nameRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 18));
+            fullWidthStyle(nameRow, 18);
             JLabel numberLabel = smallLabel(entry.role == RunePartyRole.PLAYER ? String.valueOf(entry.number) : "", numberColor);
             JLabel nameLabel = smallLabel(entry.rsn, nameColor);
             nameRow.add(numberLabel, BorderLayout.WEST);
