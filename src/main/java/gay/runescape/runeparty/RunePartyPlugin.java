@@ -3261,6 +3261,16 @@ public class RunePartyPlugin extends Plugin
         return standingOnTrackedPositionCached;
     }
 
+    /** The one gate isLocalPlayerReadyToUseItem/isLocalPlayerAwaitingReturnToPosition/
+     * isAwaitingSomeonesRoll all share verbatim -- true whenever nothing about the game's own
+     * current phase/roll/mini-game/ceremony state makes a normal turn action possible at all,
+     * regardless of whose turn it is or where they're standing. isLocalPlayerReadyToRoll has one
+     * extra condition of its own (rollRequestSubmitted) and isn't built on this. */
+    private boolean isTurnActionBlocked()
+    {
+        return phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || ceremonyPresentation.isCeremonyStarted();
+    }
+
     /** Whether the local player could actually use/place/target an item right now -- the real
      * "ready to act" window the server's own _require_ready_to_act enforces for use-item/
      * use-item-on-player (app.py): their own turn, no roll pending, no mini-game running, the
@@ -3278,7 +3288,7 @@ public class RunePartyPlugin extends Plugin
      * drops that check entirely, the encounter gate has to be explicit instead. */
     public boolean isLocalPlayerReadyToUseItem()
     {
-        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || ceremonyPresentation.isCeremonyStarted()) return false;
+        if (isTurnActionBlocked()) return false;
         if (jadPresentation.getEncounterRsn() != null || wiseOldManPresentation.getEncounterRsn() != null
             || itemShopPresentation.getEncounterRsn() != null || goldenGnomePresentation.getOfferRsn() != null) return false;
         if (System.currentTimeMillis() < turnEffectGateUntil) return false;
@@ -3299,7 +3309,7 @@ public class RunePartyPlugin extends Plugin
      * in edge cases, same tolerance every other cached-vs-live check in this file already accepts. */
     public boolean isLocalPlayerAwaitingReturnToPosition()
     {
-        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || ceremonyPresentation.isCeremonyStarted()) return false;
+        if (isTurnActionBlocked()) return false;
         String self = localRsn();
         if (self == null || !self.equalsIgnoreCase(currentTurnRsn)) return false;
         return !standingOnTrackedPositionCached;
@@ -3314,7 +3324,7 @@ public class RunePartyPlugin extends Plugin
      * and nobody's rolled" is the whole story either way. */
     public boolean isAwaitingSomeonesRoll()
     {
-        if (phase != GamePhase.ACTIVE || pendingRoll || minigamePresentation.isActive() || ceremonyPresentation.isCeremonyStarted()) return false;
+        if (isTurnActionBlocked()) return false;
         if (System.currentTimeMillis() < turnEffectGateUntil) return false;
         return currentTurnRsn != null;
     }
