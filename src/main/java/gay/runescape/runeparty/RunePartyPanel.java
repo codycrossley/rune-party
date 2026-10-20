@@ -102,7 +102,7 @@ public class RunePartyPanel extends PluginPanel
         add(buildTopPanel(), BorderLayout.NORTH);
         add(buildCardPanel(), BorderLayout.CENTER);
 
-        presetDropdown.addActionListener(e -> plugin.selectPreset((CoursePreset) presetDropdown.getSelectedItem()));
+        presetDropdown.addActionListener(e -> plugin.courseBuilder.selectPreset((CoursePreset) presetDropdown.getSelectedItem()));
         refreshPresetDropdown(null);
 
         refresh();
@@ -456,11 +456,11 @@ public class RunePartyPanel extends PluginPanel
 
         placeBtn.setAlignmentX(LEFT_ALIGNMENT);
         placeBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
-        placeBtn.addActionListener(e -> plugin.enterCoursePlacementMode());
+        placeBtn.addActionListener(e -> plugin.courseBuilder.enterCoursePlacementMode());
 
         clearCourseBtn.setAlignmentX(LEFT_ALIGNMENT);
         clearCourseBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
-        clearCourseBtn.addActionListener(e -> plugin.clearCourse());
+        clearCourseBtn.addActionListener(e -> plugin.courseBuilder.clearCourse());
 
         courseToolsPanel.add(caption);
         courseToolsPanel.add(Box.createVerticalStrut(4));
@@ -471,13 +471,13 @@ public class RunePartyPanel extends PluginPanel
         courseToolsPanel.add(clearCourseBtn);
     }
 
-    /** Repopulates presetDropdown from plugin.getAvailablePresets() -- called once at
+    /** Repopulates presetDropdown from plugin.courseBuilder.getAvailablePresets() -- called once at
      * construction. If selectName is non-null, selects whichever entry's own name matches it;
      * otherwise preserves index 0 as the default selection. */
     private void refreshPresetDropdown(String selectName)
     {
         presetDropdown.removeAllItems();
-        for (CoursePreset preset : plugin.getAvailablePresets()) presetDropdown.addItem(preset);
+        for (CoursePreset preset : plugin.courseBuilder.getAvailablePresets()) presetDropdown.addItem(preset);
         if (presetDropdown.getItemCount() == 0) return;
 
         int selectedIndex = 0;
@@ -489,7 +489,7 @@ public class RunePartyPanel extends PluginPanel
             }
         }
         presetDropdown.setSelectedIndex(selectedIndex);
-        plugin.selectPreset((CoursePreset) presetDropdown.getSelectedItem());
+        plugin.courseBuilder.selectPreset((CoursePreset) presetDropdown.getSelectedItem());
     }
 
     private void copyJoinCodeToClipboard()
